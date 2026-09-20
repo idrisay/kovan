@@ -37,6 +37,22 @@ const api = {
     ipcRenderer.invoke('baton:start-agent', request, subject),
   runHistory: (subject: string) => ipcRenderer.invoke('baton:run-history', subject),
 
+  // Workspace
+  workspaces: () => ipcRenderer.invoke('baton:workspaces'),
+  workspaceCreate: () => ipcRenderer.invoke('baton:workspace-create'),
+  workspaceActivate: (id: string) => ipcRenderer.invoke('baton:workspace-activate', id),
+  workspaceAddFolder: (id: string) => ipcRenderer.invoke('baton:workspace-add-folder', id),
+  workspaceRemoveFolder: (id: string, folder: string) =>
+    ipcRenderer.invoke('baton:workspace-remove-folder', id, folder),
+  workspaceForget: (id: string) => ipcRenderer.invoke('baton:workspace-forget', id),
+  workspaceRepos: (id: string, force?: boolean) =>
+    ipcRenderer.invoke('baton:workspace-repos', id, force),
+  workspaceStatus: (repo: string) => ipcRenderer.invoke('baton:workspace-status', repo),
+  workspaceDiff: (repo: string, file: string, side: string, from?: string) =>
+    ipcRenderer.invoke('baton:workspace-diff', repo, file, side, from),
+  workspaceTree: (dir: string) => ipcRenderer.invoke('baton:workspace-tree', dir),
+  workspaceRead: (file: string) => ipcRenderer.invoke('baton:workspace-read', file),
+
   // Terminals
   sessions: () => ipcRenderer.invoke('baton:sessions'),
   sessionBuffer: (id: string) => ipcRenderer.invoke('baton:session-buffer', id),

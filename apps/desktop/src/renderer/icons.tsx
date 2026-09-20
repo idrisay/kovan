@@ -108,3 +108,68 @@ export function SortIcon({ size = 14 }: Props) {
     </svg>
   );
 }
+
+export function WorkspaceIcon({ size = 19 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M3 7.2a1.7 1.7 0 0 1 1.7-1.7h3.4l1.8 2.2h8.4A1.7 1.7 0 0 1 20 9.4v8.1a1.7 1.7 0 0 1-1.7 1.7H4.7A1.7 1.7 0 0 1 3 17.5Z" />
+    </svg>
+  );
+}
+
+export function ChevronIcon({ size = 12, open = false }: Props & { open?: boolean }) {
+  return (
+    <svg
+      width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={2.2}
+      aria-hidden="true"
+      style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 120ms ease' }}
+    >
+      <path d="m9 5 7 7-7 7" />
+    </svg>
+  );
+}
+
+export function FolderIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M3 7.2a1.7 1.7 0 0 1 1.7-1.7h3.4l1.8 2.2h8.4A1.7 1.7 0 0 1 20 9.4v8.1a1.7 1.7 0 0 1-1.7 1.7H4.7A1.7 1.7 0 0 1 3 17.5Z" />
+    </svg>
+  );
+}
+
+export function FileIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M13.5 3.5H7a1.8 1.8 0 0 0-1.8 1.8v13.4A1.8 1.8 0 0 0 7 20.5h10a1.8 1.8 0 0 0 1.8-1.8V8.8Z" />
+      <path d="M13.5 3.5v4.4a1 1 0 0 0 1 1h4.3" />
+    </svg>
+  );
+}
+
+export function CloseIcon({ size = 12 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={2.2} aria-hidden="true">
+      <path d="M6 6 18 18" /><path d="M18 6 6 18" />
+    </svg>
+  );
+}
+
+export function PlusIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={2} aria-hidden="true">
+      <path d="M12 5v14" /><path d="M5 12h14" />
+    </svg>
+  );
+}
+
+/** Source control: the two-sided compare, not a branch. */
+export function ChangesIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <circle cx="6" cy="6" r="2.4" />
+      <circle cx="18" cy="18" r="2.4" />
+      <path d="M6 8.4v5.3a2.3 2.3 0 0 0 2.3 2.3H15" />
+      <path d="m12.6 13.4 2.6 2.6-2.6 2.6" />
+    </svg>
+  );
+}

@@ -510,3 +510,272 @@ button { font: inherit; cursor: pointer; }
 @media (max-width: 1000px) {
   .queue { width: 260px; }
 }
+
+/* --- Workspace: explorer, tabs, code, diff ---------------------------------
+ *
+ * Rule 1 does the work again here. The explorer is a sidebar, so it sits on
+ * --sidebar; the code you read sits on --editor, one step brighter; a diff's
+ * changed lines tint that surface rather than boxing it. Rule 5 means every
+ * path, line number, branch name and source line is mono — in this view almost
+ * everything is machine text, and the few things that are not (a heading, a
+ * button) are what the sans is reserved for.
+ */
+
+.explorer .queue-head { padding-bottom: 8px; }
+
+.ws-picker { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.ws-picker select {
+  flex: 1; min-width: 0;
+  background: var(--wash);
+  border: 1px solid var(--hair);
+  border-radius: 7px;
+  color: var(--body);
+  font: inherit; font-size: 12px;
+  padding: 5px 7px;
+}
+.ws-picker select:focus { outline: none; border-color: rgba(217, 119, 87, 0.45); }
+
+.ws-empty { padding: 18px 6px; }
+.ws-empty .quiet { padding: 0 0 16px; line-height: 1.6; }
+
+.ws-root { margin-bottom: 14px; }
+
+.ws-head {
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 8px; margin-bottom: 2px;
+}
+.ws-name {
+  font-family: var(--display); font-size: 12px; font-weight: 600;
+  color: var(--title); letter-spacing: -0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ws-branch, .ws-ab {
+  font-family: var(--mono); font-size: 10px; color: var(--meta);
+  flex: none;
+}
+.ws-ab { color: var(--clay); }
+
+/* Collapsible section headers: Changes, Files. */
+.ws-section {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: 0; padding: 4px 8px;
+  color: var(--meta); font-size: 10.5px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.07em;
+  text-align: left;
+}
+.ws-section:hover { color: var(--secondary); }
+.ws-count {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0;
+  color: var(--clay); text-transform: none;
+}
+.ws-clean { color: var(--dim); font-size: 11.5px; padding: 3px 8px 6px 26px; margin: 0; }
+
+/* --- Source control rows --- */
+
+.rows.changes { margin-bottom: 4px; }
+
+.change {
+  display: flex; align-items: baseline; gap: 7px; width: 100%;
+  background: none; border: 0; border-radius: 6px;
+  padding: 3px 8px; text-align: left; min-width: 0;
+}
+.change:hover { background: rgba(255, 255, 255, 0.03); }
+.change-mark {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+  width: 10px; flex: none; color: var(--meta);
+}
+/* Rule 3: only a conflict is red, because only a conflict has failed. */
+.change-mark.modified { color: var(--running); }
+.change-mark.added, .change-mark.untracked { color: var(--pass); }
+.change-mark.deleted { color: var(--muted); }
+.change-mark.renamed, .change-mark.copied, .change-mark.typechange { color: var(--waiting); }
+.change-mark.conflicted { color: var(--blocked-bright); }
+
+.change-name {
+  font-size: 12px; color: var(--body); flex: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Left-truncated for the same reason, and isolated for the same reason. */
+.change-dir {
+  font-family: var(--mono); font-size: 10px; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl;
+}
+.change-staged {
+  font-family: var(--mono); font-size: 9.5px; color: var(--pass);
+  flex: none; margin-left: auto;
+}
+
+/* --- The file tree --- */
+
+.tree { list-style: none; margin: 0; padding: 0; }
+.tree-row {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: 0; border-radius: 6px;
+  padding: 3px 8px; text-align: left; color: var(--secondary);
+}
+.tree-row:hover { background: rgba(255, 255, 255, 0.03); color: var(--body); }
+.tree-row svg { flex: none; color: var(--dim); }
+.tree-spacer { width: 11px; flex: none; }
+.tree-name {
+  font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* A file git has something to say about. Same palette as the change marks. */
+.tree-row.changed .tree-name { color: var(--running); }
+.tree-row.changed.added .tree-name, .tree-row.changed.untracked .tree-name { color: var(--pass); }
+.tree-row.changed.deleted .tree-name { color: var(--muted); text-decoration: line-through; }
+.tree-row.changed.conflicted .tree-name { color: var(--blocked-bright); }
+
+/* --- Editor tabs --- */
+
+.editor-pane { padding: 0; display: flex; flex-direction: column; background: var(--editor); overflow: hidden; }
+
+.tabs {
+  display: flex; flex: none; overflow-x: auto; overflow-y: hidden;
+  background: var(--sidebar);
+  border-bottom: 1px solid var(--hair);
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+
+.tab {
+  display: flex; align-items: center; flex: none;
+  border-right: 1px solid var(--hair);
+  background: var(--sidebar);
+  max-width: 220px;
+}
+.tab.active { background: var(--editor); }
+/* Rule 2: the selected tab is marked with clay, and nothing else here is.
+ * An inset shadow rather than a pseudo-element — the ::before version needed a
+ * positioned ancestor it never had, so it rendered nowhere at all. */
+.tab.active { box-shadow: inset 0 2px 0 var(--clay); }
+.tab-label {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  background: none; border: 0; padding: 8px 4px 8px 12px;
+  color: var(--muted); font-size: 12px;
+}
+.tab.active .tab-label { color: var(--title); }
+.tab-label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-label svg { flex: none; color: var(--meta); }
+.tab-side {
+  font-family: var(--mono); font-size: 9.5px; color: var(--dim); flex: none;
+}
+.tab-close {
+  background: none; border: 0; padding: 4px; margin-right: 6px;
+  border-radius: 4px; color: var(--dim); display: flex;
+}
+.tab-close:hover { background: rgba(255, 255, 255, 0.08); color: var(--body); }
+
+.tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+/**
+ * A long path is truncated from the *left*, so the filename survives.
+ *
+ * CSS can only ellipsize the end, so the container is flipped to RTL to move
+ * the overflow to the front. That flip is also why the path itself is wrapped
+ * in a `<bdi>` in the markup: a leading "/" is a bidi-neutral character, and
+ * in an RTL container it gets re-ordered to the *other* end — rendering
+ * `/Users/me/x.ts` as `Users/me/x.ts/`. The isolate keeps the path LTR inside
+ * an RTL box, which is exactly what it is for.
+ */
+.tab-path {
+  flex: none; padding: 6px 14px;
+  font-family: var(--mono); font-size: 10.5px; color: var(--dim);
+  border-bottom: 1px solid var(--hair);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  direction: rtl; text-align: left;
+}
+
+/* --- Code and diff --- */
+
+.code, .diff { flex: 1; min-height: 0; overflow: auto; }
+
+.code-table {
+  border-collapse: collapse;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.6;
+  width: 100%;
+}
+.code-num {
+  /* Unselectable so copying a block of code does not bring the numbers. */
+  user-select: none; -webkit-user-select: none;
+  text-align: right; vertical-align: top;
+  padding: 0 10px 0 12px; width: 1%; white-space: nowrap;
+  color: var(--dim); font-size: 10.5px;
+}
+.code-line {
+  padding: 0 16px 0 0; white-space: pre-wrap; word-break: break-word;
+  color: var(--prose);
+}
+
+.code-more {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; border-top: 1px solid var(--hair);
+  color: var(--muted); font-size: 12px;
+}
+.code-foot {
+  display: flex; gap: 16px; padding: 8px 16px;
+  border-top: 1px solid var(--hair);
+  font-family: var(--mono); font-size: 10.5px; color: var(--dim);
+}
+
+.diff-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 16px; border-bottom: 1px solid var(--hair);
+  font-size: 11.5px; color: var(--meta);
+}
+.diff-side { font-weight: 500; color: var(--secondary); }
+.diff-rename { color: var(--waiting); font-size: 11px; }
+.diff-rename .mono { font-family: var(--mono); }
+
+.hunk { border-bottom: 1px solid var(--hair); }
+.hunk:last-child { border-bottom: 0; }
+.hunk-head {
+  padding: 5px 16px; background: var(--wash);
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+  border-bottom: 1px solid var(--hair);
+}
+.diff-mark {
+  display: inline-block; width: 1.2ch; user-select: none; -webkit-user-select: none;
+  color: var(--dim);
+}
+/* Tint the surface, never box it — rule 4. Green and red here are the
+ * conventional diff colours and are the one sanctioned exception to rule 3:
+ * a red line in a diff means "removed", which everyone already reads correctly. */
+.diff-add { background: rgba(111, 169, 127, 0.11); }
+.diff-add .diff-mark { color: var(--pass); }
+.diff-del { background: rgba(196, 99, 90, 0.11); }
+.diff-del .diff-mark { color: var(--blocked-bright); }
+.diff-meta .code-line { color: var(--dim); font-style: italic; }
+
+/* --- Syntax highlighting -----------------------------------------------------
+ *
+ * Written against the canvas palette rather than importing one of
+ * highlight.js's own themes. Every stock theme brings its own idea of a
+ * background and its own hues; these are the design's colours, so code in the
+ * viewer sits in the same world as everything around it.
+ *
+ * Deliberately restrained — four hues and two greys. A rainbow would break
+ * rule 2 by making colour mean nothing in particular.
+ */
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-type { color: #c48dd4; }
+.hljs-string, .hljs-regexp, .hljs-attribute, .hljs-addition { color: var(--pass); }
+.hljs-title, .hljs-title.function_, .hljs-section, .hljs-name { color: var(--clay-bright); }
+.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-quote { color: var(--running); }
+.hljs-comment { color: var(--dim); font-style: italic; }
+.hljs-variable, .hljs-template-variable, .hljs-params, .hljs-property { color: var(--waiting); }
+.hljs-built_in, .hljs-class .hljs-title, .hljs-title.class_ { color: var(--waiting); }
+.hljs-meta, .hljs-doctag { color: var(--muted); }
+.hljs-deletion { color: var(--blocked-bright); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) .hljs-keyword,
+  :root:not([data-theme='dark']) .hljs-selector-tag,
+  :root:not([data-theme='dark']) .hljs-literal,
+  :root:not([data-theme='dark']) .hljs-type { color: #8341a0; }
+  :root:not([data-theme='dark']) .hljs-comment { color: #77767a; }
+  :root:not([data-theme='dark']) .tab-close:hover { background: rgba(20, 20, 19, 0.08); }
+  :root:not([data-theme='dark']) .change:hover,
+  :root:not([data-theme='dark']) .tree-row:hover { background: rgba(20, 20, 19, 0.04); }
+  :root:not([data-theme='dark']) .diff-add { background: rgba(78, 138, 98, 0.13); }
+  :root:not([data-theme='dark']) .diff-del { background: rgba(180, 84, 74, 0.11); }
+}

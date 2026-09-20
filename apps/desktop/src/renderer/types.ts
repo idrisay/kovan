@@ -1,9 +1,19 @@
 import type { JiraIssue, ProviderId, PullSummary } from '@baton/core';
 import type { PullDetail } from '@baton/providers';
 import type { AgentRun, Runner, RunKind } from '@baton/agent';
-import type { RunTarget } from '@baton/git';
+import type {
+  ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus, RunTarget
+} from '@baton/git';
+import type { Entry, FileBody, Workspace, WorkspaceRepo } from '../main/workspace';
 
 export type { PullDetail, AgentRun, Runner, RunKind, RunTarget, JiraIssue, PullSummary };
+export type {
+  ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus,
+  Entry, FileBody, Workspace, WorkspaceRepo
+};
+
+/** A repo's status plus the de-duplicated count the badge shows. */
+export type WorkspaceStatus = RepoStatus & { changes: number };
 
 export interface SessionInfo {
   id: string;
@@ -53,6 +63,18 @@ export interface BatonApi {
     subject: { pull?: PullSummary; issue?: JiraIssue }
   ): Promise<StartResult>;
   runHistory(subject: string): Promise<AgentRun[]>;
+
+  workspaces(): Promise<{ list: Workspace[]; active?: string }>;
+  workspaceCreate(): Promise<Workspace | undefined>;
+  workspaceActivate(id: string): Promise<void>;
+  workspaceAddFolder(id: string): Promise<Workspace | undefined>;
+  workspaceRemoveFolder(id: string, folder: string): Promise<Workspace | undefined>;
+  workspaceForget(id: string): Promise<void>;
+  workspaceRepos(id: string, force?: boolean): Promise<WorkspaceRepo[]>;
+  workspaceStatus(repo: string): Promise<WorkspaceStatus>;
+  workspaceDiff(repo: string, file: string, side: DiffSide, from?: string): Promise<FileDiff>;
+  workspaceTree(dir: string): Promise<Entry[]>;
+  workspaceRead(file: string): Promise<FileBody>;
 
   sessions(): Promise<SessionInfo[]>;
   sessionBuffer(id: string): Promise<string>;

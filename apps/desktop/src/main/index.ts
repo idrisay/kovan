@@ -24,6 +24,7 @@ import { adoptImportedTokens } from './adopt';
 import { smokePty, smokeUi, type SmokeMode } from './smoke';
 import { Sessions } from './sessions';
 import { Agents } from './agents';
+import { Workspaces } from './workspace';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +33,13 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 // this, state lands in "@baton/desktop" and the importer in scripts/ writes to
 // a directory the app will never read.
 app.setName('Baton');
+
+// A smoke run must not write into the real settings file — seeding a workspace
+// there would leave a folder in the user's app that they never chose. Set
+// before anything reads the path, for the same reason `setName` is.
+if (process.env['BATON_USER_DATA']) {
+  app.setPath('userData', process.env['BATON_USER_DATA']);
+}
 
 // Measured, not assumed: `app.disableHardwareAcceleration()` was tried here and
 // does NOT remove the GPU process — Chromium still spawns one for compositing,
@@ -48,6 +56,7 @@ const poller = new Poller(host);
 const activity = new Activity(host);
 const sessions = new Sessions();
 const agents = new Agents(host, sessions);
+const workspaces = new Workspaces(host);
 const detailHttp = new HttpClient(host.log);
 
 let window: BrowserWindow | undefined;
@@ -204,6 +213,34 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('baton:run-history', (_event, subject: string) => agents.history(subject));
 
+  // --- Workspace ------------------------------------------------------------
+  // Every path-taking channel below is resolved against the workspace folders
+  // inside `Workspaces`; see the note at the top of workspace.ts.
+  ipcMain.handle('baton:workspaces', () => ({
+    list: workspaces.list(),
+    active: workspaces.activeId()
+  }));
+  ipcMain.handle('baton:workspace-create', () => workspaces.create(window));
+  ipcMain.handle('baton:workspace-activate', (_event, id: string) => workspaces.activate(id));
+  ipcMain.handle('baton:workspace-add-folder', (_event, id: string) =>
+    workspaces.addFolder(id, window)
+  );
+  ipcMain.handle('baton:workspace-remove-folder', (_event, id: string, folder: string) =>
+    workspaces.removeFolder(id, folder)
+  );
+  ipcMain.handle('baton:workspace-forget', (_event, id: string) => workspaces.forget(id));
+  ipcMain.handle('baton:workspace-repos', (_event, id: string, force?: boolean) =>
+    workspaces.repos(id, force)
+  );
+  ipcMain.handle('baton:workspace-status', (_event, repo: string) => workspaces.status(repo));
+  ipcMain.handle(
+    'baton:workspace-diff',
+    (_event, repo: string, file: string, side: string, from?: string) =>
+      workspaces.diff(repo, file, side as 'staged' | 'unstaged' | 'untracked', from)
+  );
+  ipcMain.handle('baton:workspace-tree', (_event, dir: string) => workspaces.tree(dir));
+  ipcMain.handle('baton:workspace-read', (_event, file: string) => workspaces.read(file));
+
   // --- Terminals ------------------------------------------------------------
   ipcMain.handle('baton:sessions', () => sessions.list());
   ipcMain.handle('baton:session-buffer', (_event, id: string) => sessions.buffer(id));
@@ -239,6 +276,12 @@ app.whenReady().then(async () => {
 
   applyLoginItem();
 
+  // Seeds the workspace the UI smoke then drives. Guarded by the same env var
+  // that redirects userData, so it can only ever touch a throwaway profile.
+  if (process.env['BATON_SMOKE'] === 'workspace' && process.env['BATON_WS_FOLDER']) {
+    await seedWorkspace(process.env['BATON_WS_FOLDER']);
+  }
+
   if (process.env['BATON_SMOKE'] === 'pty') {
     console.log(JSON.stringify(await smokePty(sessions, agents), null, 2));
     app.exit(0);
@@ -262,6 +305,16 @@ app.whenReady().then(async () => {
   app.on('activate', () => createWindow());
   app.on('second-instance', () => createWindow());
 });
+
+async function seedWorkspace(folder: string): Promise<void> {
+  if (!process.env['BATON_USER_DATA']) {
+    throw new Error('Refusing to seed a workspace into the real profile');
+  }
+  await host.config.set('workspaces', [
+    { id: 'smoke-workspace', name: path.basename(folder), folders: [folder] }
+  ]);
+  await host.config.set('workspace.active', 'smoke-workspace');
+}
 
 // Closing every window must NOT quit: that is the entire point of a menu bar
 // app. Overriding the default here is what keeps Baton running.

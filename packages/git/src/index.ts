@@ -153,3 +153,25 @@ export function runTargets(clones: readonly Clone[], folders: readonly string[])
   }
   return targets;
 }
+
+export {
+  parseStatus,
+  readStatus,
+  changeCount,
+  EMPTY_STATUS,
+  type ChangeKind,
+  type ChangeSide,
+  type FileChange,
+  type RepoStatus
+} from './status';
+
+export {
+  parseDiff,
+  readDiff,
+  EMPTY_DIFF,
+  type DiffHunk,
+  type DiffLine,
+  type DiffLineKind,
+  type DiffSide,
+  type FileDiff
+} from './diff';

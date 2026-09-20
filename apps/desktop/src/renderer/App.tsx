@@ -6,17 +6,19 @@ import { PullPane, TicketPane } from './Detail';
 import { RunSheet } from './RunSheet';
 import { Terminal } from './Terminal';
 import { GroupHead, PullRow } from './rows';
+import { WorkspaceView } from './Workspace';
 import {
-  PullRequestIcon, ReviewIcon, BranchIcon, TicketIcon, TerminalIcon,
+  PullRequestIcon, ReviewIcon, TicketIcon, TerminalIcon, WorkspaceIcon,
   RefreshIcon, SettingsIcon, SearchIcon, SortIcon
 } from './icons';
 
-type ViewId = 'pulls' | 'review' | 'tickets' | 'sessions';
+type ViewId = 'pulls' | 'review' | 'tickets' | 'workspace' | 'sessions';
 
 const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JSX.Element }[] = [
   { id: 'pulls', label: 'Pull requests', icon: PullRequestIcon },
   { id: 'review', label: 'Awaiting your review', icon: ReviewIcon },
   { id: 'tickets', label: 'Tickets', icon: TicketIcon },
+  { id: 'workspace', label: 'Workspace', icon: WorkspaceIcon },
   { id: 'sessions', label: 'Sessions', icon: TerminalIcon }
 ];
 
@@ -55,8 +57,17 @@ export function App() {
     pulls: snapshot.blocked.length,
     review: snapshot.reviewRequested.length,
     tickets: snapshot.tickets.length,
+    workspace: 0,
     sessions: sessions.filter((s) => s.running).length
   }), [snapshot, sessions]);
+
+  /** Opening a terminal anywhere lands you in the session that just started. */
+  const openTerminal = useCallback((cwd?: string) => {
+    void window.baton.openTerminal(cwd).then((s) => {
+      setActiveSession(s.id);
+      setView('sessions');
+    });
+  }, []);
 
   const current = VIEWS.find((v) => v.id === view)!;
 
@@ -161,9 +172,7 @@ export function App() {
             <span className="rail-spacer" />
             <button
               type="button" aria-label="Open a terminal" className="rail-item"
-              onClick={() => void window.baton.openTerminal().then((s) => {
-                setActiveSession(s.id); setView('sessions');
-              })}
+              onClick={() => openTerminal()}
             >
               <TerminalIcon size={18} />
             </button>
@@ -183,6 +192,8 @@ export function App() {
 
           {view === 'sessions' ? (
             <Sessions sessions={sessions} active={activeSession} onSelect={setActiveSession} />
+          ) : view === 'workspace' ? (
+            <WorkspaceView onTerminal={openTerminal} />
           ) : (
             <>
               <aside className="queue" aria-label={current.label}>
