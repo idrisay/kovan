@@ -81,6 +81,7 @@ the limitation the project exists to fix.
 | `npm run smoke` | launch, assert main/preload/renderer wiring, exit |
 | `npm run --workspace @baton/desktop smoke:seeded` | same, with a fixture snapshot, asserts row and flag rendering |
 | `npm run --workspace @baton/desktop smoke:live` | same, against your real accounts |
+| `npm run --workspace @baton/desktop smoke:workspace` | drives the explorer against a real clone: opens a file and a diff |
 
 `smoke` exists because screenshots need a screen-recording permission that CI
 does not have, and "it rendered" is the assertion that actually matters.
@@ -118,14 +119,59 @@ Both the ones on your PATH and the ones that are shell functions or aliases.
 `which` cannot see the second kind — they are lines in a `.zshrc` — and on a
 real machine that is about half of them.
 
+## The workspace
+
+Pick a folder and Baton finds the git clones inside it, so the code behind a
+ticket is readable without leaving the app. The layout is VS Code's — explorer,
+editor tabs, source control — because that shape is already known.
+
+What is underneath is not an editor:
+
+- **Nothing edits.** The agent edits, in a terminal you can watch. A second
+  place where the same file is open would mean save-conflict handling for a
+  workflow nobody asked for.
+- **Nothing watches the filesystem.** Refresh is a button.
+- **A directory is listed only when it is opened**, so a workspace pointed at a
+  folder full of `node_modules` opens as fast as an empty one.
+
+Changes come from `git status --porcelain=v2`, and clicking one opens its diff
+unified, with both line numbers. Staged and unstaged diffs of the same file are
+two different things, so they are two tabs.
+
+### Why every path is re-resolved
+
+The renderer displays pull request bodies and ticket descriptions — other
+people's text. So no IPC channel reads a path it was handed. Each one resolves
+it first against the workspace folders: `realpath` on both sides, so a symlink
+planted inside a workspace cannot point out of one, and a separator required
+after the root, so `~/work-secrets` is not accepted as living under `~/work`. A
+path that fails is refused, not clamped.
+
+### Syntax highlighting
+
+29 grammars registered against `highlight.js/lib/core`, not the default bundle,
+which is ~190 grammars for a viewer that will meet a dozen. Detection is by
+extension, never `highlightAuto` — guessing from content reads a three-line
+shell script as Perl, which looks like a rendering bug.
+
+Highlighting runs over a block and the resulting HTML is split at its newlines,
+re-opening spans across the boundary. Per-line highlighting was tried first and
+loses all multi-line state: the body of a triple-quoted string renders as
+ordinary code. highlight.js v11 exposes no continuation between calls — checked
+against the library, not assumed.
+
 ## Known gaps
 
 - **Idle memory is ~244 MB**, against the Swift app's few MB. Measured, not
   estimated; see MIGRATION.md §9 for the breakdown and what was tried.
 - `noUncheckedIndexedAccess` is off, matching the extension's original compiler
   contract. Turning it on means auditing ~17 regex `match[1]` sites.
-- Queue scoping is account-wide only. Folder and workspace modes need the clone
-  index from `@baton/git`, which lands with Phase 5.
+- Queue scoping is account-wide only. The clone index that folder and workspace
+  scoping needs now exists in `@baton/git`; wiring it to the queue does not.
+- The workspace is read-only: no staging, no committing, no editing.
+- `smoke:workspace` needs `BATON_USER_DATA` and `BATON_WS_FOLDER` set. The
+  first is not optional — seeding a workspace into the real profile would leave
+  a folder in your app that you never chose, and the seeder refuses without it.
 
 ## Installing
 
