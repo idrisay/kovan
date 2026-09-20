@@ -6,33 +6,41 @@
  * clear queue is quiet.
  */
 
-import { Menu, Tray, nativeImage, type NativeImage } from 'electron';
+import { app, Menu, Tray, nativeImage, type NativeImage } from 'electron';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { EMPTY, type Snapshot } from './poller';
 
+const dirname = path.dirname(fileURLToPath(import.meta.url));
+
 /**
- * A template image, drawn as a filled circle. Template images let macOS invert
- * them for light and dark menu bars, which is why this is black with alpha
- * rather than a fixed colour.
+ * The menu bar glyph.
+ *
+ * A *template* image: pure black plus alpha, which macOS recolours itself for
+ * light and dark menu bars and for the highlighted state. Colour in a template
+ * image is discarded, so the entire design here is the silhouette — which is
+ * why it is a shorter, thicker baton than the Dock icon rather than a scaled
+ * copy of it. A faithful scale becomes a hairline at 16pt, and a hairline in a
+ * menu bar reads as dirt on the screen.
+ *
+ * Loaded from disk rather than drawn in code: `nativeImage` picks the @2x file
+ * automatically, which is what every Retina Mac actually displays.
  */
 function icon(): NativeImage {
-  const size = 16;
-  const centre = (size - 1) / 2;
-  const radius = 5.5;
-  const buffer = Buffer.alloc(size * size * 4);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const distance = Math.hypot(x - centre, y - centre);
-      // Antialias the last pixel of the edge so it does not look chewed.
-      const alpha = Math.max(0, Math.min(1, radius - distance)) * 255;
-      const offset = (y * size + x) * 4;
-      buffer[offset] = 0;
-      buffer[offset + 1] = 0;
-      buffer[offset + 2] = 0;
-      buffer[offset + 3] = Math.round(alpha);
-    }
+  const file = app.isPackaged
+    ? path.join(process.resourcesPath, 'trayTemplate.png')
+    : path.join(dirname, '../../resources/trayTemplate.png');
+  const image = nativeImage.createFromPath(file);
+  if (image.isEmpty()) {
+    // Never leave the menu bar with no hit target: an invisible tray icon is
+    // an app the user cannot reach at all.
+    return nativeImage.createFromNamedImage('NSApplicationIcon', [0, 0, 0]).resize({ width: 16 });
   }
-  const image = nativeImage.createFromBuffer(buffer, { width: size, height: size });
   image.setTemplateImage(true);
+  if (process.env['BATON_SMOKE']) {
+    const { width, height } = image.getSize();
+    console.log(`tray glyph loaded from ${file} (${width}x${height}, template=${image.isTemplateImage()})`);
+  }
   return image;
 }
 

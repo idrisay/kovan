@@ -48,7 +48,8 @@
     "files": [
       "out/**/*",
       "package.json",
-      "!**/*.map"
+      "!**/*.map",
+      "!resources/alternatives/**"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
@@ -73,7 +74,17 @@
     "asarUnpack": [
       "**/node_modules/node-pty/**"
     ],
-    "npmRebuild": true
+    "npmRebuild": true,
+    "extraResources": [
+      {
+        "from": "resources/trayTemplate.png",
+        "to": "trayTemplate.png"
+      },
+      {
+        "from": "resources/trayTemplate@2x.png",
+        "to": "trayTemplate@2x.png"
+      }
+    ]
   },
   "description": "Tells you what is blocked on you, and hands it to a coding agent.",
   "author": {
