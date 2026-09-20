@@ -89,3 +89,27 @@ does not have, and "it rendered" is the assertion that actually matters.
   contract. Turning it on means auditing ~17 regex `match[1]` sites.
 - Queue scoping is account-wide only. Folder and workspace modes need the clone
   index from `@baton/git`, which lands with Phase 5.
+
+## Installing
+
+```sh
+npm run install:app --workspace @baton/desktop
+```
+
+Builds, copies to `/Applications/Baton.app`, re-signs and launches it. Re-run it
+to update — it quits the running copy first, because swapping the bundle under a
+live process leaves it running old code from a deleted inode.
+
+Baton is **ad-hoc signed**. That is fine for a local install (Gatekeeper only
+quarantines what was downloaded) but it is not distributable: sending the
+bundle to another Mac needs the Developer ID and notarisation of Phase 7.
+
+Only one Baton runs at a time — a single-instance lock means a `dev` build
+exits immediately while the installed one is running. Quit it from the menu bar
+first.
+
+### Open at login
+
+On by default, toggled from the tray menu. The login item is re-asserted on
+every launch, because it registers against a bundle path and reinstalling
+elsewhere would otherwise orphan it silently.

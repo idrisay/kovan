@@ -9,11 +9,12 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "pack": "electron-vite build && electron-builder --dir",
-    "dist": "electron-vite build && electron-builder",
+    "dist": "electron-vite build && electron-builder --mac --arm64",
     "smoke": "electron-vite build && BATON_SMOKE=1 electron .",
     "smoke:seeded": "electron-vite build && BATON_SMOKE=seeded electron .",
     "smoke:live": "electron-vite build && BATON_SMOKE=live electron .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "install:app": "npm run dist && node ../../scripts/install-app.mjs"
   },
   "dependencies": {
     "@baton/core": "*",
@@ -41,23 +42,33 @@
     },
     "files": [
       "out/**/*",
-      "package.json"
+      "package.json",
+      "!**/*.map"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
         {
-          "target": "dmg",
+          "target": "dir",
           "arch": [
             "arm64"
           ]
         }
       ],
-      "hardenedRuntime": true,
+      "icon": "resources/icon.icns",
+      "identity": null,
+      "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "extendInfo": {
-        "LSUIElement": true
+        "LSUIElement": true,
+        "NSUserNotificationAlertStyle": "banner"
       }
-    }
+    },
+    "electronVersion": "33.4.11"
+  },
+  "description": "Tells you what is blocked on you, and hands it to a coding agent.",
+  "author": {
+    "name": "idrisay",
+    "email": "idrisaydev@gmail.com"
   }
 }

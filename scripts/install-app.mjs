@@ -1,0 +1,61 @@
+#!/usr/bin/env node
+/**
+ * Installs the built Baton.app into /Applications.
+ *
+ * Replaces any existing copy, but quits the running one first: swapping the
+ * bundle under a live process leaves it running from a deleted inode, so it
+ * keeps its old code until something restarts it — which looks exactly like
+ * "my change did nothing".
+ */
+
+import { execFileSync, spawn } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const built = path.join(root, 'apps/desktop/release/mac-arm64/Baton.app');
+const target = '/Applications/Baton.app';
+
+if (!fs.existsSync(built)) {
+  console.error(`No build at ${built}\nRun: npm run dist --workspace @baton/desktop`);
+  process.exit(1);
+}
+
+function quitRunning() {
+  try {
+    execFileSync('pkill', ['-f', '/Applications/Baton.app/Contents/MacOS/Baton'], {
+      stdio: 'ignore'
+    });
+    console.log('stopped the running Baton');
+  } catch {
+    // Nothing was running, which is the common case.
+  }
+}
+
+quitRunning();
+
+if (fs.existsSync(target)) {
+  fs.rmSync(target, { recursive: true, force: true });
+  console.log('removed the previous /Applications/Baton.app');
+}
+
+fs.cpSync(built, target, { recursive: true, verbatimSymlinks: true });
+console.log(`installed ${target}`);
+
+// Ad-hoc signatures do not survive a copy intact on every macOS version, and an
+// invalid one is refused at launch with a message that says nothing useful.
+// Re-signing here costs a second and removes that whole class of confusion.
+try {
+  execFileSync('codesign', ['--force', '--deep', '--sign', '-', target], { stdio: 'ignore' });
+  execFileSync('codesign', ['--verify', '--deep', target], { stdio: 'ignore' });
+  console.log('re-signed and verified (ad-hoc)');
+} catch {
+  console.warn('codesign step failed — the app may still run, but check with:');
+  console.warn(`  codesign --verify --verbose ${target}`);
+}
+
+if (!process.argv.includes('--no-launch')) {
+  spawn('open', ['-a', target], { detached: true, stdio: 'ignore' }).unref();
+  console.log('launched — look for the Baton icon in your menu bar');
+}

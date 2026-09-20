@@ -91,6 +91,25 @@ function createWindow(): void {
   }
 }
 
+/**
+ * Keeps the macOS login item in step with the setting.
+ *
+ * Applied on every launch rather than only when the setting changes: the login
+ * item is registered against a bundle path, so reinstalling the app to a new
+ * location silently orphans the old registration. Re-asserting it costs
+ * nothing and makes a reinstall self-healing.
+ *
+ * `openAsHidden` is redundant under LSUIElement — there is no window to hide —
+ * but it is what stops a Dock icon flashing on login for a fraction of a second.
+ */
+function applyLoginItem(): void {
+  const wanted = host.config.get('launchAtLogin', false);
+  const current = app.getLoginItemSettings();
+  if (current.openAtLogin !== wanted) {
+    app.setLoginItemSettings({ openAtLogin: wanted, openAsHidden: true });
+  }
+}
+
 function broadcast(snapshot: Snapshot): void {
   tray?.update(snapshot);
   if (window && !window.isDestroyed()) {
@@ -106,6 +125,13 @@ app.whenReady().then(async () => {
   tray = new BatonTray({
     open: () => createWindow(),
     refresh: () => void poller.refresh(true),
+    launchAtLogin: () => host.config.get('launchAtLogin', false),
+    toggleLaunchAtLogin: async () => {
+      const next = !host.config.get('launchAtLogin', false);
+      await host.config.set('launchAtLogin', next);
+      applyLoginItem();
+      tray?.update(poller.current());
+    },
     quit: () => {
       app.exit(0);
     }
@@ -126,9 +152,12 @@ app.whenReady().then(async () => {
   ipcMain.handle('baton:open-external', (_event, url: string) => shell.openExternal(url));
   ipcMain.handle('baton:credential-fields', () => CREDENTIAL_FIELDS);
   ipcMain.handle('baton:settings', () => host.config.all());
-  ipcMain.handle('baton:set-setting', (_event, key: string, value: unknown) =>
-    host.config.set(key, value)
-  );
+  ipcMain.handle('baton:set-setting', async (_event, key: string, value: unknown) => {
+    await host.config.set(key, value);
+    if (key === 'launchAtLogin') {
+      applyLoginItem();
+    }
+  });
   ipcMain.handle('baton:set-secret', async (_event, key: string, value: string) => {
     await host.secrets.set(key, value);
     return poller.refresh(true);
@@ -137,6 +166,8 @@ app.whenReady().then(async () => {
   // Before the first poll, so an imported token is used on the very first
   // refresh rather than showing "not connected" for a cycle.
   await adoptImportedTokens(host);
+
+  applyLoginItem();
 
   poller.start();
 

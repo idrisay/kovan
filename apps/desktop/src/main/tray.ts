@@ -7,7 +7,7 @@
  */
 
 import { Menu, Tray, nativeImage, type NativeImage } from 'electron';
-import type { Snapshot } from './poller';
+import { EMPTY, type Snapshot } from './poller';
 
 /**
  * A template image, drawn as a filled circle. Template images let macOS invert
@@ -39,6 +39,8 @@ function icon(): NativeImage {
 export interface TrayActions {
   open(): void;
   refresh(): void;
+  launchAtLogin(): boolean;
+  toggleLaunchAtLogin(): void;
   quit(): void;
 }
 
@@ -49,7 +51,9 @@ export class BatonTray {
     this.tray = new Tray(icon());
     this.tray.setToolTip('Baton');
     this.tray.on('click', () => this.actions.open());
-    this.update({ blocked: [], reviewRequested: [], connected: [], refreshing: false } as never);
+    // Draw the menu immediately, so a right-click before the first refresh
+    // lands gets a real menu rather than nothing.
+    this.update(EMPTY);
   }
 
   update(snapshot: Snapshot): void {
@@ -74,6 +78,13 @@ export class BatonTray {
           label: snapshot.refreshing ? 'Refreshing…' : 'Refresh now',
           enabled: !snapshot.refreshing,
           click: () => this.actions.refresh()
+        },
+        { type: 'separator' },
+        {
+          label: 'Open at login',
+          type: 'checkbox',
+          checked: this.actions.launchAtLogin(),
+          click: () => this.actions.toggleLaunchAtLogin()
         },
         { type: 'separator' },
         { label: 'Quit Baton', accelerator: 'Command+Q', click: () => this.actions.quit() }
