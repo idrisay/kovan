@@ -12,7 +12,7 @@
  * If you ever find yourself moving the poller into the renderer, stop.
  */
 
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, shell } from 'electron';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHost } from './host';
@@ -21,6 +21,7 @@ import { BatonTray } from './tray';
 import { Activity } from './notify';
 import { CREDENTIAL_FIELDS, HttpClient, fetchPullDetail } from '@baton/providers';
 import { adoptImportedTokens } from './adopt';
+import { smokePty, smokeUi, type SmokeMode } from './smoke';
 import { Sessions } from './sessions';
 import { Agents } from './agents';
 
@@ -67,7 +68,9 @@ function createWindow(): void {
     minHeight: 480,
     show: false,
     titleBarStyle: 'hiddenInset',
-    backgroundColor: '#1b1c1f',
+    // Matches the rail on each side of the appearance switch, so the frame and
+    // the first paint agree rather than flashing the wrong one.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0d0e11' : '#edebe5',
     webPreferences: {
       preload: path.join(dirname, '../preload/index.mjs'),
       contextIsolation: true,
@@ -236,163 +239,26 @@ app.whenReady().then(async () => {
 
   applyLoginItem();
 
-  // Proves the pty layer end to end: open a shell, type a command, read what
-  // comes back. A click test cannot do this, and it is the one part of the app
-  // that depends on a native module matching Electron's ABI.
   if (process.env['BATON_SMOKE'] === 'pty') {
-    const runners = await agents.runners();
-    const session = await sessions.open({
-      cwd: app.getPath('home'),
-      title: 'smoke',
-      runnerName: 'Shell'
-    });
-    let seen = '';
-    sessions.onOutput(({ id, data }) => {
-      if (id === session.id) seen += data;
-    });
-    setTimeout(() => sessions.write(session.id, 'echo BATON_PTY_OK-$((6*7))\r'), 600);
-    await new Promise((r) => setTimeout(r, 4000));
-    const prompt = agents.buildPrompt('unblock', {
-      pull: {
-        number: 1, title: 'ACME-1 x', url: 'u', repo: 'a/b', author: 'me',
-        isDraft: false, createdAt: '', updatedAt: '', mergeable: 'conflicting',
-        reviewDecision: 'none', checks: 'none', unresolvedThreads: 0,
-        additions: 0, deletions: 0, viewerReviewed: false
-      }
-    });
-    console.log(JSON.stringify({
-      ptyOpened: Boolean(session.id),
-      sawEcho: seen.includes('BATON_PTY_OK-42'),
-      running: sessions.list()[0]?.running,
-      bufferBytes: sessions.buffer(session.id).length,
-      runnersFound: runners.length,
-      runnerNames: runners.map((r) => r.name).slice(0, 8),
-      targets: (await agents.targets()).map((x) => x.label).slice(0, 4),
-      promptOk: prompt.includes('BATON_REPORT') && prompt.includes('npm run type-check')
-    }, null, 2));
+    console.log(JSON.stringify(await smokePty(sessions, agents), null, 2));
     app.exit(0);
     return;
   }
 
   poller.start();
 
-  // `npm run smoke` drives this: open the window, prove the renderer mounted
-  // and the IPC round-trips, print the result and exit. It is the cheapest
-  // check that the main/preload/renderer wiring is intact, and it runs without
-  // a human or a screen-recording permission.
-  // Proves the pty layer end to end: open a shell, type a command, read what
-  // comes back. A click test cannot do this, and it is the one part of the app
-  // that depends on a native module matching Electron's ABI.
-  if (process.env['BATON_SMOKE'] === 'pty') {
-    const runners = await agents.runners();
-    const session = await sessions.open({
-      cwd: app.getPath('home'),
-      title: 'smoke',
-      runnerName: 'Shell'
-    });
-    let seen = '';
-    sessions.onOutput(({ id, data }) => {
-      if (id === session.id) seen += data;
-    });
-    sessions.write(session.id, 'echo BATON_PTY_OK-$((6*7))\r');
-    await new Promise((r) => setTimeout(r, 3500));
-    console.log(JSON.stringify({
-      ptyOpened: Boolean(session.id),
-      sawEcho: seen.includes('BATON_PTY_OK-42'),
-      running: sessions.list()[0]?.running,
-      bufferBytes: sessions.buffer(session.id).length,
-      runnersFound: runners.length,
-      runnerNames: runners.map((r) => r.name).slice(0, 8),
-      targets: (await agents.targets()).map((t) => t.label).slice(0, 5)
-    }, null, 2));
-    app.exit(0);
-    return;
-  }
-
   if (process.env['BATON_SMOKE']) {
     createWindow();
     const win = window!;
-    // Seed a snapshot so the smoke test exercises the row and flag rendering,
-    // not just the empty state. Fixture only — nothing reaches the network.
-    if (process.env['BATON_SMOKE'] === 'seeded') {
-      const pull = {
-        number: 42, title: 'Fix the flaky payment retry', url: 'https://example.invalid/pr/42',
-        repo: 'acme/web', author: 'someone', isDraft: false,
-        createdAt: new Date(Date.now() - 86_400_000).toISOString(),
-        updatedAt: new Date(Date.now() - 3_600_000).toISOString(),
-        mergeable: 'conflicting' as const, reviewDecision: 'changes_requested' as const,
-        checks: 'failure' as const, unresolvedThreads: 2,
-        additions: 10, deletions: 3, viewerReviewed: false
-      };
-      win.webContents.once('did-finish-load', () => {
-        win.webContents.send('baton:snapshot', {
-          at: Date.now(), viewer: 'idrisay', blocked: [pull], mine: [pull],
-          reviewRequested: [], tickets: [], connected: ['github'], errors: [], refreshing: false
-        });
-      });
-    }
     win.webContents.once('did-finish-load', async () => {
-      // Live mode waits for a real network round-trip before asserting.
-      await new Promise((r) => setTimeout(r, process.env['BATON_SMOKE'] === 'live' ? 9000 : 400));
-      const mounted = await win.webContents.executeJavaScript(
-        `document.querySelector('#root')?.children.length > 0`
-      );
-      const hasApi = await win.webContents.executeJavaScript(`typeof window.baton?.refresh`);
-      const heading = await win.webContents.executeJavaScript(
-        `document.querySelector('.wordmark')?.textContent ?? ''`
-      );
-      const rail = await win.webContents.executeJavaScript(
-        `Array.from(document.querySelectorAll('.rail-item span:first-child')).map(e => e.textContent).join(' | ')`
-      );
-      console.log(JSON.stringify({
-        trayCreated: Boolean(tray),
-        rendererMounted: mounted,
-        preloadApi: hasApi,
-        wordmark: heading,
-        rail,
-        emptyState: await win.webContents.executeJavaScript(
-          `document.querySelector('.empty h1')?.textContent ?? ''`
-        ),
-        connected: poller.current().connected,
-        rowTitle: await win.webContents.executeJavaScript(
-          `document.querySelector('.row-title')?.textContent ?? ''`),
-        rowMeta: await win.webContents.executeJavaScript(
-          `document.querySelector('.row-meta')?.textContent ?? ''`),
-        flags: await win.webContents.executeJavaScript(
-          `Array.from(document.querySelectorAll('.flag')).map(e => e.textContent).join(' · ')`),
-        blockedCount: await win.webContents.executeJavaScript(
-          `document.querySelector('.count.alert')?.textContent ?? ''`),
-        // Click the first row, then read the detail pane that opens.
-        detail: await win.webContents.executeJavaScript(`(async () => {
-          document.querySelector('.row')?.click();
-          await new Promise(r => setTimeout(r, 4000));
-          return {
-            heading: document.querySelector('.detail-head h2')?.textContent ?? '',
-            runButtons: Array.from(document.querySelectorAll('.run-buttons button')).map(b => b.textContent),
-            sections: Array.from(document.querySelectorAll('.detail h3')).map(h => h.textContent),
-            error: document.querySelector('.detail .error')?.textContent ?? '',
-            loading: Boolean(document.querySelector('.detail .quiet')),
-            threads: document.querySelectorAll('.thread').length,
-            checks: document.querySelectorAll('.check').length,
-            files: document.querySelectorAll('.files li').length
-          };
-        })()`),
-        snapshotOk: typeof poller.current().at === 'number',
-        live: {
-          viewer: poller.current().viewer,
-          blocked: poller.current().blocked.length,
-          mine: poller.current().mine.length,
-          reviewRequested: poller.current().reviewRequested.length,
-          tickets: poller.current().tickets.length,
-          errors: poller.current().errors
-        },
-        userData: app.getPath('userData')
-      }, null, 2));
+      const mode = process.env['BATON_SMOKE'] as SmokeMode;
+      console.log(JSON.stringify(await smokeUi(win, poller, mode), null, 2));
       app.exit(0);
     });
+    return;
   }
 
-  // Opening from the Dock or a relaunch attempt should surface the window.
+
   app.on('activate', () => createWindow());
   app.on('second-instance', () => createWindow());
 });

@@ -1,15 +1,8 @@
 import { useEffect, useState } from 'react';
-import { formatAge, pullFlags } from '@baton/core';
+import { formatAge } from '@baton/core';
+import { States } from './rows';
+import { Prose } from './Prose';
 import type { AgentRun, JiraIssue, PullDetail, PullSummary, RunKind } from './types';
-
-function Markdownish({ text }: { text: string }) {
-  // Deliberately not a Markdown renderer. Review comments and ticket bodies are
-  // other people's text, and the fastest way to an injection in a desktop app
-  // is `dangerouslySetInnerHTML` over content from a pull request. Whitespace
-  // preservation gets 90% of the readability for none of the risk; a real
-  // renderer can land later behind a sanitiser.
-  return <div className="prose">{text || <span className="quiet">Nothing written.</span>}</div>;
-}
 
 function RunButtons({
   kinds,
@@ -52,7 +45,7 @@ function History({ subject }: { subject: string }) {
         {runs.map((run) => (
           <li key={run.id}>
             <span className="run-kind">{run.kind}</span>
-            <span className="quiet">{new Date(run.startedAt).toLocaleString()}</span>
+            <span className="run-when">{new Date(run.startedAt).toLocaleString()}</span>
             {run.confidence !== undefined && <span className="score">{run.confidence}/100</span>}
             {run.verdict !== 'unknown' && <span className="verdict">{run.verdict}</span>}
             {run.reportPath && (
@@ -110,16 +103,15 @@ export function PullPane({
     <div className="detail">
       <header className="detail-head">
         <h2>{pull.title}</h2>
-        <div className="row-meta">
-          {pull.repo} #{pull.number} · {pull.author} · updated {formatAge(pull.updatedAt)}
-          {detail && ` · ${detail.baseRef} ← ${detail.headRef}`}
+        <div className="detail-meta">
+          <span>{pull.repo}</span>
+          <span>#{pull.number}</span>
+          <span>{pull.author}</span>
+          <span>{formatAge(pull.updatedAt)}</span>
+          {detail && <span>{detail.baseRef} ← {detail.headRef}</span>}
         </div>
-        <div className="flags">
-          {pullFlags(pull).map((flag) => (
-            <span key={flag.id} className={`flag flag-${flag.id}`}>
-              {flag.label}
-            </span>
-          ))}
+        <div className="detail-states">
+          <States pull={pull} max={6} />
         </div>
         <div className="detail-actions">
           <button className="ghost" onClick={() => void window.baton.openExternal(pull.url)}>
@@ -140,9 +132,13 @@ export function PullPane({
               <h3>Checks</h3>
               <ul className="checks">
                 {detail.checks.map((check) => (
-                  <li key={check.name} className={`check check-${check.status}`}>
-                    <span className="dot" />
-                    <span>{check.name}</span>
+                  <li key={check.name}>
+                    <span className={`dot ${
+                      check.status === 'success' ? 'pass'
+                        : check.status === 'failure' ? 'fail'
+                          : check.status === 'pending' ? 'running' : ''
+                    }`} />
+                    <span className="file-path">{check.name}</span>
                     {check.url && (
                       <button className="link" onClick={() => void window.baton.openExternal(check.url!)}>
                         logs
@@ -169,9 +165,9 @@ export function PullPane({
                     <div key={i} className="comment">
                       <div className="comment-head">
                         <strong>{c.author}</strong>
-                        <span className="quiet">{formatAge(c.createdAt)}</span>
+                        <span className="when">{formatAge(c.createdAt)}</span>
                       </div>
-                      <Markdownish text={c.body} />
+                      <Prose text={c.body} />
                     </div>
                   ))}
                 </div>
@@ -182,7 +178,7 @@ export function PullPane({
           {detail.body && (
             <section>
               <h3>Description</h3>
-              <Markdownish text={detail.body} />
+              <Prose text={detail.body} />
             </section>
           )}
 
@@ -221,11 +217,19 @@ export function TicketPane({
     <div className="detail">
       <header className="detail-head">
         <h2>
-          <span className="key">{issue.key}</span> {issue.summary}
+          {issue.summary}
         </h2>
-        <div className="row-meta">
-          {issue.status} · {issue.issueType}
-          {issue.priority ? ` · ${issue.priority}` : ''} · updated {formatAge(issue.updated)}
+        <div className="detail-meta">
+          <span className="key">{issue.key}</span>
+          <span>{issue.issueType}</span>
+          {issue.priority && <span>{issue.priority}</span>}
+          <span>{formatAge(issue.updated)}</span>
+        </div>
+        <div className="detail-states">
+          <span className="state">
+            <span className={`dot ${issue.statusCategory === 'done' ? 'pass' : 'waiting'}`} />
+            {issue.status}
+          </span>
         </div>
         <div className="detail-actions">
           <button className="ghost" onClick={() => void window.baton.openExternal(issue.url)}>
@@ -238,7 +242,7 @@ export function TicketPane({
 
       <section>
         <h3>Description</h3>
-        <Markdownish text={issue.description} />
+        <Prose text={issue.description} />
       </section>
 
       {issue.subtasks.length > 0 && (
@@ -251,7 +255,7 @@ export function TicketPane({
                   {sub.key}
                 </button>
                 <span className="file-path">{sub.summary}</span>
-                <span className="quiet">{sub.status}</span>
+                <span className="run-when">{sub.status}</span>
               </li>
             ))}
           </ul>
@@ -265,9 +269,9 @@ export function TicketPane({
             <div key={i} className="comment">
               <div className="comment-head">
                 <strong>{c.author}</strong>
-                <span className="quiet">{formatAge(c.created)}</span>
+                <span className="when">{formatAge(c.created)}</span>
               </div>
-              <Markdownish text={c.body} />
+              <Prose text={c.body} />
             </div>
           ))}
         </section>

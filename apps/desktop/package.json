@@ -17,11 +17,21 @@
     "install:app": "npm run dist && node ../../scripts/install-app.mjs"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@fontsource/space-grotesk": "^5.3.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "dompurify": "^3.4.15",
+    "marked": "^14.1.4",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
+    "@baton/agent": "*",
+    "@baton/core": "*",
+    "@baton/git": "*",
+    "@baton/host": "*",
+    "@baton/providers": "*",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
@@ -30,12 +40,7 @@
     "electron-vite": "^2.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "vite": "^5.4.11",
-    "@baton/core": "*",
-    "@baton/host": "*",
-    "@baton/providers": "*",
-    "@baton/agent": "*",
-    "@baton/git": "*"
+    "vite": "^5.4.11"
   },
   "productName": "Baton",
   "build": {

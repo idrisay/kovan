@@ -150,3 +150,46 @@ first.
 On by default, toggled from the tray menu. The login item is re-asserted on
 every launch, because it registers against a bundle path and reinstalling
 elsewhere would otherwise orphan it silently.
+
+## Design
+
+The interface follows the DevHub design canvas — its surfaces, type scale,
+status palette and layout, in both themes. The canvas is the source; this is
+the implementation.
+
+Six rules from it, which `src/renderer/styles.css` exists to hold:
+
+1. **Elevation separates.** Rail → sidebar → editor → card, each a step
+   brighter. The surface you *read* on is the brightest; everything you
+   *operate* sits a step back. In light mode the values invert but the rule
+   does not.
+2. **Clay is reserved** — selection, the primary action, a link. Never
+   decoration, so a coloured thing on screen always means something.
+3. **Red only ever means something failed.** Queue rows are grouped and only
+   the blocked group is tinted, which is why "blocked on you" is a section of
+   one list rather than a view of its own: a whole screen of red says nothing.
+4. **Hairlines at 6–9%.** No heavy dividers, no boxes around boxes.
+5. **Anything a machine wrote is mono** — a path, a number, a sha, a duration.
+6. **Status is a dot plus a word**, so it survives being read in grey.
+
+Prose is capped at a 720px measure wherever it appears. Type is IBM Plex Sans
+for prose, IBM Plex Mono for machine text, Space Grotesk for titles — bundled
+via `@fontsource`, not fetched, because the app has to work offline and the
+renderer's CSP allows no remote origins.
+
+Markdown from pull requests and tickets is rendered through `marked` and
+sanitised with DOMPurify before it reaches the DOM. That is not a formality:
+it is other people's text inside a renderer that holds a bridge to the main
+process.
+
+### Checking it
+
+```sh
+BATON_SMOKE=live BATON_SHOT=/tmp/q.png BATON_SHOT_DETAIL=/tmp/d.png \
+  npm run --workspace @baton/desktop start
+```
+
+`BATON_THEME=light` forces the appearance so both can be captured without
+touching System Settings. The smoke harness waits for the UI to be *ready*
+rather than for a fixed delay — a fixed wait landed on the boundary where live
+data arrives, and different assertions in one run saw different states.
