@@ -3,14 +3,18 @@
 A **ceremonial baton** — cord and tassel, red shaft with cross-lacing, spear
 tip, bulb — drawn flat in three colours.
 
-`W1-three` is in use. The alternatives change only the palette; the layout is
+`W4-mono` is in use. The alternatives change only the palette; the layout is
 identical across all four.
 
 ## Three colours
 
-Navy field, red, one off-white. That is the whole palette: the tip, the bulb,
-the cord, the knot and the lacing are all the same white, and the tassel is the
-same red as the shaft.
+Near-black field, red, one off-white. The tip, the bulb, the cord and the knot
+are all the same white, and the tassel is the same red as the shaft.
+
+The lacing is the one thing that differs from the other palettes: it is drawn
+in the **field colour**, so the X marks read as cut out of the shaft rather
+than laid on top of it. That trick only works because the field is flat —
+against a gradient the cut-outs would not match the tile behind them.
 
 Earlier rounds had gradients, specular highlights and lit/shadow halves. Each
 of those is a decision that has to survive being reduced to 16px, and some of

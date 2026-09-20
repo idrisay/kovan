@@ -3,11 +3,15 @@ from PIL import Image, ImageDraw
 import os, shutil, subprocess
 
 OUT = '/Users/idrisay/Desktop/coding/ikatia/app/baton/apps/desktop/resources'
-CHOICE = dict(bg=(37, 48, 92), red=(219, 46, 48),
-              metal=(244, 246, 250), lace=(244, 246, 250))
+# W4-mono. The lacing is drawn in the field colour rather than white, so the X
+# marks read as cut out of the shaft instead of laid on top of it. That works
+# only because the field is flat — against a gradient the cut-outs would not
+# match the surrounding tile.
+CHOICE = dict(bg=(24, 26, 34), red=(226, 52, 50),
+              metal=(232, 236, 244), lace=(24, 26, 34))
 
 master = compose(CHOICE)
-master.save('W1-three.png')
+master.save('W4-mono.png')
 
 iconset = 'baton.iconset'
 shutil.rmtree(iconset, ignore_errors=True); os.makedirs(iconset)
@@ -40,7 +44,7 @@ d.rectangle([0, 178, 780, 330], fill=(28, 29, 33))
 for j, sz in enumerate((128, 64, 32, 16)):
     s_ = master.resize((sz, sz), Image.LANCZOS)
     proof.paste(s_, (30 + j * 150, 32 + (128 - sz) // 2), s_)
-d.text((30, 8), 'app icon — three colours, one drawing at every size', fill=(60, 60, 66))
+d.text((30, 8), 'app icon — W4-mono, lacing as negative space', fill=(60, 60, 66))
 for j, (bg, fg, label) in enumerate((((241, 241, 245), (0, 0, 0), 'light menu bar'),
                                      ((28, 29, 33), (255, 255, 255), 'dark menu bar'))):
     y = 202 + j * 60
