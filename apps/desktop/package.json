@@ -1,0 +1,63 @@
+{
+  "name": "@baton/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "pack": "electron-vite build && electron-builder --dir",
+    "dist": "electron-vite build && electron-builder",
+    "smoke": "electron-vite build && BATON_SMOKE=1 electron .",
+    "smoke:seeded": "electron-vite build && BATON_SMOKE=seeded electron .",
+    "smoke:live": "electron-vite build && BATON_SMOKE=live electron .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@baton/core": "*",
+    "@baton/host": "*",
+    "@baton/providers": "*"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^5.4.11"
+  },
+  "productName": "Baton",
+  "build": {
+    "appId": "com.idrisay.baton",
+    "productName": "Baton",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    }
+  }
+}

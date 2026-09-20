@@ -1,0 +1,124 @@
+/**
+ * One settings schema, read by both hosts.
+ *
+ * The extension declared these in `package.json` under
+ * `contributes.configuration`; the desktop app has no such manifest. Declaring
+ * them here instead is what stops the two drifting — the VS Code host maps
+ * these keys onto its own configuration, and the Electron host onto a JSON
+ * file, but neither owns the list.
+ *
+ * Keys keep their `devhub.`-era spelling minus the prefix, so an existing
+ * `defaults read com.idrisay.devhub` import lands on the right names.
+ */
+
+import type { PathMapping } from './types';
+
+export interface Settings {
+  ticketKeyPattern: string;
+  branchTemplate: string;
+
+  'jira.baseUrl': string;
+  'jira.email': string;
+  'jira.jql': string;
+  'jira.tasksJql': string;
+  'jira.inProgressTransition': string;
+  'jira.tasksLimit': number;
+
+  'github.enabled': boolean;
+  'github.baseUrl': string;
+  'github.limit': number;
+  'github.reviewPromptTemplate': string;
+  'github.updatePromptTemplate': string;
+  'github.useCLI': boolean;
+
+  'sentry.baseUrl': string;
+  'sentry.organization': string;
+  'sentry.projects': string[];
+  'sentry.environment': string;
+  'sentry.pathMappings': PathMapping[];
+
+  'grafana.enabled': boolean;
+  'grafana.baseUrl': string;
+  'grafana.services': Record<string, string>;
+  'grafana.serviceLabels': string[];
+  'grafana.latency.datasourceUid': string;
+  'grafana.latency.datasourceKind': 'prometheus' | 'loki';
+  'grafana.latency.query': string;
+  'grafana.latency.window': string;
+  'grafana.latency.limit': number;
+
+  'figma.enabled': boolean;
+
+  'tasks.promptTemplate': string;
+  'rows.titleLength': number;
+  'refresh.minIntervalSeconds': number;
+
+  /** Desktop only: how the queues are scoped. See DOCS.md §4, Workspaces. */
+  'scope.mode': 'all' | 'folders' | 'workspace';
+  'repos.folders': string[];
+  'workspaces.list': { id: string; name: string; folders: string[] }[];
+  'workspaces.active': string;
+
+  'runner.default': string;
+  'runner.custom': unknown[];
+  'runner.reviewers': string[];
+
+  'notify.enabled': boolean;
+  'launchAtLogin': boolean;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  ticketKeyPattern: '[A-Z][A-Z0-9]+-\\d+',
+  branchTemplate: '${key}-${slug}',
+
+  'jira.baseUrl': '',
+  'jira.email': '',
+  'jira.jql': 'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC',
+  'jira.tasksJql':
+    'assignee = currentUser() AND (statusCategory != Done OR resolutiondate >= -14d) ORDER BY updated DESC',
+  'jira.inProgressTransition': '',
+  'jira.tasksLimit': 100,
+
+  'github.enabled': true,
+  'github.baseUrl': 'https://api.github.com',
+  'github.limit': 50,
+  'github.reviewPromptTemplate': '',
+  'github.updatePromptTemplate': '',
+  'github.useCLI': false,
+
+  'sentry.baseUrl': 'https://sentry.io',
+  'sentry.organization': '',
+  'sentry.projects': [],
+  'sentry.environment': '',
+  'sentry.pathMappings': [{ from: 'app:///', to: '' }],
+
+  'grafana.enabled': true,
+  'grafana.baseUrl': '',
+  'grafana.services': {},
+  'grafana.serviceLabels': ['service', 'app', 'job', 'namespace'],
+  'grafana.latency.datasourceUid': '',
+  'grafana.latency.datasourceKind': 'prometheus',
+  'grafana.latency.query': '',
+  'grafana.latency.window': '1h',
+  'grafana.latency.limit': 5,
+
+  'figma.enabled': true,
+
+  'tasks.promptTemplate': '',
+  'rows.titleLength': 40,
+  'refresh.minIntervalSeconds': 15,
+
+  'scope.mode': 'all',
+  'repos.folders': [],
+  'workspaces.list': [],
+  'workspaces.active': '',
+
+  'runner.default': '',
+  'runner.custom': [],
+  'runner.reviewers': [],
+
+  'notify.enabled': true,
+  launchAtLogin: false
+};
+
+export type SettingKey = keyof Settings;

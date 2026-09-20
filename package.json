@@ -1,0 +1,27 @@
+{
+  "name": "baton",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tells you what is blocked on you, and hands it to a coding agent.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --build && npm run typecheck --workspace @baton/desktop",
+    "test": "vitest run",
+    "dev": "npm run dev --workspace @baton/desktop",
+    "build": "npm run build --workspace @baton/desktop",
+    "clean": "tsc --build --clean",
+    "smoke": "npm run smoke --workspace @baton/desktop",
+    "import": "node scripts/import-from-devhub.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

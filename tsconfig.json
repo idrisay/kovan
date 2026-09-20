@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/host" },
+    { "path": "./packages/core" },
+    { "path": "./packages/providers" }
+  ],
+  "//": "packages/git and packages/agent join here when Phase 4 lands."
+}
