@@ -17,9 +17,9 @@
     "install:app": "npm run dist && node ../../scripts/install-app.mjs"
   },
   "dependencies": {
-    "@baton/core": "*",
-    "@baton/host": "*",
-    "@baton/providers": "*"
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
@@ -30,7 +30,12 @@
     "electron-vite": "^2.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "@baton/core": "*",
+    "@baton/host": "*",
+    "@baton/providers": "*",
+    "@baton/agent": "*",
+    "@baton/git": "*"
   },
   "productName": "Baton",
   "build": {
@@ -64,7 +69,11 @@
         "NSUserNotificationAlertStyle": "banner"
       }
     },
-    "electronVersion": "33.4.11"
+    "electronVersion": "33.4.11",
+    "asarUnpack": [
+      "**/node_modules/node-pty/**"
+    ],
+    "npmRebuild": true
   },
   "description": "Tells you what is blocked on you, and hands it to a coding agent.",
   "author": {

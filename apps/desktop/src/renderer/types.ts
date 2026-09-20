@@ -1,4 +1,22 @@
 import type { JiraIssue, ProviderId, PullSummary } from '@baton/core';
+import type { PullDetail } from '@baton/providers';
+import type { AgentRun, Runner, RunKind } from '@baton/agent';
+import type { RunTarget } from '@baton/git';
+
+export type { PullDetail, AgentRun, Runner, RunKind, RunTarget, JiraIssue, PullSummary };
+
+export interface SessionInfo {
+  id: string;
+  title: string;
+  cwd: string;
+  runnerName: string;
+  kind?: RunKind;
+  subject?: string;
+  startedAt: number;
+  running: boolean;
+  exitCode?: number;
+  runDirectory?: string;
+}
 
 export interface Snapshot {
   at: number;
@@ -12,6 +30,8 @@ export interface Snapshot {
   refreshing: boolean;
 }
 
+export type StartResult = { ok: true; sessionId: string } | { ok: false; error: string };
+
 export interface BatonApi {
   snapshot(): Promise<Snapshot>;
   refresh(): Promise<Snapshot>;
@@ -21,6 +41,27 @@ export interface BatonApi {
   setSetting(key: string, value: unknown): Promise<void>;
   setSecret(key: string, value: string): Promise<Snapshot>;
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
+
+  pullDetail(repo: string, number: number): Promise<PullDetail>;
+
+  runners(): Promise<Runner[]>;
+  runTargets(force?: boolean): Promise<RunTarget[]>;
+  buildPrompt(kind: RunKind, subject: { pull?: PullSummary; issue?: JiraIssue }): Promise<string>;
+  defaultCwd(repo?: string): Promise<string | undefined>;
+  startAgent(
+    request: { kind: RunKind; subjectId: string; runnerId: string; cwd?: string; prompt?: string },
+    subject: { pull?: PullSummary; issue?: JiraIssue }
+  ): Promise<StartResult>;
+  runHistory(subject: string): Promise<AgentRun[]>;
+
+  sessions(): Promise<SessionInfo[]>;
+  sessionBuffer(id: string): Promise<string>;
+  sessionWrite(id: string, data: string): Promise<void>;
+  sessionResize(id: string, cols: number, rows: number): Promise<void>;
+  sessionClose(id: string): Promise<void>;
+  openTerminal(cwd?: string): Promise<SessionInfo>;
+  onSessionOutput(listener: (id: string, data: string) => void): () => void;
+  onSessions(listener: (list: SessionInfo[]) => void): () => void;
 }
 
 declare global {

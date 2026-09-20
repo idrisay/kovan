@@ -62,14 +62,62 @@ function say(...args) {
   console.log(...args);
 }
 
-function readDefault(key) {
+/**
+ * The whole domain, as JSON.
+ *
+ * NOT `defaults read <key>`, which was the first version and was wrong in a way
+ * that only showed up at runtime. Swift wrote `runner.custom` and
+ * `prompt.conventions` as JSON-encoded `Data`, and `defaults read` renders that
+ * as a hex dump — `{length = 147, bytes = 0x5b7b2269 …}` — which imported
+ * cleanly as a *string* and then blew up the moment anything read `.length` on
+ * it.
+ *
+ * `defaults export` plus `plutil -convert json` gives real types, with `Data`
+ * base64-encoded, which `decodeBlob` below turns back into the JSON it is.
+ */
+function readDomain() {
   try {
-    return execFileSync('defaults', ['read', OLD_DOMAIN, key], {
+    const xml = execFileSync('defaults', ['export', OLD_DOMAIN, '-'], {
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore']
-    }).trim();
+      stdio: ['ignore', 'pipe', 'ignore'],
+      maxBuffer: 8 * 1024 * 1024
+    });
+    // Via python's plistlib rather than `plutil -convert json`, which refuses
+    // outright on a plist containing `Data` — and `Data` is exactly what the
+    // two interesting keys are. Base64 here, decoded by `decodeBlob`.
+    const json = execFileSync(
+      'python3',
+      [
+        '-c',
+        'import plistlib,sys,json,base64\n' +
+          'd=plistlib.loads(sys.stdin.buffer.read())\n' +
+          'print(json.dumps({k:(base64.b64encode(v).decode() if isinstance(v,bytes) else v) for k,v in d.items()}, default=str))'
+      ],
+      { input: xml, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }
+    );
+    return JSON.parse(json);
+  } catch (err) {
+    console.warn(`could not read ${OLD_DOMAIN}: ${err.message}`);
+    return {};
+  }
+}
+
+/**
+ * A base64 `Data` value that is really JSON, or the value unchanged.
+ *
+ * Swift's `JSONEncoder` output stored in UserDefaults arrives here as base64.
+ * Anything that does not decode to JSON is left alone rather than guessed at.
+ */
+function decodeBlob(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length < 8) {
+    return value;
+  }
+  try {
+    const text = Buffer.from(value, 'base64').toString('utf8');
+    const parsed = JSON.parse(text);
+    return typeof parsed === 'object' ? parsed : value;
   } catch {
-    return undefined;
+    return value;
   }
 }
 
@@ -82,6 +130,7 @@ function readDefault(key) {
  * and not the other way round. Searching by service alone finds the wrong item
  * or none.
  */
+// eslint-disable-next-line no-unused-vars
 function readKeychain(service) {
   try {
     return execFileSync(
@@ -113,30 +162,30 @@ function readGhCli() {
   }
 }
 
-/** `defaults` prints plist syntax, not JSON. Enough of it to read a list. */
-function parsePlistish(raw) {
-  if (raw === undefined) return undefined;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  if (/^-?\d+$/.test(raw)) return Number(raw);
-  if (raw.startsWith('(')) {
-    return raw
-      .slice(1, -1)
-      .split('\n')
-      .map((line) => line.trim().replace(/,$/, '').replace(/^"|"$/g, ''))
-      .filter(Boolean);
-  }
-  return raw;
-}
-
 // --- 1. Settings -------------------------------------------------------------
 
+const domain = readDomain();
 const settings = {};
 for (const key of SETTING_KEYS) {
-  const value = parsePlistish(readDefault(key));
+  const value = decodeBlob(domain[key]);
   if (value !== undefined && value !== '') {
     settings[RENAMES[key] ?? key] = value;
   }
+}
+
+// `prompt.conventions` and `runner.custom` are the two that were Data blobs.
+// Refuse to carry either across unless it decoded into the shape the app
+// expects — a half-understood value is worse than an absent one, because the
+// defaults are correct and a malformed one crashes the runner list.
+if (settings['prompt.conventions'] && typeof settings['prompt.conventions'] !== 'object') {
+  console.warn('prompt.conventions did not decode; leaving it at the default');
+  delete settings['prompt.conventions'];
+}
+if (!Array.isArray(settings['runner.custom'])) {
+  if (settings['runner.custom']) {
+    console.warn('runner.custom did not decode; leaving it empty');
+  }
+  delete settings['runner.custom'];
 }
 say(`settings: found ${Object.keys(settings).length} of ${SETTING_KEYS.length} keys`);
 

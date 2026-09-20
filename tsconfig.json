@@ -1,9 +1,21 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/host" },
-    { "path": "./packages/core" },
-    { "path": "./packages/providers" }
+    {
+      "path": "./packages/host"
+    },
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./packages/providers"
+    },
+    {
+      "path": "./packages/agent"
+    },
+    {
+      "path": "./packages/git"
+    }
   ],
-  "//": "packages/git and packages/agent join here when Phase 4 lands."
+  "comment": "packages/git and packages/agent join here when Phase 4 lands."
 }

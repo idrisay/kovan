@@ -32,3 +32,4 @@ export * from './promptSettings';
 // pulls a browser-external shim into the bundle and fails at rollup. Node-only
 // code is reached through `@baton/core/node` instead, which only the main
 // process imports.
+export * from './prompts';

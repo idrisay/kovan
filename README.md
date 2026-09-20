@@ -24,10 +24,11 @@ poller and the queue views. Verified against a real account — 42 pull requests
 | 1 | Extract `core` + `providers` behind the `Host` seam | done |
 | 2 | Menu bar app: tray, poller in main, notifications | done |
 | 3 | Queue and ticket views | done |
+| 4 | Terminal + agent runner (`node-pty`, run archive) | done |
+| 4b | Detail panes for pull requests and tickets | done |
 | 3b | Re-point the VS Code extension at `packages/*` | **not started** |
-| 4 | Terminal + agent runner (`node-pty`, run archive) | not started |
 | 5 | Workbench: explorer, Monaco editor, diff | not started |
-| 6 | Workspaces, Activity, Sessions, reviewers | not started |
+| 6 | Workspaces, Activity, Environments, reviewers | not started |
 | 7 | Codesign, notarise, auto-update | not started |
 
 Sentry, Grafana and Figma clients are **not** ported yet, though their pure
@@ -49,10 +50,13 @@ that is macOS deciding whether this process may read the secret.
 
 ```
 packages/host        the seam: Secrets, Config, Files, Log. No platform imports.
-packages/core        pure domain logic. Shared with the VS Code extension.
-packages/providers   GitHub and Jira clients, HTTP, credentials.
+packages/core        pure domain logic + the agent prompts. Shared with the extension.
+packages/providers   GitHub and Jira clients, HTTP, credentials, PR detail.
+packages/agent       runner discovery, argv/shell-line building, the run archive.
+packages/git         clone discovery, so a run starts in the right folder.
 apps/desktop
-  src/main           tray, poller, notifications, IPC — works with no window
+  src/main           tray, poller, notifications, pty sessions, IPC
+                     — all of it works with no window open
   src/preload        contextBridge. Tokens go in, never come out.
   src/renderer       React views
 scripts              one-time migration from DevHub
@@ -80,6 +84,39 @@ the limitation the project exists to fix.
 
 `smoke` exists because screenshots need a screen-recording permission that CI
 does not have, and "it rendered" is the assertion that actually matters.
+
+## Running an agent
+
+Pick a pull request or a ticket, and the detail pane offers the run that fits
+it: **Work on this in an agent** for a ticket, **Review in an agent** for
+somebody else's pull request, **Unblock** and **Check it shipped** for your own.
+
+You see the prompt before it is sent, and can edit it. That is deliberate: the
+prompts are long because every line of them is a mistake somebody made once,
+and an agent started on a prompt nobody read is how the wrong thing gets built
+confidently.
+
+Every run leaves a folder under `runs/<ticket>/<timestamp>/` holding the prompt,
+the report the agent writes to `$BATON_REPORT`, and any screenshots it saves in
+`$BATON_SHOTS`. One folder per ticket, so the second time a ticket comes round
+the first time is already there. `$BATON_TICKET` is everything already known,
+written before the agent starts.
+
+### The security rule
+
+The prompt is **never** interpolated into a shell line. Prompts are built from
+pull request titles and review comments — text other people wrote — and the
+process receiving them has a shell and your credentials. Direct spawns pass it
+as one argv element; terminal sessions write it to a 0600 file and reference it
+as `"$(< path)"`, which a shell substitutes once and does not re-parse.
+`packages/agent/test/runner.test.ts` round-trips a prompt containing backticks,
+`$(…)` and `rm -rf` through a real zsh and asserts it arrives byte-identical.
+
+### Which agents it finds
+
+Both the ones on your PATH and the ones that are shell functions or aliases.
+`which` cannot see the second kind — they are lines in a `.zshrc` — and on a
+real machine that is about half of them.
 
 ## Known gaps
 
