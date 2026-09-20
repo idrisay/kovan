@@ -21,6 +21,7 @@
  */
 
 import { app, type BrowserWindow } from 'electron';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import type { Agents } from './agents';
 import type { Poller } from './poller';
@@ -241,7 +242,7 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
   await read(win, `document.querySelector('.rail-item[aria-label="Workspace"]')?.click()`);
   await until(win, `document.querySelector('.explorer')`);
 
-  if (!(await until(win, `document.querySelector('.repo')`, 30_000))) {
+  if (!(await until(win, `document.querySelector('.ws-row')`, 30_000))) {
     return {
       reached: false,
       explorer: await read(win, `document.querySelector('.explorer .queue-list')?.textContent ?? ''`)
@@ -250,10 +251,22 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
   // Statuses arrive after the repo list; wait rather than race.
   await until(win, `!document.querySelector('.repo-pill.quiet-pill')?.textContent?.includes('\u00b7')`, 30_000);
 
+  await until(win, `document.querySelector('.repo')`, 30_000);
   const summary: Record<string, unknown> = {
     reached: true,
+    workspaceRow: await read(
+      win,
+      `(() => { const r = document.querySelector('.ws-row'); return r ? {
+         title: r.querySelector('.ws-title')?.textContent,
+         kind: r.querySelector('.ws-kind')?.textContent,
+         folders: r.querySelector('.ws-folders')?.textContent,
+         actions: Array.from(r.querySelectorAll('.icon-button')).map(b => b.getAttribute('aria-label'))
+       } : null; })()`
+    ),
+    // The dropdown is gone; every folder is visible at once instead.
+    pickerGone: !(await read(win, `Boolean(document.querySelector('.ws-picker'))`)),
+    removeButtons: await read(win, `document.querySelectorAll('.icon-button.remove').length`),
     repoCount: await read(win, `document.querySelectorAll('.repo').length`),
-    repoCountLabel: await read(win, `document.querySelector('.ws-repo-count')?.textContent ?? ''`),
     repos: await read(
       win,
       `Array.from(document.querySelectorAll('.repo')).map(r => ({
@@ -297,7 +310,19 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
     rowsBefore: deepRows,
     treeRowsAfter: await read(win, `document.querySelectorAll('.tree-row').length`),
     reposStillVisible: await read(win, `document.querySelectorAll('.repo').length`),
-    buttonDisabled: await read(win, `document.querySelector('.icon-button.boxed')?.disabled`)
+    buttonDisabled: await read(win, `document.querySelector('.icon-button.boxed')?.disabled`),
+    // Every repo row must agree that it is shut — a chevron still pointing
+    // down after Collapse all would be the control lying about the state.
+    anyStillExpanded: await read(
+      win,
+      `Array.from(document.querySelectorAll('.repo-main'))
+         .some(b => b.getAttribute('aria-expanded') === 'true')`
+    ),
+    chevronsRotated: await read(
+      win,
+      `Array.from(document.querySelectorAll('.repo-main svg'))
+         .filter(s => (s.style.transform || '').includes('rotate')).length`
+    )
   };
 
   if (process.env['BATON_SHOT_REPOS']) {
@@ -450,6 +475,47 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
       console.log(`shot: ${process.env['BATON_SHOT_CONFLICT']}`);
     }
   }
+
+  // --- The workspace menu, and removing a folder ----------------------------
+  // Last, because removing a folder mutates the workspace everything above
+  // was driving.
+  await read(win, `document.querySelector('[aria-label="Workspace actions"]')?.click()`);
+  await until(win, `document.querySelector('.menu')`, 5_000);
+  summary['menu'] = await read(
+    win,
+    `Array.from(document.querySelectorAll('.menu button')).map(b => b.textContent.trim())`
+  );
+
+  if (process.env['BATON_SHOT_MENU']) {
+    await writeFile(process.env['BATON_SHOT_MENU'], (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${process.env['BATON_SHOT_MENU']}`);
+  }
+  await read(win, `document.body.click()`);
+
+  const reposBefore = await read(win, `document.querySelectorAll('.repo').length`);
+  const removedName = await read(
+    win,
+    `(() => {
+       const button = document.querySelector('.icon-button.remove');
+       if (!button) return null;
+       const name = button.closest('.repo')?.querySelector('.repo-name')?.textContent;
+       button.click();
+       return name;
+     })()`
+  );
+  if (removedName) {
+    await until(win, `document.querySelectorAll('.repo').length < ${reposBefore}`, 15_000);
+  }
+  summary['removeFolder'] = {
+    removed: removedName,
+    reposBefore,
+    reposAfter: await read(win, `document.querySelectorAll('.repo').length`),
+    folderLabel: await read(win, `document.querySelector('.ws-folders')?.textContent ?? ''`),
+    // Removing a folder from a workspace must not touch the folder.
+    stillOnDisk: removedName
+      ? existsSync(`${process.env['BATON_WS_FOLDER']?.split(':')[0]}`)
+      : 'not checked'
+  };
 
   if (process.env['BATON_SHOT_WS']) {
     await writeFile(process.env['BATON_SHOT_WS'], (await win.webContents.capturePage()).toPNG());

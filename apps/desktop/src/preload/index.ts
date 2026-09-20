@@ -47,6 +47,10 @@ const api = {
   workspaceForget: (id: string) => ipcRenderer.invoke('baton:workspace-forget', id),
   workspaceRepos: (id: string, force?: boolean) =>
     ipcRenderer.invoke('baton:workspace-repos', id, force),
+  workspaceRoots: (id: string, force?: boolean) =>
+    ipcRenderer.invoke('baton:workspace-roots', id, force),
+  workspaceRename: (id: string, name: string) =>
+    ipcRenderer.invoke('baton:workspace-rename', id, name),
   workspaceStatus: (repo: string) => ipcRenderer.invoke('baton:workspace-status', repo),
   workspaceDiff: (repo: string, file: string, side: string, from?: string) =>
     ipcRenderer.invoke('baton:workspace-diff', repo, file, side, from),

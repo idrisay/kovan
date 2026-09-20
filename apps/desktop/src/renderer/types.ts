@@ -5,13 +5,13 @@ import type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus, RunTarget
 } from '@baton/git';
 import type {
-  Entry, FileBody, FileStamp, Workspace, WorkspaceRepo, WriteResult
+  Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
 } from '../main/workspace';
 
 export type { PullDetail, AgentRun, Runner, RunKind, RunTarget, JiraIssue, PullSummary };
 export type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus,
-  Entry, FileBody, FileStamp, Workspace, WorkspaceRepo, WriteResult
+  Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
 };
 
 /** A repo's status plus the de-duplicated count the badge shows. */
@@ -73,6 +73,8 @@ export interface BatonApi {
   workspaceRemoveFolder(id: string, folder: string): Promise<Workspace | undefined>;
   workspaceForget(id: string): Promise<void>;
   workspaceRepos(id: string, force?: boolean): Promise<WorkspaceRepo[]>;
+  workspaceRoots(id: string, force?: boolean): Promise<Root[]>;
+  workspaceRename(id: string, name: string): Promise<Workspace | undefined>;
   workspaceStatus(repo: string): Promise<WorkspaceStatus>;
   workspaceDiff(repo: string, file: string, side: DiffSide, from?: string): Promise<FileDiff>;
   workspaceTree(dir: string): Promise<Entry[]>;

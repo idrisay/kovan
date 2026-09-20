@@ -232,6 +232,12 @@ app.whenReady().then(async () => {
   ipcMain.handle('baton:workspace-repos', (_event, id: string, force?: boolean) =>
     workspaces.repos(id, force)
   );
+  ipcMain.handle('baton:workspace-roots', (_event, id: string, force?: boolean) =>
+    workspaces.roots(id, force)
+  );
+  ipcMain.handle('baton:workspace-rename', (_event, id: string, name: string) =>
+    workspaces.rename(id, name)
+  );
   ipcMain.handle('baton:workspace-status', (_event, repo: string) => workspaces.status(repo));
   ipcMain.handle(
     'baton:workspace-diff',
@@ -315,8 +321,15 @@ async function seedWorkspace(folder: string): Promise<void> {
   if (!process.env['BATON_USER_DATA']) {
     throw new Error('Refusing to seed a workspace into the real profile');
   }
+  // Colon-separated, so the multi-folder workspace — the case this whole
+  // explorer exists for — can actually be exercised.
+  const folders = folder.split(':').filter(Boolean);
   await host.config.set('workspaces', [
-    { id: 'smoke-workspace', name: path.basename(folder), folders: [folder] }
+    {
+      id: 'smoke-workspace',
+      name: process.env['BATON_WS_NAME'] ?? path.basename(folders[0] ?? folder),
+      folders
+    }
   ]);
   await host.config.set('workspace.active', 'smoke-workspace');
 }

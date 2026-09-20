@@ -522,20 +522,69 @@ button { font: inherit; cursor: pointer; }
 
 .explorer .queue-head { padding-bottom: 10px; }
 
-/* The workspace picker, and the repo count beside it. */
-.ws-picker { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
-.ws-picker select {
-  flex: 1; min-width: 0;
-  background: var(--wash); border: 1px solid var(--hair); border-radius: 7px;
-  color: var(--body); font: inherit; font-size: 12px; padding: 5px 7px;
+/* --- The workspace's own row ---
+ *
+ * There is no workspace dropdown any more. A workspace holds every folder you
+ * are working across at once, so a control whose job is to show one at a time
+ * was the wrong shape — it became a repository switcher the moment somebody
+ * made one workspace per repository. Switching now lives in the overflow menu,
+ * where a thing you do rarely belongs.
+ */
+.ws-row {
+  display: flex; align-items: center; border-radius: 7px; margin-bottom: 2px;
 }
-.ws-picker select:focus { outline: none; border-color: rgba(217, 119, 87, 0.45); }
-.ws-picker select:disabled { color: var(--dim); }
-/* Visible before anything is expanded, so "found nothing" and "still
- * scanning" are not the same empty sidebar. */
-.ws-repo-count {
-  font-family: var(--mono); font-size: 9.5px; color: var(--dim); flex: none;
+.ws-row:hover { background: rgba(255, 255, 255, 0.03); }
+.ws-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
+  background: none; border: 0; padding: 6px 4px 6px 8px; text-align: left;
 }
+.ws-title {
+  font-family: var(--display); font-size: 12.5px; font-weight: 600;
+  color: var(--title); letter-spacing: -0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ws-kind { font-size: 11px; color: var(--dim); flex: none; }
+.ws-folders { font-family: var(--mono); font-size: 9.5px; color: var(--dim); flex: none; }
+
+.ws-rename { padding: 4px 8px; }
+.ws-rename input {
+  width: 100%; background: var(--card); border: 1px solid rgba(217, 119, 87, 0.45);
+  border-radius: 6px; color: var(--title); padding: 5px 7px;
+  font-family: var(--display); font-size: 12.5px; font-weight: 600;
+}
+.ws-rename input:focus { outline: none; }
+
+/* Remove-from-workspace. Deliberately quiet until you go looking for it: it is
+ * next to a tree people click through quickly, and although it deletes nothing
+ * it is still not something to hit by accident. */
+.icon-button.remove { color: var(--dim); opacity: 0; }
+.repo:hover .icon-button.remove, .icon-button.remove:focus-visible { opacity: 1; }
+.icon-button.remove:hover { color: var(--blocked-bright); background: rgba(196, 99, 90, 0.12); }
+
+/* --- The overflow menu --- */
+.ws-menu-host { position: relative; display: flex; }
+.menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 20;
+  min-width: 210px; padding: 5px;
+  background: var(--card); border: 1px solid var(--hair-strong); border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  display: flex; flex-direction: column;
+}
+.menu button {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: 0; border-radius: 6px; padding: 6px 9px;
+  color: var(--body); font-size: 12px; text-align: left;
+}
+.menu button:hover { background: rgba(255, 255, 255, 0.06); color: var(--title); }
+.menu button.menu-warn:hover { background: rgba(196, 99, 90, 0.14); color: var(--blocked-bright); }
+.menu .menu-note {
+  margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--dim);
+}
+.menu-head {
+  margin: 6px 9px 3px; font-size: 10px; font-weight: 500;
+  letter-spacing: 0.07em; text-transform: uppercase; color: var(--meta);
+}
+.menu-rule { height: 1px; background: var(--hair); margin: 5px 4px; }
 
 .icon-button.boxed {
   border: 1px solid var(--hair-strong); background: var(--wash); color: var(--secondary);

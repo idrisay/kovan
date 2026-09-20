@@ -81,7 +81,7 @@ the limitation the project exists to fix.
 | `npm run smoke` | launch, assert main/preload/renderer wiring, exit |
 | `npm run --workspace @baton/desktop smoke:seeded` | same, with a fixture snapshot, asserts row and flag rendering |
 | `npm run --workspace @baton/desktop smoke:live` | same, against your real accounts |
-| `npm run --workspace @baton/desktop smoke:workspace` | drives the explorer against scratch clones: expands the tree, collapses all, opens a diff, edits a file, saves it with ⌘S, and forces a save conflict |
+| `npm run --workspace @baton/desktop smoke:workspace` | drives the explorer against scratch clones: expands the tree, collapses all, opens a diff, edits a file, saves it with ⌘S, forces a save conflict, and removes a folder |
 
 `smoke` exists because screenshots need a screen-recording permission that CI
 does not have, and "it rendered" is the assertion that actually matters.
@@ -121,13 +121,25 @@ real machine that is about half of them.
 
 ## The workspace
 
-Pick a folder and Baton finds every git clone inside it. The layout is VS
-Code's — explorer, editor tabs, source control — because that shape is already
-known.
+A workspace is a **set of folders**, like VS Code's multi-root workspaces, and
+every one of them is on screen at once. The explorer is headed by the workspace
+itself — `acme (Workspace)`, `4 folders` — with its folders beneath.
+
+**There is no workspace dropdown.** There was, and it was wrong: a control
+whose job is to show one workspace at a time becomes a *repository* switcher
+the moment somebody makes one workspace per repo, which is exactly what
+happened. Switching moved into the overflow menu, where something you do rarely
+belongs.
+
+**Add a folder** with the button on the workspace row. **Remove one** with the
+× that appears on a folder row on hover — it stops listing the folder and
+touches nothing on disk, which is why it needs no confirmation and why every
+label says *remove from workspace*.
 
 **A repository is a row, not a section.** Eight repos of header + changes +
 tree do not fit on a screen; eight rows do. Each carries its branch, its
-ahead/behind, and a count of what has changed.
+ahead/behind, and a count of what has changed. A folder that is not itself a
+clone shows the clones found inside it.
 
 **Files and Changes are separate tabs.** Stacked in one scroller, a repo with
 twenty changes pushed the tree below the fold, so a workspace looked like it
@@ -210,7 +222,9 @@ starts to show.
   first is not optional — seeding a workspace into the real profile would leave
   a folder in your app that you never chose, and the seeder refuses without it.
   It **edits and saves a real file**, so point `BATON_WS_FOLDER` at scratch
-  clones, never at a repository you care about.
+  clones, never at a repository you care about. `BATON_WS_FOLDER` is
+  colon-separated, because the multi-folder workspace is the case worth
+  exercising.
 
 ## Installing
 

@@ -22,11 +22,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Editor, formatBytes, statusFor } from './Editor';
 import { Diff } from './Diff';
 import {
-  ChangesIcon, ChevronIcon, CloseIcon, CollapseIcon, FileIcon, FolderIcon,
-  PlusIcon, RefreshIcon, TerminalIcon
+  AddFolderIcon, ChangesIcon, ChevronIcon, CloseIcon, CollapseIcon, FileIcon,
+  FolderIcon, MoreIcon, RefreshIcon, TerminalIcon
 } from './icons';
 import type {
-  ChangeKind, DiffSide, Entry, FileBody, FileDiff, Workspace, WorkspaceRepo, WorkspaceStatus
+  ChangeKind, DiffSide, Entry, FileBody, FileDiff, Root, Workspace, WorkspaceRepo, WorkspaceStatus
 } from './types';
 
 interface Tab {
@@ -50,10 +50,12 @@ interface Cursor { line: number; column: number; selected: number }
 export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => void }) {
   const [list, setList] = useState<Workspace[]>([]);
   const [active, setActive] = useState<string>();
-  const [repos, setRepos] = useState<WorkspaceRepo[]>();
+  const [roots, setRoots] = useState<Root[]>();
   const [statuses, setStatuses] = useState<Record<string, WorkspaceStatus>>({});
   const [pane, setPane] = useState<'files' | 'changes'>('files');
   const [busy, setBusy] = useState(false);
+  /** The workspace row itself collapses, so a long folder list can be hidden. */
+  const [shutRoot, setShutRoot] = useState(false);
 
   /**
    * Expansion and the directory cache, owned here rather than per level.
@@ -92,13 +94,18 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
    * `cancelled` matters: switching workspaces twice quickly would otherwise let
    * the first scan resolve last and paint the wrong folder's repositories.
    */
-  const loadRepos = useCallback(async (id: string, force = false) => {
+  const reposOf = (list: Root[]) =>
+    list.flatMap((root) => (root.repo ? [root.repo, ...root.inside] : root.inside));
+
+  const loadRoots = useCallback(async (id: string, force = false) => {
     setBusy(true);
     try {
-      const found = await window.baton.workspaceRepos(id, force);
-      setRepos(found);
+      const found = await window.baton.workspaceRoots(id, force);
+      setRoots(found);
       const pairs = await Promise.all(
-        found.map(async (r) => [r.path, await window.baton.workspaceStatus(r.path)] as const)
+        reposOf(found).map(
+          async (r) => [r.path, await window.baton.workspaceStatus(r.path)] as const
+        )
       );
       setStatuses(Object.fromEntries(pairs));
     } finally {
@@ -107,19 +114,22 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
   }, []);
 
   useEffect(() => {
-    if (!active) { setRepos([]); setStatuses({}); return undefined; }
+    if (!active) { setRoots([]); setStatuses({}); return undefined; }
     let cancelled = false;
-    setRepos(undefined);
+    setRoots(undefined);
     setBusy(true);
     void (async () => {
-      const found = await window.baton.workspaceRepos(active);
+      const found = await window.baton.workspaceRoots(active);
       if (cancelled) return;
-      setRepos(found);
-      // One repo expanded by default when it is the only one; with several,
-      // the useful first screen is the list of them.
-      setExpanded(found.length === 1 && found[0] ? new Set([found[0].path]) : new Set());
+      setRoots(found);
+      // Every folder of the workspace starts open. That is the whole point of
+      // a multi-folder workspace: you see all of them at once, without
+      // switching anything.
+      setExpanded(new Set(found.map((r) => r.folder)));
       const pairs = await Promise.all(
-        found.map(async (r) => [r.path, await window.baton.workspaceStatus(r.path)] as const)
+        reposOf(found).map(
+          async (r) => [r.path, await window.baton.workspaceStatus(r.path)] as const
+        )
       );
       if (cancelled) return;
       setStatuses(Object.fromEntries(pairs));
@@ -161,8 +171,53 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
     if (!active) return;
     setEntries(new Map());
     setFailed(new Map());
-    void loadRepos(active, true);
-  }, [active, loadRepos]);
+    void loadRoots(active, true);
+  }, [active, loadRoots]);
+
+  const createWorkspace = useCallback(() => {
+    void window.baton.workspaceCreate().then(async (made) => {
+      if (!made) return;
+      await loadWorkspaces();
+      setActive(made.id);
+    });
+  }, [loadWorkspaces]);
+
+  const addFolder = useCallback(() => {
+    if (!active) return;
+    void window.baton.workspaceAddFolder(active).then(async (updated) => {
+      if (!updated) return;
+      await loadWorkspaces();
+      // Force, because the repo scan is cached per workspace and the new
+      // folder is exactly the thing the cache has not seen.
+      await loadRoots(active, true);
+    });
+  }, [active, loadWorkspaces, loadRoots]);
+
+  /**
+   * Stops listing a folder. Nothing on disk is touched — which is why this
+   * needs no confirmation and why every label says "remove from workspace".
+   */
+  const removeFolder = useCallback((folder: string) => {
+    if (!active) return;
+    void window.baton.workspaceRemoveFolder(active, folder).then(async (updated) => {
+      if (!updated) return;
+      await loadWorkspaces();
+      await loadRoots(active, true);
+    });
+  }, [active, loadWorkspaces, loadRoots]);
+
+  const renameWorkspace = useCallback((name: string) => {
+    if (!active) return;
+    void window.baton.workspaceRename(active, name).then(() => void loadWorkspaces());
+  }, [active, loadWorkspaces]);
+
+  const forgetWorkspace = useCallback(() => {
+    if (!active) return;
+    void window.baton.workspaceForget(active).then(async () => {
+      setActive(undefined);
+      await loadWorkspaces();
+    });
+  }, [active, loadWorkspaces]);
 
   /** Absolute path → change kind, so the tree can mark what git sees. */
   const changed = useMemo(() => {
@@ -258,34 +313,6 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
             </button>
           </div>
 
-          <div className="ws-picker">
-            <select
-              aria-label="Active workspace"
-              value={active ?? ''}
-              disabled={list.length === 0}
-              onChange={(e) => {
-                setActive(e.target.value);
-                void window.baton.workspaceActivate(e.target.value);
-              }}
-            >
-              {list.length === 0 && <option value="">No workspace</option>}
-              {list.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-            </select>
-            {repos && repos.length > 0 && (
-              <span className="ws-repo-count">{repos.length} repo{repos.length === 1 ? '' : 's'}</span>
-            )}
-            <button
-              type="button" className="icon-button" aria-label="New workspace"
-              onClick={() => void window.baton.workspaceCreate().then(async (made) => {
-                if (!made) return;
-                await loadWorkspaces();
-                setActive(made.id);
-              })}
-            >
-              <PlusIcon size={13} />
-            </button>
-          </div>
-
           {workspace && (
             <div className="segmented" role="tablist" aria-label="Explorer view">
               <button
@@ -307,44 +334,80 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
 
         <div className="queue-list">
           {!workspace ? (
-            <NoWorkspace onCreate={() => void window.baton.workspaceCreate().then(async (made) => {
-              if (!made) return;
-              await loadWorkspaces();
-              setActive(made.id);
-            })} />
-          ) : repos === undefined ? (
-            <Skeleton label="Looking for repositories…" />
-          ) : repos.length === 0 ? (
-            <NoRepos workspace={workspace} onAdd={() =>
-              void window.baton.workspaceAddFolder(workspace.id).then((updated) => {
-                if (updated) { void loadWorkspaces(); refresh(); }
-              })} />
+            <NoWorkspace onCreate={createWorkspace} />
           ) : (
-            repos.map((repo) => (
-              <RepoRow
-                key={repo.path}
-                repo={repo}
-                status={statuses[repo.path]}
-                open={expanded.has(repo.path)}
-                onToggle={() => toggle(repo.path)}
-                onTerminal={() => onTerminal(repo.path)}
-              >
-                {pane === 'files' ? (
-                  <Tree
-                    dir={repo.path} depth={0}
-                    expanded={expanded} entries={entries} failed={failed}
-                    changed={changed} dirtyDirs={dirtyDirs} dirtyTabs={dirty}
-                    ensure={ensure} onToggle={toggle} onOpenFile={openFile}
-                  />
+            <>
+              {/*
+                The workspace itself is a row, the way VS Code draws a
+                multi-root workspace. There is no switcher in the way, because
+                a workspace holds every folder you care about at once — the
+                dropdown that used to sit here turned into a repo switcher the
+                moment somebody made one workspace per repository.
+              */}
+              <WorkspaceRow
+                workspace={workspace}
+                others={list.filter((w) => w.id !== workspace.id)}
+                folders={roots?.length ?? 0}
+                open={!shutRoot}
+                onToggle={() => setShutRoot((v) => !v)}
+                onAddFolder={addFolder}
+                onSwitch={(id) => { setActive(id); void window.baton.workspaceActivate(id); }}
+                onCreate={createWorkspace}
+                onRename={renameWorkspace}
+                onForget={forgetWorkspace}
+              />
+
+              {!shutRoot && (
+                roots === undefined ? (
+                  <Skeleton rows={3} label="Looking for repositories…" />
+                ) : roots.length === 0 ? (
+                  <div className="ws-empty">
+                    <p className="quiet">This workspace has no folders yet.</p>
+                    <button className="primary" onClick={addFolder}>Add a folder</button>
+                  </div>
                 ) : (
-                  <ChangeList
-                    repo={repo} status={statuses[repo.path]}
-                    selected={tab?.kind === 'diff' ? `${tab.repo}/${tab.path}` : undefined}
-                    onOpen={openDiff}
-                  />
-                )}
-              </RepoRow>
-            ))
+                  roots.map((root) => (
+                    <RootRow
+                      key={root.folder}
+                      root={root}
+                      statuses={statuses}
+                      expanded={expanded}
+                      onToggle={toggle}
+                      onRemove={() => removeFolder(root.folder)}
+                      onTerminal={onTerminal}
+                      renderRepo={(repo) => (
+                        pane === 'files' ? (
+                          <Tree
+                            dir={repo.path} depth={0}
+                            expanded={expanded} entries={entries} failed={failed}
+                            changed={changed} dirtyDirs={dirtyDirs} dirtyTabs={dirty}
+                            ensure={ensure} onToggle={toggle} onOpenFile={openFile}
+                          />
+                        ) : (
+                          <ChangeList
+                            repo={repo} status={statuses[repo.path]}
+                            selected={tab?.kind === 'diff' ? `${tab.repo}/${tab.path}` : undefined}
+                            onOpen={openDiff}
+                          />
+                        )
+                      )}
+                      renderPlain={(folder) => (
+                        pane === 'files' ? (
+                          <Tree
+                            dir={folder} depth={0}
+                            expanded={expanded} entries={entries} failed={failed}
+                            changed={changed} dirtyDirs={dirtyDirs} dirtyTabs={dirty}
+                            ensure={ensure} onToggle={toggle} onOpenFile={openFile}
+                          />
+                        ) : (
+                          <p className="tree-note">Not a git repository.</p>
+                        )
+                      )}
+                    />
+                  ))
+                )
+              )}
+            </>
           )}
         </div>
       </aside>
@@ -410,13 +473,15 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
 // --- Explorer -----------------------------------------------------------------
 
 function RepoRow({
-  repo, status, open, onToggle, onTerminal, children
+  repo, status, open, onToggle, onTerminal, onRemove, children
 }: {
   repo: WorkspaceRepo;
   status?: WorkspaceStatus;
   open: boolean;
   onToggle: () => void;
   onTerminal: () => void;
+  /** Present only when this repo *is* a workspace folder, so removable. */
+  onRemove?: () => void;
   children: React.ReactNode;
 }) {
   const count = status?.changes;
@@ -448,8 +513,206 @@ function RepoRow({
         >
           <TerminalIcon size={13} />
         </button>
+        {onRemove && (
+          <button
+            className="icon-button remove"
+            aria-label={`Remove ${repo.name} from workspace`}
+            title="Remove from workspace — no files are deleted"
+            onClick={onRemove}
+          >
+            <CloseIcon size={12} />
+          </button>
+        )}
       </div>
       {open && <div className="repo-body">{children}</div>}
+    </section>
+  );
+}
+
+/**
+ * The workspace's own row, with everything you do to a workspace on it.
+ *
+ * VS Code draws this as `name (Workspace)` and hangs the folders beneath; the
+ * shape is borrowed because it answers the question the dropdown could not —
+ * *which folders are in here* — without making you open anything.
+ */
+function WorkspaceRow({
+  workspace, others, folders, open, onToggle,
+  onAddFolder, onSwitch, onCreate, onRename, onForget
+}: {
+  workspace: Workspace;
+  others: Workspace[];
+  folders: number;
+  open: boolean;
+  onToggle: () => void;
+  onAddFolder: () => void;
+  onSwitch: (id: string) => void;
+  onCreate: () => void;
+  onRename: (name: string) => void;
+  onForget: () => void;
+}) {
+  const [menu, setMenu] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(workspace.name);
+
+  // Any click outside closes the menu. Captured on the document rather than a
+  // backdrop element so it does not sit over the rest of the explorer.
+  useEffect(() => {
+    if (!menu) return undefined;
+    const close = () => setMenu(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [menu]);
+
+  if (renaming) {
+    return (
+      <form
+        className="ws-rename"
+        onSubmit={(e) => { e.preventDefault(); onRename(draft); setRenaming(false); }}
+      >
+        <input
+          autoFocus value={draft} aria-label="Workspace name"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => { onRename(draft); setRenaming(false); }}
+          onKeyDown={(e) => { if (e.key === 'Escape') { setDraft(workspace.name); setRenaming(false); } }}
+        />
+      </form>
+    );
+  }
+
+  return (
+    <div className="ws-row">
+      <button className="ws-main" onClick={onToggle} aria-expanded={open}>
+        <ChevronIcon open={open} size={11} />
+        <span className="ws-title">{workspace.name}</span>
+        <span className="ws-kind">(Workspace)</span>
+        <span className="spacer" />
+        <span className="ws-folders">{folders} folder{folders === 1 ? '' : 's'}</span>
+      </button>
+      <button
+        className="icon-button" aria-label="Add a folder to this workspace"
+        title="Add folder to workspace" onClick={onAddFolder}
+      >
+        <AddFolderIcon size={14} />
+      </button>
+      <div className="ws-menu-host">
+        <button
+          className="icon-button" aria-label="Workspace actions" aria-expanded={menu}
+          onClick={(e) => { e.stopPropagation(); setMenu((v) => !v); }}
+        >
+          <MoreIcon />
+        </button>
+        {menu && (
+          <div className="menu" role="menu" onClick={(e) => e.stopPropagation()}>
+            <button role="menuitem" onClick={() => { setMenu(false); onAddFolder(); }}>
+              Add folder to workspace…
+            </button>
+            <button role="menuitem" onClick={() => { setMenu(false); setDraft(workspace.name); setRenaming(true); }}>
+              Rename workspace
+            </button>
+            <div className="menu-rule" />
+            {others.length > 0 && (
+              <>
+                <p className="menu-head">Switch to</p>
+                {others.map((w) => (
+                  <button key={w.id} role="menuitem" onClick={() => { setMenu(false); onSwitch(w.id); }}>
+                    {w.name}
+                    <span className="menu-note">{w.folders.length}</span>
+                  </button>
+                ))}
+                <div className="menu-rule" />
+              </>
+            )}
+            <button role="menuitem" onClick={() => { setMenu(false); onCreate(); }}>
+              New workspace…
+            </button>
+            {/* "Close", not "Delete": this forgets a list of folders and
+                leaves every file where it is. */}
+            <button role="menuitem" className="menu-warn" onClick={() => { setMenu(false); onForget(); }}>
+              Close workspace
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One folder of the workspace.
+ *
+ * A folder that is itself a clone renders as the repository; a folder that
+ * merely contains clones renders as itself with the clones under it. Either
+ * way the row carries the remove button, because the folder is the thing that
+ * was added and so the only thing that can be taken away.
+ */
+function RootRow({
+  root, statuses, expanded, onToggle, onRemove, onTerminal, renderRepo, renderPlain
+}: {
+  root: Root;
+  statuses: Record<string, WorkspaceStatus>;
+  expanded: Set<string>;
+  onToggle: (path: string) => void;
+  onRemove: () => void;
+  onTerminal: (cwd: string) => void;
+  renderRepo: (repo: WorkspaceRepo) => React.ReactNode;
+  renderPlain: (folder: string) => React.ReactNode;
+}) {
+  const open = expanded.has(root.folder);
+
+  if (root.repo) {
+    return (
+      <RepoRow
+        repo={root.repo} status={statuses[root.repo.path]} open={open}
+        onToggle={() => onToggle(root.folder)}
+        onTerminal={() => onTerminal(root.repo!.path)}
+        onRemove={onRemove}
+      >
+        {renderRepo(root.repo)}
+      </RepoRow>
+    );
+  }
+
+  return (
+    <section className="ws-root">
+      <div className={open ? 'repo open' : 'repo'}>
+        <button className="repo-main" onClick={() => onToggle(root.folder)} aria-expanded={open}>
+          <ChevronIcon open={open} size={11} />
+          <FolderIcon size={13} />
+          <span className="repo-name">{root.name}</span>
+          <span className="spacer" />
+          {root.inside.length > 0 && (
+            <span className="repo-pill quiet-pill">{root.inside.length} repos</span>
+          )}
+        </button>
+        <button
+          className="icon-button" aria-label={`Open a terminal in ${root.name}`}
+          onClick={() => onTerminal(root.folder)}
+        >
+          <TerminalIcon size={13} />
+        </button>
+        <button
+          className="icon-button remove" aria-label={`Remove ${root.name} from workspace`}
+          title="Remove from workspace — no files are deleted" onClick={onRemove}
+        >
+          <CloseIcon size={12} />
+        </button>
+      </div>
+      {open && (
+        <div className="repo-body">
+          {root.inside.length > 0
+            ? root.inside.map((repo) => (
+                <RepoRow
+                  key={repo.path} repo={repo} status={statuses[repo.path]}
+                  open={expanded.has(repo.path)} onToggle={() => onToggle(repo.path)}
+                  onTerminal={() => onTerminal(repo.path)}
+                >
+                  {renderRepo(repo)}
+                </RepoRow>
+              ))
+            : renderPlain(root.folder)}
+        </div>
+      )}
     </section>
   );
 }
@@ -623,16 +886,6 @@ function NoWorkspace({ onCreate }: { onCreate: () => void }) {
   );
 }
 
-function NoRepos({ workspace, onAdd }: { workspace: Workspace; onAdd: () => void }) {
-  return (
-    <div className="ws-empty">
-      <p className="quiet">
-        No git clones under <span className="key">{workspace.folders.join(', ')}</span>.
-      </p>
-      <button className="ghost" onClick={onAdd}>Add a folder</button>
-    </div>
-  );
-}
 
 // --- Tab bodies ---------------------------------------------------------------
 

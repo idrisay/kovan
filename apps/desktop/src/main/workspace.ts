@@ -50,6 +50,20 @@ export interface WorkspaceRepo extends Clone {
   changes?: number;
 }
 
+/**
+ * One folder of a workspace, and what is in it.
+ *
+ * `repo` is set when the folder is itself a clone — the common case, since
+ * people add `~/code/acme-web` directly. `inside` holds the clones found
+ * beneath a folder that is not one, such as `~/code`.
+ */
+export interface Root {
+  folder: string;
+  name: string;
+  repo?: WorkspaceRepo;
+  inside: WorkspaceRepo[];
+}
+
 export interface Entry {
   name: string;
   path: string;
@@ -158,6 +172,49 @@ export class Workspaces {
     return workspace;
   }
 
+  /**
+   * The workspace's folders, each with the clones found inside it.
+   *
+   * The grouping is by folder rather than a flat list of clones because a
+   * folder is the thing you added and the thing you can remove; a clone
+   * discovered three levels down is not. Without this the explorer could show
+   * a repository with no way to say which folder brought it in.
+   */
+  async roots(id: string, force = false): Promise<Root[]> {
+    const workspace = this.list().find((w) => w.id === id);
+    if (!workspace) return [];
+    const repos = await this.repos(id, force);
+
+    return workspace.folders.map((folder) => {
+      const self = repos.find((r) => r.path === folder);
+      return {
+        folder,
+        name: path.basename(folder),
+        ...(self ? { repo: self } : {}),
+        inside: repos.filter((r) => r.path !== folder && r.path.startsWith(folder + path.sep))
+      };
+    });
+  }
+
+  /** Renames a workspace. The folders it holds are untouched. */
+  async rename(id: string, name: string): Promise<Workspace | undefined> {
+    const trimmed = name.trim();
+    if (!trimmed) return undefined;
+    const all = this.list();
+    const workspace = all.find((w) => w.id === id);
+    if (!workspace) return undefined;
+    workspace.name = trimmed.slice(0, 80);
+    await this.save(all);
+    return workspace;
+  }
+
+  /**
+   * Stops listing a folder. It does not touch a single file on disk.
+   *
+   * Everything user-facing has to say "remove from workspace" rather than
+   * "remove", because the other reading is unrecoverable and this one is
+   * undone by picking the folder again.
+   */
   async removeFolder(id: string, folder: string): Promise<Workspace | undefined> {
     const all = this.list();
     const workspace = all.find((w) => w.id === id);

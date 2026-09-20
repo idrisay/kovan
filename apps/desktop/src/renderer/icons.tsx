@@ -184,3 +184,24 @@ export function CollapseIcon({ size = 14 }: Props) {
     </svg>
   );
 }
+
+/** Add a folder to the workspace. */
+export function AddFolderIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M20 13.2V9.4a1.7 1.7 0 0 0-1.7-1.7H9.9L8.1 5.5H4.7A1.7 1.7 0 0 0 3 7.2v10.3a1.7 1.7 0 0 0 1.7 1.7h8.4" />
+      <path d="M18 15.2v5.2" /><path d="M15.4 17.8h5.2" />
+    </svg>
+  );
+}
+
+/** The overflow menu: three dots, as every editor draws it. */
+export function MoreIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true"
+      fill="currentColor" stroke="none">
+      <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" />
+      <circle cx="19" cy="12" r="1.6" />
+    </svg>
+  );
+}
