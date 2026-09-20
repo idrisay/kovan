@@ -1,12 +1,13 @@
-exec(open('tassel.py').read().split("NAVY = ((58")[0])
+exec(open('flat.py').read().split('PALETTES = {')[0])
 from PIL import Image, ImageDraw
-import os, shutil, subprocess, math
+import os, shutil, subprocess
 
-NAVY = ((58, 74, 130), (18, 24, 58))
 OUT = '/Users/idrisay/Desktop/coding/ikatia/app/baton/apps/desktop/resources'
+CHOICE = dict(bg=(37, 48, 92), red=(219, 46, 48),
+              metal=(244, 246, 250), lace=(244, 246, 250))
 
-master = compose(NAVY, lacing=3, shading=True, tassel=True)
-master.save('V1-lace3.png')
+master = compose(CHOICE)
+master.save('W1-three.png')
 
 iconset = 'baton.iconset'
 shutil.rmtree(iconset, ignore_errors=True); os.makedirs(iconset)
@@ -17,45 +18,37 @@ subprocess.run(['iconutil', '-c', 'icns', iconset, '-o', f'{OUT}/icon.icns'], ch
 shutil.rmtree(iconset)
 print('icon.icns written')
 
-def tray(pt, tassel):
-    """Template glyph. Rendered 8x and reduced.
+def tray(pt):
+    """Template glyph: the same drawing flattened to black plus alpha.
 
-    Whether the tassel belongs here is a separate question from whether it
-    belongs on the app icon: a template image is one flat colour, so the cord
-    and the bell merge into the shaft instead of reading as a separate thing.
-    Both are rendered so the reduction can be judged rather than assumed.
+    Built from the silhouette rather than redrawn, so the menu bar and the Dock
+    can never drift apart.
     """
-    F = 8; n = pt * F
-    img = Image.new('RGBA', (n, n), (0, 0, 0, 0))
-    g = globals()
-    # Reuse the real drawing at glyph scale, then flatten to black.
     big = Image.new('RGBA', (W, W), (0, 0, 0, 0))
-    draw(big, W / 2, W / 2, s=0.94, lacing=0, shading=False, tassel=tassel)
-    alpha = big.split()[3].resize((pt, pt), Image.LANCZOS)
+    draw(big, W / 2, W / 2, s=0.94, lacing=0, palette=CHOICE, tassel=True)
     out = Image.new('RGBA', (pt, pt), (0, 0, 0, 0))
-    out.putalpha(alpha)
+    out.putalpha(big.split()[3].resize((pt, pt), Image.LANCZOS))
     return out
 
-for tas in (True, False):
-    tag = 'tassel' if tas else 'plain'
-    tray(16, tas).save(f'tray16-{tag}.png')
-    tray(32, tas).save(f'tray32-{tag}.png')
+tray(16).save(f'{OUT}/trayTemplate.png')
+tray(32).save(f'{OUT}/trayTemplate@2x.png')
+print('trayTemplate written')
 
-proof = Image.new('RGB', (820, 360), (243, 243, 246))
+proof = Image.new('RGB', (780, 330), (241, 241, 245))
 d = ImageDraw.Draw(proof)
-d.rectangle([0, 180, 820, 360], fill=(28, 29, 33))
+d.rectangle([0, 178, 780, 330], fill=(28, 29, 33))
 for j, sz in enumerate((128, 64, 32, 16)):
     s_ = master.resize((sz, sz), Image.LANCZOS)
-    proof.paste(s_, (30 + j * 150, 35 + (128 - sz) // 2), s_)
-d.text((30, 10), 'app icon', fill=(60, 60, 66))
-for j, (bg, fg, label) in enumerate((((243, 243, 246), (0, 0, 0), 'light'),
-                                     ((28, 29, 33), (255, 255, 255), 'dark'))):
-    y = 208 + j * 66
-    d.rectangle([30, y - 12, 520, y + 40], fill=bg)
-    for k, (pt, tas) in enumerate(((16, True), (32, True), (16, False), (32, False))):
-        g = tray(pt, tas)
+    proof.paste(s_, (30 + j * 150, 32 + (128 - sz) // 2), s_)
+d.text((30, 8), 'app icon — three colours, one drawing at every size', fill=(60, 60, 66))
+for j, (bg, fg, label) in enumerate((((241, 241, 245), (0, 0, 0), 'light menu bar'),
+                                     ((28, 29, 33), (255, 255, 255), 'dark menu bar'))):
+    y = 202 + j * 60
+    d.rectangle([30, y - 10, 380, y + 36], fill=bg)
+    for k, pt in enumerate((16, 32)):
+        g = tray(pt)
         tint = Image.new('RGBA', g.size, fg + (255,)); tint.putalpha(g.split()[3])
-        proof.paste(tint, (48 + k * 62, y + (32 - pt) // 2), tint)
-    d.text((330, y + 8), f'{label}:  tassel | tassel@2x | plain | plain@2x', fill=fg)
-proof.save('proof4.png')
+        proof.paste(tint, (50 + k * 64, y + (32 - pt) // 2), tint)
+    d.text((205, y + 8), label, fill=fg)
+proof.save('proof5.png')
 print('proof written')

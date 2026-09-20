@@ -1,59 +1,50 @@
 # Icon
 
-A **ceremonial baton** — white cord and red tassel, red lacquered shaft with
-white cross-lacing, silver spear tip, chromed bulb — drawn flat, from a
-reference photo of the real object.
+A **ceremonial baton** — cord and tassel, red shaft with cross-lacing, spear
+tip, bulb — drawn flat in three colours.
 
-`V1-lace3` is in use. The alternatives differ in lacing count and whether the
-tassel is present.
+`W1-three` is in use. The alternatives change only the palette; the layout is
+identical across all four.
 
-## Flat, and why that is the harder version
+## Three colours
 
-An earlier round rendered this as a small illustration: gradients, specular
-highlights, a per-size simplification because the detail turned to smudge below
-64px. It looked good at 1024 and muddy everywhere else.
+Navy field, red, one off-white. That is the whole palette: the tip, the bulb,
+the cord, the knot and the lacing are all the same white, and the tassel is the
+same red as the shaft.
 
-This one is flat two-tone, and **one drawing serves every size**. The
-constraint that makes it work is that nothing is faked:
+Earlier rounds had gradients, specular highlights and lit/shadow halves. Each
+of those is a decision that has to survive being reduced to 16px, and some of
+them did not. Flat has none: **one drawing serves every size**, and the 16px
+version is the same picture, just smaller. There is nothing left that can turn
+to mush.
 
-- Every lit and shadowed area is built from **its own vertices**. The shaft and
-  tip split exactly along their centreline; the bulb splits along a true chord
-  via `pieslice`.
-- The previous version got two-tone shading by drawing a second shape offset
-  sideways and clipping it. At preview size that looked fine. At 1024px it was
-  a stepped seam down the shaft and two visibly overlapping circles where the
-  bulb should have been. **That is why every round here was rendered and looked
-  at rather than reasoned about.**
+## The layout is fixed
 
-## The tassel
+Tassel hanging lower-left, baton on a 52-degree diagonal, spear tip upper-left,
+bulb lower-right, three lacing marks. That arrangement came out of the earlier
+rounds and is deliberately unchanged here:
 
-Cut in an early round because three hairline strands read as insect legs — the
-wrong conclusion. The tassel is part of the object; the fault was the drawing.
-It is now one bold shape: a thick cord with real slack, a bound knot, and a
-bell that widens as it falls with **two** fringe notches. Three or more return
-to grit under reduction.
-
-It also earns its place compositionally. The baton runs corner to corner and
-leaves the lower-left empty, which is exactly where a hanging tassel goes.
-
-## Colour
-
-Navy, because it lets the red and the chrome both separate from the field and
-from each other.
-
-## The menu bar glyph
-
-`trayTemplate.png` is a *template* image: black plus alpha, recoloured by macOS
-for light and dark menu bars. It keeps the tassel, because at @2x — what every
-Retina Mac actually draws — it reads as a tassel rather than as a nick in the
-shaft, and matching the app icon is worth more than a marginally cleaner 1x
-almost nobody sees. Both were rendered side by side before choosing.
+- **52 degrees**, because a shallower diagonal wasted the corners and this is a
+  long object.
+- **The tassel fills the lower-left**, which the diagonal would otherwise leave
+  empty. It is drawn as one bold shape — thick cord with real slack, a bound
+  knot, a bell with **two** fringe notches. An early version used three
+  hairline strands and read as insect legs.
+- **Three lacing marks**, not five. More is closer to the reference photograph
+  and starts to blur at 32px.
 
 ## Regenerating
 
 ```sh
-python3 render.py    # the variants
+python3 render.py    # the four palettes
 python3 build.py     # icon.icns + trayTemplate, straight into resources/
 ```
 
-Then `npm run dist --workspace @baton/desktop`.
+`build.py`'s `CHOICE` is the palette dict. Then
+`npm run dist --workspace @baton/desktop`.
+
+## The menu bar glyph
+
+`trayTemplate.png` is built from the same drawing's silhouette, flattened to
+black plus alpha, so the menu bar and the Dock cannot drift apart. macOS
+recolours it for light and dark menu bars; both were checked.
