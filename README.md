@@ -81,7 +81,7 @@ the limitation the project exists to fix.
 | `npm run smoke` | launch, assert main/preload/renderer wiring, exit |
 | `npm run --workspace @baton/desktop smoke:seeded` | same, with a fixture snapshot, asserts row and flag rendering |
 | `npm run --workspace @baton/desktop smoke:live` | same, against your real accounts |
-| `npm run --workspace @baton/desktop smoke:workspace` | drives the explorer against a real clone: opens a file and a diff |
+| `npm run --workspace @baton/desktop smoke:workspace` | drives the explorer against scratch clones: expands the tree, collapses all, opens a diff, edits a file, saves it with ⌘S, and forces a save conflict |
 
 `smoke` exists because screenshots need a screen-recording permission that CI
 does not have, and "it rendered" is the assertion that actually matters.
@@ -121,22 +121,55 @@ real machine that is about half of them.
 
 ## The workspace
 
-Pick a folder and Baton finds the git clones inside it, so the code behind a
-ticket is readable without leaving the app. The layout is VS Code's — explorer,
-editor tabs, source control — because that shape is already known.
+Pick a folder and Baton finds every git clone inside it. The layout is VS
+Code's — explorer, editor tabs, source control — because that shape is already
+known.
 
-What is underneath is not an editor:
+**A repository is a row, not a section.** Eight repos of header + changes +
+tree do not fit on a screen; eight rows do. Each carries its branch, its
+ahead/behind, and a count of what has changed.
 
-- **Nothing edits.** The agent edits, in a terminal you can watch. A second
-  place where the same file is open would mean save-conflict handling for a
-  workflow nobody asked for.
-- **Nothing watches the filesystem.** Refresh is a button.
+**Files and Changes are separate tabs.** Stacked in one scroller, a repo with
+twenty changes pushed the tree below the fold, so a workspace looked like it
+had no folders in it.
+
+**Collapse all** is top right. It closes every folder *and* every repository,
+so the press always lands on the same thing: the list of repositories in this
+workspace.
+
+Changes come from `git status --porcelain=v2`, grouped as git groups them —
+staged, changed, untracked. Clicking one opens a unified diff with both line
+numbers. The staged and unstaged diff of one file are two different things, so
+they are two tabs.
+
+### Editing
+
+Files open in a real editor — CodeMirror 6, with multi-cursor, undo, bracket
+matching and find. ⌘S saves. An unsaved tab shows a clay dot **in place of**
+its close button, so the muscle memory that shuts a saved tab cannot discard an
+edit.
+
+Three things guard the write, and each has a test:
+
+- **The path is resolved against the workspace folders first**, exactly as
+  reads are. A symlink planted inside a workspace that points out of one is
+  refused, and so is a path that climbs out with `..`.
+- **A save is refused if the file moved under it.** An agent running in the
+  same clone edits the same files; the mtime and size recorded at open are
+  compared at save, and a mismatch offers *Reload from disk* or *Keep mine*
+  rather than silently overwriting the agent's work.
+- **Writes are atomic.** The bytes go to a temp file in the same directory and
+  are renamed over the target, so a crash mid-write cannot leave an empty file
+  where your source was. The original permission bits are carried over —
+  writing 0644 over a script silently un-executes it.
+
+What it still does not do: stage, commit, rename, delete, create, or watch the
+filesystem. Refresh is a button.
+
 - **A directory is listed only when it is opened**, so a workspace pointed at a
-  folder full of `node_modules` opens as fast as an empty one.
-
-Changes come from `git status --porcelain=v2`, and clicking one opens its diff
-unified, with both line numbers. Staged and unstaged diffs of the same file are
-two different things, so they are two tabs.
+  folder full of `node_modules` opens as fast as an empty one. Expansion state
+  and loaded entries live on the workspace view, not in each level of the tree,
+  so collapsing a folder no longer discards everything beneath it.
 
 ### Why every path is re-resolved
 
@@ -149,16 +182,20 @@ path that fails is refused, not clamped.
 
 ### Syntax highlighting
 
-29 grammars registered against `highlight.js/lib/core`, not the default bundle,
-which is ~190 grammars for a viewer that will meet a dozen. Detection is by
-extension, never `highlightAuto` — guessing from content reads a three-line
-shell script as Perl, which looks like a rendering bug.
+One highlighter, not two. The editor needs CodeMirror, which brings its own
+grammars, so the diff uses them as well rather than shipping highlight.js
+alongside: `highlightLines` renders a static string through Lezer's
+`highlightCode`, and the same grammar drives the live editor. Colours are
+Lezer's `tok-*` classes styled in `styles.css`, beside the rest of the design.
 
-Highlighting runs over a block and the resulting HTML is split at its newlines,
-re-opening spans across the boundary. Per-line highlighting was tried first and
-loses all multi-line state: the body of a triple-quoted string renders as
-ordinary code. highlight.js v11 exposes no continuation between calls — checked
-against the library, not assumed.
+Detection is by extension, never auto-detected — guessing from content reads a
+three-line shell script as Perl, which looks like a rendering bug.
+
+**This cost bundle size, measured rather than estimated**: 1,134 kB before,
+2,484 kB after. CodeMirror core is 1,511 kB of that and the 26 grammars are
+973 kB. It loads from disk rather than the network, so the cost is parse time,
+not download — but the grammars are the obvious thing to load on demand if it
+starts to show.
 
 ## Known gaps
 
@@ -168,10 +205,12 @@ against the library, not assumed.
   contract. Turning it on means auditing ~17 regex `match[1]` sites.
 - Queue scoping is account-wide only. The clone index that folder and workspace
   scoping needs now exists in `@baton/git`; wiring it to the queue does not.
-- The workspace is read-only: no staging, no committing, no editing.
+- The workspace cannot stage, commit, rename, delete or create files.
 - `smoke:workspace` needs `BATON_USER_DATA` and `BATON_WS_FOLDER` set. The
   first is not optional — seeding a workspace into the real profile would leave
   a folder in your app that you never chose, and the seeder refuses without it.
+  It **edits and saves a real file**, so point `BATON_WS_FOLDER` at scratch
+  clones, never at a repository you care about.
 
 ## Installing
 

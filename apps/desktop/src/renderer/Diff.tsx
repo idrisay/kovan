@@ -13,7 +13,7 @@
  */
 
 import { useMemo } from 'react';
-import { highlightBlock } from './highlight';
+import { highlightLines } from './languages';
 import type { DiffSide, FileDiff } from './types';
 
 const SIDE_LABEL: Record<DiffSide, string> = {
@@ -50,7 +50,7 @@ export function Diff({
         // are stripped by the parser already, so what is highlighted is the
         // code itself — near enough to valid source for the grammar to follow.
         const code = hunk.lines.map((line) => line.text);
-        const html = highlightBlock(code.join('\n'), path);
+        const html = highlightLines(code.join('\n'), path);
         return {
           header: hunk.header,
           lines: hunk.lines.map((line, i) => ({

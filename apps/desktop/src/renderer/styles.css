@@ -511,103 +511,88 @@ button { font: inherit; cursor: pointer; }
   .queue { width: 260px; }
 }
 
-/* --- Workspace: explorer, tabs, code, diff ---------------------------------
+/* --- Workspace -------------------------------------------------------------
  *
- * Rule 1 does the work again here. The explorer is a sidebar, so it sits on
- * --sidebar; the code you read sits on --editor, one step brighter; a diff's
- * changed lines tint that surface rather than boxing it. Rule 5 means every
- * path, line number, branch name and source line is mono — in this view almost
- * everything is machine text, and the few things that are not (a heading, a
- * button) are what the sans is reserved for.
+ * Rule 1 does the work here too: the explorer is a sidebar, so it sits on
+ * --sidebar; the code you read and edit sits on --editor, a step brighter; a
+ * diff tints that surface rather than boxing it. Rule 5 means nearly
+ * everything in this view is mono — paths, line numbers, branches, source —
+ * and the few things that are not are what the sans is reserved for.
  */
 
-.explorer .queue-head { padding-bottom: 8px; }
+.explorer .queue-head { padding-bottom: 10px; }
 
-.ws-picker { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+/* The workspace picker, and the repo count beside it. */
+.ws-picker { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
 .ws-picker select {
   flex: 1; min-width: 0;
-  background: var(--wash);
-  border: 1px solid var(--hair);
-  border-radius: 7px;
-  color: var(--body);
-  font: inherit; font-size: 12px;
-  padding: 5px 7px;
+  background: var(--wash); border: 1px solid var(--hair); border-radius: 7px;
+  color: var(--body); font: inherit; font-size: 12px; padding: 5px 7px;
 }
 .ws-picker select:focus { outline: none; border-color: rgba(217, 119, 87, 0.45); }
+.ws-picker select:disabled { color: var(--dim); }
+/* Visible before anything is expanded, so "found nothing" and "still
+ * scanning" are not the same empty sidebar. */
+.ws-repo-count {
+  font-family: var(--mono); font-size: 9.5px; color: var(--dim); flex: none;
+}
+
+.icon-button.boxed {
+  border: 1px solid var(--hair-strong); background: var(--wash); color: var(--secondary);
+  width: 26px; height: 26px; border-radius: 7px;
+}
+.icon-button.boxed:hover:not(:disabled) { color: var(--title); background: rgba(255, 255, 255, 0.07); }
+.icon-button.boxed:disabled { opacity: 0.4; cursor: default; }
+
+/* Files | Changes */
+.segmented {
+  display: flex; gap: 2px; margin-top: 12px; padding: 2px;
+  background: var(--wash); border-radius: 8px;
+}
+.seg {
+  flex: 1; border: 0; border-radius: 6px; padding: 5px 0;
+  background: none; color: var(--muted); font-size: 11.5px; font-weight: 500;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+}
+.seg.on { background: var(--card); color: var(--title); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
+.seg-count { font-family: var(--mono); font-size: 10px; color: var(--clay); }
 
 .ws-empty { padding: 18px 6px; }
 .ws-empty .quiet { padding: 0 0 16px; line-height: 1.6; }
 
-.ws-root { margin-bottom: 14px; }
+/* --- A repository is a row --- */
 
-.ws-head {
-  display: flex; align-items: center; gap: 7px;
-  padding: 5px 8px; margin-bottom: 2px;
+.ws-root { margin-bottom: 2px; }
+.repo { display: flex; align-items: center; border-radius: 7px; }
+.repo:hover { background: rgba(255, 255, 255, 0.03); }
+.repo.open { background: var(--wash); }
+.repo-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
+  background: none; border: 0; padding: 6px 4px 6px 8px; text-align: left;
 }
-.ws-name {
-  font-family: var(--display); font-size: 12px; font-weight: 600;
-  color: var(--title); letter-spacing: -0.01em;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.repo-name {
+  font-family: var(--display); font-size: 12px; font-weight: 600; color: var(--title);
+  letter-spacing: -0.01em; flex: none;
 }
-.ws-branch, .ws-ab {
+.repo-branch {
   font-family: var(--mono); font-size: 10px; color: var(--meta);
-  flex: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
-.ws-ab { color: var(--clay); }
+.repo-ab { font-family: var(--mono); font-size: 10px; color: var(--clay); flex: none; }
+.repo-pill {
+  font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 9px; flex: none;
+}
+/* Amber, not red: uncommitted work is the normal state of a working tree,
+ * and rule 3 keeps red for something that failed. */
+.repo-pill.dirty { background: rgba(208, 160, 90, 0.16); color: var(--running); }
+.repo-pill.quiet-pill { color: var(--dim); }
+.repo-body { padding: 2px 0 8px; }
 
-/* Collapsible section headers: Changes, Files. */
-.ws-section {
-  display: flex; align-items: center; gap: 6px; width: 100%;
-  background: none; border: 0; padding: 4px 8px;
-  color: var(--meta); font-size: 10.5px; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.07em;
-  text-align: left;
-}
-.ws-section:hover { color: var(--secondary); }
-.ws-count {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0;
-  color: var(--clay); text-transform: none;
-}
-.ws-clean { color: var(--dim); font-size: 11.5px; padding: 3px 8px 6px 26px; margin: 0; }
-
-/* --- Source control rows --- */
-
-.rows.changes { margin-bottom: 4px; }
-
-.change {
-  display: flex; align-items: baseline; gap: 7px; width: 100%;
-  background: none; border: 0; border-radius: 6px;
-  padding: 3px 8px; text-align: left; min-width: 0;
-}
-.change:hover { background: rgba(255, 255, 255, 0.03); }
-.change-mark {
-  font-family: var(--mono); font-size: 10.5px; font-weight: 500;
-  width: 10px; flex: none; color: var(--meta);
-}
-/* Rule 3: only a conflict is red, because only a conflict has failed. */
-.change-mark.modified { color: var(--running); }
-.change-mark.added, .change-mark.untracked { color: var(--pass); }
-.change-mark.deleted { color: var(--muted); }
-.change-mark.renamed, .change-mark.copied, .change-mark.typechange { color: var(--waiting); }
-.change-mark.conflicted { color: var(--blocked-bright); }
-
-.change-name {
-  font-size: 12px; color: var(--body); flex: none;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-/* Left-truncated for the same reason, and isolated for the same reason. */
-.change-dir {
-  font-family: var(--mono); font-size: 10px; color: var(--dim);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl;
-}
-.change-staged {
-  font-family: var(--mono); font-size: 9.5px; color: var(--pass);
-  flex: none; margin-left: auto;
-}
-
-/* --- The file tree --- */
+/* --- The tree --- */
 
 .tree { list-style: none; margin: 0; padding: 0; }
+/* One hairline per level, so a file six deep can be traced to its folder. */
+.tree-children { border-left: 1px solid var(--hair); margin-left: 16px; }
 .tree-row {
   display: flex; align-items: center; gap: 6px; width: 100%;
   background: none; border: 0; border-radius: 6px;
@@ -617,65 +602,127 @@ button { font: inherit; cursor: pointer; }
 .tree-row svg { flex: none; color: var(--dim); }
 .tree-spacer { width: 11px; flex: none; }
 .tree-name {
-  font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
 }
-/* A file git has something to say about. Same palette as the change marks. */
-.tree-row.changed .tree-name { color: var(--running); }
-.tree-row.changed.added .tree-name, .tree-row.changed.untracked .tree-name { color: var(--pass); }
+.tree-mark { font-family: var(--mono); font-size: 10px; flex: none; }
+/* A collapsed folder with work inside it. */
+.tree-dot {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--running); flex: none;
+}
+.tree-unsaved {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--clay); flex: none;
+}
+.tree-row.changed .tree-name, .tree-row.changed .tree-mark { color: var(--running); }
+.tree-row.changed.added .tree-name, .tree-row.changed.added .tree-mark,
+.tree-row.changed.untracked .tree-name, .tree-row.changed.untracked .tree-mark { color: var(--pass); }
+.tree-row.changed.renamed .tree-name, .tree-row.changed.renamed .tree-mark,
+.tree-row.changed.copied .tree-name, .tree-row.changed.copied .tree-mark { color: var(--waiting); }
 .tree-row.changed.deleted .tree-name { color: var(--muted); text-decoration: line-through; }
-.tree-row.changed.conflicted .tree-name { color: var(--blocked-bright); }
+.tree-row.changed.conflicted .tree-name, .tree-row.changed.conflicted .tree-mark {
+  color: var(--blocked-bright);
+}
 
-/* --- Editor tabs --- */
+.tree-note {
+  color: var(--dim); font-size: 11px; margin: 0; padding: 3px 8px 5px 26px; font-style: italic;
+}
+.tree-note.error { color: var(--blocked-bright); font-style: normal; }
+.tree-note.clean {
+  display: flex; align-items: center; gap: 7px; font-style: normal; color: var(--muted);
+  font-size: 11.5px; padding-left: 10px;
+}
 
-.editor-pane { padding: 0; display: flex; flex-direction: column; background: var(--editor); overflow: hidden; }
+/* Placeholder rows, shown *under* the folder being opened — never in place of
+ * the level, which is what made the whole tree vanish on a slow directory. */
+.skeleton { display: flex; flex-direction: column; gap: 7px; padding: 10px 8px; }
+.skeleton.inline { padding: 6px 8px 6px 26px; gap: 6px; }
+.shimmer {
+  height: 8px; border-radius: 4px; background: var(--wash);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+@keyframes breathe { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.9; } }
+@media (prefers-reduced-motion: reduce) { .shimmer { animation: none; } }
 
+/* --- Changes --- */
+
+.change-group {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: 0; padding: 5px 8px;
+  color: var(--meta); font-size: 10.5px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.07em; text-align: left;
+}
+.change-group:hover { color: var(--secondary); }
+.group-count {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0; text-transform: none;
+}
+.group-count.pass { color: var(--pass); }
+.group-count.running { color: var(--running); }
+
+.rows.changes { margin-bottom: 4px; }
+.change {
+  display: flex; align-items: baseline; gap: 7px; width: 100%; min-width: 0;
+  background: none; border: 0; border-radius: 6px; padding: 3px 8px; text-align: left;
+}
+.change:hover { background: rgba(255, 255, 255, 0.03); }
+.change.selected { background: rgba(217, 119, 87, 0.14); }
+.change.selected .change-name { color: var(--title); }
+.change-mark {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+  width: 10px; flex: none; color: var(--meta);
+}
+.change-mark.modified, .change-mark.typechange { color: var(--running); }
+.change-mark.added, .change-mark.untracked { color: var(--pass); }
+.change-mark.deleted { color: var(--muted); }
+.change-mark.renamed, .change-mark.copied { color: var(--waiting); }
+.change-mark.conflicted { color: var(--blocked-bright); }
+.change-name {
+  font-size: 12px; color: var(--body); flex: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Left-truncated so the tail of the path survives; the <bdi> in the markup is
+ * what stops a leading "/" migrating to the other end in an RTL box. */
+.change-dir {
+  font-family: var(--mono); font-size: 10px; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl;
+}
+
+/* --- Tabs --- */
+
+.editor-pane {
+  padding: 0; display: flex; flex-direction: column; background: var(--editor); overflow: hidden;
+}
 .tabs {
   display: flex; flex: none; overflow-x: auto; overflow-y: hidden;
-  background: var(--sidebar);
-  border-bottom: 1px solid var(--hair);
-  scrollbar-width: none;
+  background: var(--sidebar); border-bottom: 1px solid var(--hair); scrollbar-width: none;
 }
 .tabs::-webkit-scrollbar { display: none; }
-
 .tab {
   display: flex; align-items: center; flex: none;
-  border-right: 1px solid var(--hair);
-  background: var(--sidebar);
-  max-width: 220px;
+  border-right: 1px solid var(--hair); background: var(--sidebar); max-width: 220px;
 }
-.tab.active { background: var(--editor); }
-/* Rule 2: the selected tab is marked with clay, and nothing else here is.
- * An inset shadow rather than a pseudo-element — the ::before version needed a
- * positioned ancestor it never had, so it rendered nowhere at all. */
-.tab.active { box-shadow: inset 0 2px 0 var(--clay); }
+/* An inset shadow, not a ::before — the pseudo-element needed a positioned
+ * ancestor it never had, so it rendered nowhere. */
+.tab.active { background: var(--editor); box-shadow: inset 0 2px 0 var(--clay); }
 .tab-label {
   display: flex; align-items: center; gap: 6px; min-width: 0;
-  background: none; border: 0; padding: 8px 4px 8px 12px;
-  color: var(--muted); font-size: 12px;
+  background: none; border: 0; padding: 8px 4px 8px 12px; color: var(--muted); font-size: 12px;
 }
 .tab.active .tab-label { color: var(--title); }
 .tab-label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-label svg { flex: none; color: var(--meta); }
-.tab-side {
-  font-family: var(--mono); font-size: 9.5px; color: var(--dim); flex: none;
-}
+.tab-side { font-family: var(--mono); font-size: 9.5px; color: var(--dim); flex: none; }
 .tab-close {
   background: none; border: 0; padding: 4px; margin-right: 6px;
   border-radius: 4px; color: var(--dim); display: flex;
 }
 .tab-close:hover { background: rgba(255, 255, 255, 0.08); color: var(--body); }
+/* Replaces the close button while unsaved, so the muscle memory that shuts a
+ * saved tab cannot discard an edit. */
+.tab-dirty {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--clay);
+  margin: 0 11px 0 5px; flex: none;
+}
 
 .tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-/**
- * A long path is truncated from the *left*, so the filename survives.
- *
- * CSS can only ellipsize the end, so the container is flipped to RTL to move
- * the overflow to the front. That flip is also why the path itself is wrapped
- * in a `<bdi>` in the markup: a leading "/" is a bidi-neutral character, and
- * in an RTL container it gets re-ordered to the *other* end — rendering
- * `/Users/me/x.ts` as `Users/me/x.ts/`. The isolate keeps the path LTR inside
- * an RTL box, which is exactly what it is for.
- */
 .tab-path {
   flex: none; padding: 6px 14px;
   font-family: var(--mono); font-size: 10.5px; color: var(--dim);
@@ -684,47 +731,63 @@ button { font: inherit; cursor: pointer; }
   direction: rtl; text-align: left;
 }
 
-/* --- Code and diff --- */
+/* --- Editor --- */
 
-.code, .diff { flex: 1; min-height: 0; overflow: auto; }
+.cm-host { flex: 1; min-height: 0; overflow: hidden; }
+.cm-host > .cm-editor { height: 100%; }
 
-.code-table {
-  border-collapse: collapse;
-  font-family: var(--mono); font-size: 11.5px; line-height: 1.6;
-  width: 100%;
-}
-.code-num {
-  /* Unselectable so copying a block of code does not bring the numbers. */
-  user-select: none; -webkit-user-select: none;
-  text-align: right; vertical-align: top;
-  padding: 0 10px 0 12px; width: 1%; white-space: nowrap;
-  color: var(--dim); font-size: 10.5px;
-}
-.code-line {
-  padding: 0 16px 0 0; white-space: pre-wrap; word-break: break-word;
-  color: var(--prose);
-}
-
-.code-more {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 12px 16px; border-top: 1px solid var(--hair);
-  color: var(--muted); font-size: 12px;
-}
-.code-foot {
-  display: flex; gap: 16px; padding: 8px 16px;
+.status-bar {
+  flex: none; display: flex; align-items: center; gap: 16px; padding: 6px 14px;
   border-top: 1px solid var(--hair);
   font-family: var(--mono); font-size: 10.5px; color: var(--dim);
 }
+.status-bar .saved { color: var(--pass); }
+.status-bar .save {
+  display: flex; align-items: center; gap: 6px;
+  border: 0; border-radius: 6px; padding: 3px 9px;
+  background: var(--clay); color: #1a0f0a; font-family: var(--sans);
+  font-size: 11px; font-weight: 600;
+}
+.status-bar .save kbd {
+  font-family: var(--mono); font-size: 9.5px; opacity: 0.7; background: none;
+}
 
+.conflict {
+  flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+  background: rgba(208, 160, 90, 0.12); border-bottom: 1px solid rgba(208, 160, 90, 0.28);
+  font-size: 11.5px; color: var(--body);
+}
+.conflict svg { color: var(--running); flex: none; }
+.conflict .grow { flex: 1; }
+.conflict .ghost, .conflict .primary { flex: none; padding: 4px 11px; font-size: 11px; }
+.conflict.error-bar {
+  background: rgba(196, 99, 90, 0.12); border-bottom-color: rgba(196, 99, 90, 0.3);
+  color: var(--blocked-bright);
+}
+
+/* --- Diff --- */
+
+.diff { flex: 1; min-height: 0; overflow: auto; }
+.code-table {
+  border-collapse: collapse; width: 100%;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.7;
+}
+.code-num {
+  /* Unselectable, so copying a block of code does not bring the numbers. */
+  user-select: none; -webkit-user-select: none;
+  text-align: right; vertical-align: top; padding: 0 10px 0 12px;
+  width: 1%; white-space: nowrap; color: var(--dim); font-size: 10.5px;
+}
+.code-line {
+  padding: 0 16px 0 0; white-space: pre-wrap; word-break: break-word; color: var(--prose);
+}
 .diff-head {
-  display: flex; align-items: center; gap: 12px;
-  padding: 9px 16px; border-bottom: 1px solid var(--hair);
-  font-size: 11.5px; color: var(--meta);
+  display: flex; align-items: center; gap: 12px; padding: 9px 16px;
+  border-bottom: 1px solid var(--hair); font-size: 11.5px; color: var(--meta);
 }
 .diff-side { font-weight: 500; color: var(--secondary); }
 .diff-rename { color: var(--waiting); font-size: 11px; }
 .diff-rename .mono { font-family: var(--mono); }
-
 .hunk { border-bottom: 1px solid var(--hair); }
 .hunk:last-child { border-bottom: 0; }
 .hunk-head {
@@ -733,49 +796,67 @@ button { font: inherit; cursor: pointer; }
   border-bottom: 1px solid var(--hair);
 }
 .diff-mark {
-  display: inline-block; width: 1.2ch; user-select: none; -webkit-user-select: none;
-  color: var(--dim);
+  display: inline-block; width: 1.2ch; color: var(--dim);
+  user-select: none; -webkit-user-select: none;
 }
 /* Tint the surface, never box it — rule 4. Green and red here are the
- * conventional diff colours and are the one sanctioned exception to rule 3:
- * a red line in a diff means "removed", which everyone already reads correctly. */
+ * conventional diff colours and the one sanctioned exception to rule 3: red in
+ * a diff means "removed", which everybody already reads correctly. */
 .diff-add { background: rgba(111, 169, 127, 0.11); }
 .diff-add .diff-mark { color: var(--pass); }
 .diff-del { background: rgba(196, 99, 90, 0.11); }
 .diff-del .diff-mark { color: var(--blocked-bright); }
 .diff-meta .code-line { color: var(--dim); font-style: italic; }
 
-/* --- Syntax highlighting -----------------------------------------------------
+/* --- Syntax colours --------------------------------------------------------
  *
- * Written against the canvas palette rather than importing one of
- * highlight.js's own themes. Every stock theme brings its own idea of a
- * background and its own hues; these are the design's colours, so code in the
- * viewer sits in the same world as everything around it.
+ * Lezer's own `tok-*` classes, which both the editor and the diff emit, so
+ * there is one set of colours for one highlighter. Written here rather than in
+ * a CodeMirror theme object because this is where the rest of the design lives.
  *
- * Deliberately restrained — four hues and two greys. A rainbow would break
+ * Deliberately restrained: four hues and two greys. A rainbow would break
  * rule 2 by making colour mean nothing in particular.
  */
-.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-type { color: #c48dd4; }
-.hljs-string, .hljs-regexp, .hljs-attribute, .hljs-addition { color: var(--pass); }
-.hljs-title, .hljs-title.function_, .hljs-section, .hljs-name { color: var(--clay-bright); }
-.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-quote { color: var(--running); }
-.hljs-comment { color: var(--dim); font-style: italic; }
-.hljs-variable, .hljs-template-variable, .hljs-params, .hljs-property { color: var(--waiting); }
-.hljs-built_in, .hljs-class .hljs-title, .hljs-title.class_ { color: var(--waiting); }
-.hljs-meta, .hljs-doctag { color: var(--muted); }
-.hljs-deletion { color: var(--blocked-bright); }
-.hljs-emphasis { font-style: italic; }
-.hljs-strong { font-weight: 600; }
+.tok-keyword, .tok-modifier, .tok-controlKeyword, .tok-operatorKeyword,
+.tok-definitionKeyword, .tok-moduleKeyword, .tok-self, .tok-null,
+.tok-bool, .tok-atom { color: #c48dd4; }
+.tok-string, .tok-string2, .tok-regexp, .tok-character, .tok-inserted { color: var(--pass); }
+.tok-function, .tok-definition.tok-variableName, .tok-macroName,
+.tok-labelName, .tok-heading { color: var(--clay-bright); }
+.tok-number, .tok-integer, .tok-float, .tok-unit, .tok-escape { color: var(--running); }
+.tok-comment, .tok-lineComment, .tok-blockComment, .tok-docComment {
+  color: var(--dim); font-style: italic;
+}
+.tok-typeName, .tok-className, .tok-namespace, .tok-propertyName,
+.tok-attributeName, .tok-tagName { color: var(--waiting); }
+.tok-variableName { color: var(--prose); }
+.tok-operator, .tok-punctuation, .tok-bracket, .tok-separator { color: var(--muted); }
+.tok-meta, .tok-processingInstruction, .tok-documentMeta { color: var(--muted); }
+.tok-deleted, .tok-invalid { color: var(--blocked-bright); }
+.tok-emphasis { font-style: italic; }
+.tok-strong { font-weight: 600; }
+.tok-link { color: var(--clay); text-decoration: underline; }
 
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme='dark']) .hljs-keyword,
-  :root:not([data-theme='dark']) .hljs-selector-tag,
-  :root:not([data-theme='dark']) .hljs-literal,
-  :root:not([data-theme='dark']) .hljs-type { color: #8341a0; }
-  :root:not([data-theme='dark']) .hljs-comment { color: #77767a; }
+  :root:not([data-theme='dark']) .tok-keyword,
+  :root:not([data-theme='dark']) .tok-modifier,
+  :root:not([data-theme='dark']) .tok-controlKeyword,
+  :root:not([data-theme='dark']) .tok-operatorKeyword,
+  :root:not([data-theme='dark']) .tok-definitionKeyword,
+  :root:not([data-theme='dark']) .tok-moduleKeyword,
+  :root:not([data-theme='dark']) .tok-self,
+  :root:not([data-theme='dark']) .tok-atom { color: #8341a0; }
+  :root:not([data-theme='dark']) .tok-comment,
+  :root:not([data-theme='dark']) .tok-lineComment,
+  :root:not([data-theme='dark']) .tok-blockComment { color: #77767a; }
   :root:not([data-theme='dark']) .tab-close:hover { background: rgba(20, 20, 19, 0.08); }
   :root:not([data-theme='dark']) .change:hover,
-  :root:not([data-theme='dark']) .tree-row:hover { background: rgba(20, 20, 19, 0.04); }
+  :root:not([data-theme='dark']) .tree-row:hover,
+  :root:not([data-theme='dark']) .repo:hover { background: rgba(20, 20, 19, 0.04); }
+  :root:not([data-theme='dark']) .icon-button.boxed:hover:not(:disabled) {
+    background: rgba(20, 20, 19, 0.07);
+  }
   :root:not([data-theme='dark']) .diff-add { background: rgba(78, 138, 98, 0.13); }
   :root:not([data-theme='dark']) .diff-del { background: rgba(180, 84, 74, 0.11); }
+  :root:not([data-theme='dark']) .status-bar .save { color: #fff7f2; }
 }

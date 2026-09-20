@@ -240,6 +240,11 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle('baton:workspace-tree', (_event, dir: string) => workspaces.tree(dir));
   ipcMain.handle('baton:workspace-read', (_event, file: string) => workspaces.read(file));
+  ipcMain.handle(
+    'baton:workspace-write',
+    (_event, file: string, text: string, expected?: { mtimeMs: number; bytes: number }) =>
+      workspaces.write(file, text, expected)
+  );
 
   // --- Terminals ------------------------------------------------------------
   ipcMain.handle('baton:sessions', () => sessions.list());

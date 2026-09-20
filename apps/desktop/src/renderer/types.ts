@@ -4,12 +4,14 @@ import type { AgentRun, Runner, RunKind } from '@baton/agent';
 import type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus, RunTarget
 } from '@baton/git';
-import type { Entry, FileBody, Workspace, WorkspaceRepo } from '../main/workspace';
+import type {
+  Entry, FileBody, FileStamp, Workspace, WorkspaceRepo, WriteResult
+} from '../main/workspace';
 
 export type { PullDetail, AgentRun, Runner, RunKind, RunTarget, JiraIssue, PullSummary };
 export type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus,
-  Entry, FileBody, Workspace, WorkspaceRepo
+  Entry, FileBody, FileStamp, Workspace, WorkspaceRepo, WriteResult
 };
 
 /** A repo's status plus the de-duplicated count the badge shows. */
@@ -75,6 +77,7 @@ export interface BatonApi {
   workspaceDiff(repo: string, file: string, side: DiffSide, from?: string): Promise<FileDiff>;
   workspaceTree(dir: string): Promise<Entry[]>;
   workspaceRead(file: string): Promise<FileBody>;
+  workspaceWrite(file: string, text: string, expected?: FileStamp): Promise<WriteResult>;
 
   sessions(): Promise<SessionInfo[]>;
   sessionBuffer(id: string): Promise<string>;

@@ -52,6 +52,8 @@ const api = {
     ipcRenderer.invoke('baton:workspace-diff', repo, file, side, from),
   workspaceTree: (dir: string) => ipcRenderer.invoke('baton:workspace-tree', dir),
   workspaceRead: (file: string) => ipcRenderer.invoke('baton:workspace-read', file),
+  workspaceWrite: (file: string, text: string, expected?: unknown) =>
+    ipcRenderer.invoke('baton:workspace-write', file, text, expected),
 
   // Terminals
   sessions: () => ipcRenderer.invoke('baton:sessions'),

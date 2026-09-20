@@ -173,3 +173,14 @@ export function ChangesIcon({ size = 14 }: Props) {
     </svg>
   );
 }
+
+/** Collapse all: two arrows folding toward a centre line. */
+export function CollapseIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={1.8} aria-hidden="true">
+      <path d="M9 4 5 8h8Z" />
+      <path d="M15 20l4-4h-8Z" />
+      <path d="M4 12h16" />
+    </svg>
+  );
+}

@@ -22,7 +22,7 @@
  */
 
 import { dialog, type BrowserWindow } from 'electron';
-import { readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -58,10 +58,29 @@ export interface Entry {
   repo?: boolean;
 }
 
+/**
+ * What the file looked like when it was read.
+ *
+ * `mtimeMs` and `bytes` together are the save guard: an agent working in the
+ * same clone is the expected case here, not an exotic one, so a save carries
+ * these back and is refused if either has moved. Comparing content hashes
+ * would be stricter, but it means re-reading the whole file on every save of
+ * every tab; two cheap stat fields catch the case that matters.
+ */
+export interface FileStamp {
+  mtimeMs: number;
+  bytes: number;
+}
+
 export type FileBody =
-  | { kind: 'text'; text: string; lines: number; bytes: number; truncated: boolean }
-  | { kind: 'binary'; bytes: number }
-  | { kind: 'too-large'; bytes: number };
+  | ({ kind: 'text'; text: string; lines: number; truncated: boolean } & FileStamp)
+  | ({ kind: 'binary' } & FileStamp)
+  | ({ kind: 'too-large' } & FileStamp);
+
+export type WriteResult =
+  | { ok: true; stamp: FileStamp }
+  | { ok: false; reason: 'stale'; stamp: FileStamp }
+  | { ok: false; reason: 'error'; message: string };
 
 /**
  * 2 MB, and the cap is not arbitrary.
@@ -277,13 +296,15 @@ export class Workspaces {
     if (!info.isFile()) {
       throw new Error('Not a file');
     }
+    const stamp: FileStamp = { mtimeMs: info.mtimeMs, bytes: info.size };
+
     if (info.size > MAX_FILE_BYTES) {
-      return { kind: 'too-large', bytes: info.size };
+      return { kind: 'too-large', ...stamp };
     }
 
     const bytes = await readFile(resolved);
     if (bytes.subarray(0, SNIFF_BYTES).includes(0)) {
-      return { kind: 'binary', bytes: info.size };
+      return { kind: 'binary', ...stamp };
     }
 
     const text = bytes.toString('utf8');
@@ -291,9 +312,75 @@ export class Workspaces {
       kind: 'text',
       text,
       lines: text.length === 0 ? 0 : text.split('\n').length,
-      bytes: info.size,
-      truncated: false
+      truncated: false,
+      ...stamp
     };
+  }
+
+  /**
+   * Saves an edited file.
+   *
+   * Three things have to hold, and each has bitten somebody:
+   *
+   * 1. **The path is inside a workspace folder.** `inside()` refuses anything
+   *    else — the same boundary reads use. A write is the direction where
+   *    getting this wrong is unrecoverable.
+   * 2. **Nobody else changed it.** `expected` is the stamp from the read that
+   *    filled the editor. An agent running in this clone edits the same files;
+   *    silently overwriting its work is the outcome worth engineering against,
+   *    so a moved mtime or size returns `stale` and the view offers a choice.
+   *    Passing no `expected` is the explicit "overwrite anyway".
+   * 3. **A crash cannot truncate the file.** The bytes go to a temp file in the
+   *    *same directory* — same filesystem, so the rename is atomic — and that
+   *    is renamed over the target. Writing in place means a crash between
+   *    truncate and write leaves an empty file where the source used to be.
+   */
+  async write(file: string, text: string, expected?: FileStamp): Promise<WriteResult> {
+    let resolved: string;
+    try {
+      resolved = await this.inside(file);
+    } catch (error) {
+      return { ok: false, reason: 'error', message: (error as Error).message };
+    }
+
+    try {
+      const before = await stat(resolved);
+      if (!before.isFile()) {
+        return { ok: false, reason: 'error', message: 'Not a file' };
+      }
+      if (
+        expected &&
+        (before.mtimeMs !== expected.mtimeMs || before.size !== expected.bytes)
+      ) {
+        return {
+          ok: false,
+          reason: 'stale',
+          stamp: { mtimeMs: before.mtimeMs, bytes: before.size }
+        };
+      }
+
+      // Same directory, so rename() stays on one filesystem and is atomic.
+      // A temp file in /tmp would make this a copy, which is not.
+      const temporary = path.join(
+        path.dirname(resolved),
+        `.baton-${path.basename(resolved)}.${randomUUID().slice(0, 8)}`
+      );
+      try {
+        // Carry the original's permission bits: writing 0644 over an
+        // executable script silently un-executes it.
+        await writeFile(temporary, text, { encoding: 'utf8', mode: before.mode & 0o777 });
+        await rename(temporary, resolved);
+      } catch (error) {
+        await rm(temporary, { force: true });
+        throw error;
+      }
+
+      const after = await stat(resolved);
+      return { ok: true, stamp: { mtimeMs: after.mtimeMs, bytes: after.size } };
+    } catch (error) {
+      this.host.log.error(`write failed for ${file}`, error);
+      return { ok: false, reason: 'error', message: (error as Error).message };
+    }
   }
 
   // --- The boundary ----------------------------------------------------------
