@@ -1,57 +1,59 @@
 # Icon
 
-A **ceremonial baton** — red lacquered shaft, white cross-lacing, silver spear
-tip, chromed bulb — not a relay-race baton. Drawn from a reference photo of the
-real object.
+A **ceremonial baton** — white cord and red tassel, red lacquered shaft with
+white cross-lacing, silver spear tip, chromed bulb — drawn flat, from a
+reference photo of the real object.
 
-`Q1-navy` is in use. The others differ only in the field colour.
+`V1-lace3` is in use. The alternatives differ in lacing count and whether the
+tassel is present.
 
-## What the drawing had to solve
+## Flat, and why that is the harder version
 
-The real object is roughly **20:1** long and thin, and its identity lives in
-the lacing and the two metal ends. At 16px none of that exists — a faithful
-scale is a red hairline. So:
+An earlier round rendered this as a small illustration: gradients, specular
+highlights, a per-size simplification because the detail turned to smudge below
+64px. It looked good at 1024 and muddy everywhere else.
 
-- **Proportions are exaggerated** to about 5.5:1. Icons have always done this.
-- **The .icns carries different art per size.** 128px and up get the lacing and
-  the chrome; 64px and below get a simplified silhouette, scaled larger to fill
-  the tile. This is the mechanism `.icns` exists for, and Apple's own icons use
-  it.
-- **The tip is a fine needle on a collar**, not a cone. An earlier draft had a
-  broad cone and read as a rocket nose.
+This one is flat two-tone, and **one drawing serves every size**. The
+constraint that makes it work is that nothing is faked:
 
-## What three rounds of looking at it fixed
+- Every lit and shadowed area is built from **its own vertices**. The shaft and
+  tip split exactly along their centreline; the bulb splits along a true chord
+  via `pieslice`.
+- The previous version got two-tone shading by drawing a second shape offset
+  sideways and clipping it. At preview size that looked fine. At 1024px it was
+  a stepped seam down the shaft and two visibly overlapping circles where the
+  bulb should have been. **That is why every round here was rendered and looked
+  at rather than reasoned about.**
 
-Each of these was invisible until the thing was rendered and examined:
+## The tassel
 
-1. **The tassel read as insect legs.** Three thin strands at icon scale are not
-   a tassel, they are noise. Cut entirely.
-2. **The bulb had a dark ring and read as a magnifying glass** — a compositing
-   slip. It is now a properly shaded sphere: radial ramp from a light high-left
-   to a dark low-right, plus a **rim light** on the shadow side, which is the
-   whole difference between chrome and grey plastic.
-3. **A 38-degree diagonal wasted the corners.** At 52 degrees the object is
-   longer inside the same tile, which suits a long, elegant thing.
+Cut in an early round because three hairline strands read as insect legs — the
+wrong conclusion. The tassel is part of the object; the fault was the drawing.
+It is now one bold shape: a thick cord with real slack, a bound knot, and a
+bell that widens as it falls with **two** fringe notches. Three or more return
+to grit under reduction.
+
+It also earns its place compositionally. The baton runs corner to corner and
+leaves the lower-left empty, which is exactly where a hanging tassel goes.
 
 ## Colour
 
-Navy, because it lets both the red and the chrome separate. `Q3-cream` looks
-like the product photograph and is handsome large, but a pale field gives the
-baton nothing to sit against at 16px.
+Navy, because it lets the red and the chrome both separate from the field and
+from each other.
 
-## The menu bar glyph is a separate design
+## The menu bar glyph
 
 `trayTemplate.png` is a *template* image: black plus alpha, recoloured by macOS
-for light and dark menu bars. Colour is discarded there, so the whole design is
-the silhouette — spike, shaft, ball — with no lacing and no chrome. Verified in
-both themes.
+for light and dark menu bars. It keeps the tassel, because at @2x — what every
+Retina Mac actually draws — it reads as a tassel rather than as a nick in the
+shaft, and matching the app icon is worth more than a marginally cleaner 1x
+almost nobody sees. Both were rendered side by side before choosing.
 
 ## Regenerating
 
 ```sh
-python3 render.py    # all four colour variants at 1024px
-python3 build.py     # writes icon.icns + the trayTemplate images
+python3 render.py    # the variants
+python3 build.py     # icon.icns + trayTemplate, straight into resources/
 ```
 
-`build.py`'s `CHOICE` holds the two gradient stops. Then rebuild with
-`npm run dist --workspace @baton/desktop`.
+Then `npm run dist --workspace @baton/desktop`.
