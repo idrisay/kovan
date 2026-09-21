@@ -67,6 +67,12 @@ export interface Settings {
   'runner.default': string;
   'runner.custom': unknown[];
   'runner.reviewers': string[];
+  /**
+   * Per-kind model override, keyed by `RunKind` ("review", "unblock",
+   * "verify", "implement"). Lets a stage that mostly reads and judges run on
+   * a cheaper model than the one doing the actual implementation.
+   */
+  'runner.models': Record<string, string>;
 
   'notify.enabled': boolean;
   'launchAtLogin': boolean;
@@ -125,6 +131,7 @@ export const DEFAULT_SETTINGS: Settings = {
   'runner.default': '',
   'runner.custom': [],
   'runner.reviewers': [],
+  'runner.models': {},
 
   'notify.enabled': true,
   launchAtLogin: false

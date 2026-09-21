@@ -20,6 +20,8 @@ import type { JiraIssue } from './types';
 
 export const DEFAULTREVIEWTEMPLATE = `Review \${url} using gh.
 
+Check the diff's size first with \`gh pr diff \${number} --repo \${repo}  --stat\`. For a small diff, just read it. For a large one, read it file by  file rather than pulling the whole thing into context at once — a  multi-thousand-line diff read in one shot is expensive and mostly noise.
+
 Read the pull request, its diff and its threads, and retrieve the related  ticket for context if there is one. Understand what it is supposed to do  before judging whether it does it.
 
 \${reviewers}
@@ -31,7 +33,7 @@ Then submit a single, concise review to GitHub as my review, folding in  everyth
 
 export const DEFAULTUPDATETEMPLATE = `Update \${url} using gh. It is currently blocked on: \${state}.
 
-Read the review threads with \`gh pr view \${number} --repo \${repo}  --comments\`, the changes with \`gh pr diff \${number} --repo \${repo}\`, and  the failing jobs with \`gh pr checks \${number} --repo \${repo}\`. Retrieve the  related ticket for context if there is one.
+Read the review threads with \`gh pr view \${number} --repo \${repo}  --comments\`, the failing jobs with \`gh pr checks \${number} --repo \${repo}\`,  and the changes with \`gh pr diff \${number} --repo \${repo}\` — check its size  with \`--stat\` first, and for a large diff read it file by file rather than  all at once. Retrieve the related ticket for context if there is one.
 
 Then address every unresolved review comment, rebase onto the base branch  if it conflicts, and fix whatever the checks are failing on.
 
@@ -161,9 +163,9 @@ Step 0 — read $BATON_TICKET. It is this ticket's file: what was asked for  in 
 Step 1 — work out what to look for. Read what the pull request changed:
 
     gh pr view \${number} --repo \${repo}
-    gh pr diff \${number} --repo \${repo}
+    gh pr diff \${number} --repo \${repo} --stat
 
-From the diff, write down the specific user-visible behaviour it was  supposed to produce, and where on the site you would see it. Be concrete:  "the player controls stay pinned when you scroll a lesson", not "the  frontend was updated".
+Pull the full diff only for the files that stat shows changed — skip  generated or unrelated files. From the diff, write down the specific  user-visible behaviour it was supposed to produce, and where on the site  you would see it. Be concrete:  "the player controls stay pinned when you scroll a lesson", not "the  frontend was updated".
 
 Step 2 — go and look. The site is \${site}. Drive a real browser with  Playwright and check each of those behaviours against what is actually on  screen. Do not infer the answer from the code — the whole point is that  the code being merged and the feature being live are different facts.
 

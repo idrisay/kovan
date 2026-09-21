@@ -7,7 +7,7 @@
  * that records it (`RunStore`).
  */
 
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import {
   DEFAULTISSUETEMPLATE,
@@ -26,6 +26,45 @@ import { RunStore, available, type RunKind, type Runner } from '@baton/agent';
 import { findClones, runTargets, type RunTarget } from '@baton/git';
 import type { DesktopHost } from './host';
 import type { Sessions } from './sessions';
+
+/**
+ * Jira attachments arrive already inlined as base64 data URIs — that is for
+ * the ticket pane's own rendering, not for an agent. Left as-is, every run
+ * would carry whatever screenshots are pasted into the ticket straight into
+ * `ticket.md`, which the prompts tell the agent to read first, every time,
+ * whether or not the task has anything to do with what the image shows.
+ */
+const INLINE_IMAGE_PATTERN = /!\[([^\]]*)\]\((data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+)\)/g;
+
+/**
+ * Swaps each inlined image for a real file on disk plus a pointer to it, so
+ * the agent's context stays text-sized but the image is still one `Read`
+ * away if the task actually needs it.
+ */
+async function externalizeImages(markdown: string, directory: string): Promise<string> {
+  const matches = [...markdown.matchAll(INLINE_IMAGE_PATTERN)];
+  if (matches.length === 0) {
+    return markdown;
+  }
+
+  const attachmentsDir = path.join(directory, 'attachments');
+  await mkdir(attachmentsDir, { recursive: true });
+
+  const replacements = new Map<string, string>();
+  let index = 0;
+  for (const [whole, alt, dataUrl] of matches) {
+    if (replacements.has(whole)) continue;
+    const parsed = /^data:image\/([a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
+    if (!parsed) continue;
+    index += 1;
+    const ext = parsed[1] === 'jpeg' ? 'jpg' : parsed[1];
+    const file = path.join(attachmentsDir, `image-${index}.${ext}`);
+    await writeFile(file, Buffer.from(parsed[2], 'base64'));
+    replacements.set(whole, `_(image "${alt || `image-${index}`}" — open ${file} if you need to see it)_`);
+  }
+
+  return markdown.replace(INLINE_IMAGE_PATTERN, (whole) => replacements.get(whole) ?? whole);
+}
 
 export interface StartRequest {
   kind: RunKind;
@@ -116,6 +155,23 @@ export class Agents {
   }
 
   /**
+   * The runner to actually invoke, with a per-kind model swapped in.
+   *
+   * "review" and "verify" mostly read and judge; "implement" and "unblock"
+   * write the code, so they keep whatever model the runner was configured
+   * with. The built-in `claude` runner defaults the first two to a cheaper
+   * model for that reason — overridable (or turned off with `''`) via the
+   * `runner.models` setting, and left alone for any other runner, since its
+   * model names are not Claude's.
+   */
+  private runnerFor(runner: Runner, kind: RunKind): Runner {
+    const overrides = this.host.config.get('runner.models', {} as Record<string, string>);
+    const defaults: Record<string, string> = runner.id === 'claude' ? { review: 'haiku', verify: 'haiku' } : {};
+    const model = overrides[kind] ?? defaults[kind];
+    return model && runner.modelFlag ? { ...runner, model } : runner;
+  }
+
+  /**
    * The folder to start in.
    *
    * The clone matching the pull request's repository, when there is one.
@@ -176,7 +232,7 @@ export class Agents {
     const ticketFile = await this.writeTicketFile(run.directory, subject);
 
     const result = await this.sessions.run({
-      runner,
+      runner: this.runnerFor(runner, request.kind),
       prompt,
       cwd,
       title: `${request.kind} · ${subjectId}`,
@@ -200,11 +256,11 @@ export class Agents {
       lines.push(`# ${subject.issue.key} — ${subject.issue.summary}`, '');
       lines.push(`Status: ${subject.issue.status} · Type: ${subject.issue.issueType}`);
       lines.push(`URL: ${subject.issue.url}`, '', '## What was asked', '');
-      lines.push(subject.issue.description || '(no description)');
+      lines.push(await externalizeImages(subject.issue.description || '(no description)', directory));
       if (subject.issue.comments.length > 0) {
         lines.push('', '## Comments', '');
         for (const c of subject.issue.comments) {
-          lines.push(`**${c.author}** (${c.created})`, '', c.body, '');
+          lines.push(`**${c.author}** (${c.created})`, '', await externalizeImages(c.body, directory), '');
         }
       }
     }
