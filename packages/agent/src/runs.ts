@@ -76,6 +76,19 @@ export class RunStore {
   constructor(private readonly root: string) {}
 
   /**
+   * Whether a path is actually something this store wrote — the guard before
+   * an IPC handler reads a path the renderer hands it back. Every
+   * `reportPath`/`promptPath`/shot only ever came from here in the first
+   * place, but the check costs nothing and means a future caller cannot turn
+   * "read this run's report" into "read any file on disk" by mistake.
+   */
+  owns(file: string): boolean {
+    const resolved = path.resolve(file);
+    const rootWithSep = path.resolve(this.root) + path.sep;
+    return resolved.startsWith(rootWithSep);
+  }
+
+  /**
    * `BATON_RUNS_ROOT` moves the store, which is what the tests use. Read from
    * the environment rather than exposed as a setter: a global the app could
    * assign is a global the app eventually does assign, and then a bug puts

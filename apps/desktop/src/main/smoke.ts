@@ -91,6 +91,21 @@ const OPEN_PULLS = [
   }
 ];
 
+/** Someone else's pull request, waiting on the viewer's review. */
+const REVIEW_PULL = {
+  ...FIXTURE,
+  number: 205,
+  title: 'Split the invoice PDF generator out of the request path',
+  repo: 'acme/billing',
+  author: 'alice-dev',
+  mergeable: 'mergeable' as const,
+  reviewDecision: 'review_required' as const,
+  checks: 'success' as const,
+  unresolvedThreads: 0,
+  viewerReviewed: false,
+  updatedAt: new Date(Date.now() - 5_400_000).toISOString()
+};
+
 /** More merged pull requests than one page, so "Show more" has work to do. */
 const MERGED_TOTAL = 34;
 
@@ -145,7 +160,7 @@ export function fixtureSnapshot(mergedCount: number) {
     viewer: 'idrisay',
     blocked: [FIXTURE],
     mine: [FIXTURE, ...OPEN_PULLS],
-    reviewRequested: [],
+    reviewRequested: [REVIEW_PULL],
     merged: mergedFixture(mergedCount),
     mergedTotal: MERGED_TOTAL,
     loadingMerged: false,
@@ -451,6 +466,19 @@ export async function smokeUi(
   if (shot) {
     await writeFile(shot, (await win.webContents.capturePage()).toPNG());
     console.log(`shot: ${shot}`);
+  }
+
+  if (process.env['BATON_SHOT_PULL_FILTER']) {
+    await read(win, `document.querySelector('[aria-label="Filter pull requests"]')?.click()`);
+    await until(win, `document.querySelector('.filter-menu')`, 5_000);
+    await new Promise((r) => setTimeout(r, 150));
+    await writeFile(
+      process.env['BATON_SHOT_PULL_FILTER'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_PULL_FILTER']}`);
+    await read(win, `document.body.click()`);
+    await new Promise((r) => setTimeout(r, 100));
   }
 
   const result: Record<string, unknown> = {
@@ -817,6 +845,42 @@ export async function smokeUi(
       (await win.webContents.capturePage()).toPNG()
     );
     console.log(`shot: ${process.env['BATON_SHOT_TICKET']}`);
+  }
+
+  if (process.env['BATON_SHOT_RUN_VIEWER']) {
+    await until(
+      win,
+      `Array.from(document.querySelectorAll('.runs .link')).some(b => b.textContent.trim() === 'view')`,
+      5_000
+    );
+    await read(
+      win,
+      `Array.from(document.querySelectorAll('.runs .link')).find(b => b.textContent.trim() === 'view')?.click()`
+    );
+    await until(win, `document.querySelector('.run-viewer')`, 5_000);
+    await new Promise((r) => setTimeout(r, 200));
+    await writeFile(
+      process.env['BATON_SHOT_RUN_VIEWER'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_RUN_VIEWER']}`);
+
+    if (process.env['BATON_SHOT_RUN_VIEWER_SHOTS']) {
+      await read(
+        win,
+        `Array.from(document.querySelectorAll('.run-tabs button'))
+          .find(b => b.textContent.includes('Screenshots'))?.click()`
+      );
+      await new Promise((r) => setTimeout(r, 200));
+      await writeFile(
+        process.env['BATON_SHOT_RUN_VIEWER_SHOTS'],
+        (await win.webContents.capturePage()).toPNG()
+      );
+      console.log(`shot: ${process.env['BATON_SHOT_RUN_VIEWER_SHOTS']}`);
+    }
+
+    await read(win, `document.querySelector('.run-viewer .ghost')?.click()`);
+    await new Promise((r) => setTimeout(r, 100));
   }
 
   if (process.env['BATON_SHOT_TICKET_FILTER']) {

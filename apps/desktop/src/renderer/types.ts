@@ -74,6 +74,10 @@ export interface BatonApi {
     subject: { pull?: PullSummary; issue?: JiraIssue }
   ): Promise<StartResult>;
   runHistory(subject: string): Promise<AgentRun[]>;
+  /** A run's own report.md or prompt.md — validated server-side to actually belong to a run. */
+  runText(file: string): Promise<string>;
+  /** A run's own screenshot, as a `data:image/...` URL ready for an `<img src>`. */
+  runImage(file: string): Promise<string>;
 
   workspaces(): Promise<{ list: Workspace[]; active?: string }>;
   workspaceCreate(): Promise<Workspace | undefined>;

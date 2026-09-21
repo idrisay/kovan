@@ -256,6 +256,8 @@ app.whenReady().then(async () => {
     return result;
   });
   ipcMain.handle('baton:run-history', (_event, subject: string) => agents.history(subject));
+  ipcMain.handle('baton:run-text', (_event, file: string) => agents.readRunText(file));
+  ipcMain.handle('baton:run-image', (_event, file: string) => agents.readRunImage(file));
 
   // --- Workspace ------------------------------------------------------------
   // Every path-taking channel below is resolved against the workspace folders

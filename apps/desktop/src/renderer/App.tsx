@@ -9,15 +9,14 @@ import { GroupHead, PullRow } from './rows';
 import { WorkspaceView } from './Workspace';
 import { Resizer } from './Resizer';
 import {
-  PullRequestIcon, ReviewIcon, TicketIcon, TerminalIcon, WorkspaceIcon,
+  PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon,
   RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon
 } from './icons';
 
-type ViewId = 'pulls' | 'review' | 'tickets' | 'workspace' | 'sessions';
+type ViewId = 'pulls' | 'tickets' | 'workspace' | 'sessions';
 
 const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JSX.Element }[] = [
   { id: 'pulls', label: 'Pull requests', icon: PullRequestIcon },
-  { id: 'review', label: 'Awaiting your review', icon: ReviewIcon },
   { id: 'tickets', label: 'Tickets', icon: TicketIcon },
   { id: 'workspace', label: 'Workspace', icon: WorkspaceIcon },
   { id: 'sessions', label: 'Sessions', icon: TerminalIcon }
@@ -277,6 +276,100 @@ function TicketSortMenu({
   );
 }
 
+/** The pull request fields a facet filter narrows down. */
+type PullFacetKey = 'repo' | 'author' | 'checks';
+
+type PullFilters = Record<PullFacetKey, Set<string>>;
+
+function emptyPullFilters(): PullFilters {
+  return { repo: new Set(), author: new Set(), checks: new Set() };
+}
+
+const PULL_FACETS: { key: PullFacetKey; label: string }[] = [
+  { key: 'repo', label: 'Repository' },
+  { key: 'author', label: 'Author' },
+  { key: 'checks', label: 'Checks' }
+];
+
+/** Every pull request the "Pull requests" view can show, across every section. */
+function pullUniverse(snapshot: Snapshot): PullSummary[] {
+  return [...snapshot.blocked, ...snapshot.reviewRequested, ...snapshot.mine, ...snapshot.merged];
+}
+
+function pullFacetValues(pulls: readonly PullSummary[]): Record<PullFacetKey, string[]> {
+  const uniq = (values: string[]) => [...new Set(values)].sort();
+  return {
+    repo: uniq(pulls.map((p) => p.repo)),
+    author: uniq(pulls.map((p) => p.author)),
+    checks: uniq(pulls.map((p) => p.checks))
+  };
+}
+
+/** The same funnel menu as Tickets, faceted on what a pull request actually carries. */
+function PullFilterMenu({
+  values, active, onToggle, onClear
+}: {
+  values: Record<PullFacetKey, string[]>;
+  active: PullFilters;
+  onToggle: (facet: PullFacetKey, value: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const count = PULL_FACETS.reduce((n, f) => n + active[f.key].size, 0);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = () => setOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [open]);
+
+  return (
+    <div className="filter-menu-host">
+      <button
+        type="button"
+        className={count > 0 ? 'icon-button active' : 'icon-button'}
+        aria-label="Filter pull requests" aria-expanded={open}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+      >
+        <FilterIcon />
+        {count > 0 && <span className="filter-count">{count}</span>}
+      </button>
+      {open && (
+        <div className="menu filter-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+          {PULL_FACETS.map((facet) => {
+            const options = values[facet.key];
+            if (options.length === 0) return null;
+            return (
+              <div key={facet.key} className="filter-group">
+                <p className="menu-head">{facet.label}</p>
+                {options.map((value) => (
+                  <label key={value} className="filter-option">
+                    <input
+                      type="checkbox"
+                      checked={active[facet.key].has(value)}
+                      onChange={() => onToggle(facet.key, value)}
+                    />
+                    {value}
+                  </label>
+                ))}
+              </div>
+            );
+          })}
+          {count > 0 && (
+            <>
+              <div className="menu-rule" />
+              <button type="button" role="menuitem" className="menu-warn" onClick={onClear}>
+                Clear filters
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY);
   const [view, setView] = useState<ViewId>('pulls');
@@ -288,6 +381,7 @@ export function App() {
   const [runSheet, setRunSheet] = useState<({ kind: RunKind } & Selection) | undefined>();
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsed);
+  const [pullFilters, setPullFilters] = useState<PullFilters>(emptyPullFilters);
   const [ticketFilters, setTicketFilters] = useState<TicketFilters>(emptyTicketFilters);
   const [ticketSort, setTicketSort] = useState<TicketSort>('updated');
   const [theme, setThemeState] = useState<ThemeChoice>('system');
@@ -317,6 +411,17 @@ export function App() {
     setThemeState(choice);
     void window.baton.setSetting('appearance.theme', choice);
   }, []);
+
+  const togglePullFilter = useCallback((facet: PullFacetKey, value: string) => {
+    setPullFilters((current) => {
+      const next = { ...current, [facet]: new Set(current[facet]) };
+      if (!next[facet].delete(value)) {
+        next[facet].add(value);
+      }
+      return next;
+    });
+  }, []);
+  const clearPullFilters = useCallback(() => setPullFilters(emptyPullFilters()), []);
 
   const toggleTicketFilter = useCallback((facet: TicketFacetKey, value: string) => {
     setTicketFilters((current) => {
@@ -360,8 +465,7 @@ export function App() {
   const refresh = useCallback(() => void window.baton.refresh(), []);
 
   const counts = useMemo(() => ({
-    pulls: snapshot.blocked.length,
-    review: snapshot.reviewRequested.length,
+    pulls: snapshot.blocked.length + snapshot.reviewRequested.length,
     tickets: snapshot.tickets.length,
     workspace: 0,
     sessions: sessions.filter((s) => s.running).length
@@ -385,36 +489,40 @@ export function App() {
 
   const match = useCallback((p: PullSummary) => {
     const q = filter.trim().toLowerCase();
-    return !q ||
+    const textOk = !q ||
       p.title.toLowerCase().includes(q) ||
       p.repo.toLowerCase().includes(q) ||
       String(p.number).includes(q);
-  }, [filter]);
+    if (!textOk) {
+      return false;
+    }
+    return PULL_FACETS.every(({ key }) => {
+      const selected = pullFilters[key];
+      return selected.size === 0 || selected.has(p[key]);
+    });
+  }, [filter, pullFilters]);
 
   /**
    * One list, grouped by urgency — not one queue per rail item.
    *
-   * Splitting "blocked" into its own view meant every row in it was tinted,
-   * which is a wall of red and the opposite of what the tint is for: red has
-   * to mean *this one* failed. Grouped, only the first section is tinted and
-   * the rest state themselves in grey, which is the design's rule.
+   * "Awaiting your review" used to be its own rail tab; folded in here as
+   * just another section, it is one fewer place to go looking. Splitting
+   * "blocked" into its own view meant every row in it was tinted, which is a
+   * wall of red and the opposite of what the tint is for: red has to mean
+   * *this one* failed. Grouped, only the first section is tinted and the
+   * rest state themselves in grey, which is the design's rule.
    *
    * Drafts sit last because a draft is not waiting on anyone.
    */
   const groups = useMemo((): Group[] => {
-    if (view === 'review') {
-      return [{
-        id: 'review',
-        label: 'Awaiting your review',
-        pulls: snapshot.reviewRequested.filter(match),
-        tint: false
-      }];
-    }
     const blockedIds = new Set(snapshot.blocked.map((p) => `${p.repo}#${p.number}`));
     const rest = snapshot.mine.filter((p) => !blockedIds.has(`${p.repo}#${p.number}`));
     const drafts = rest.filter((p) => p.isDraft).filter(match);
     return [
       { id: 'blocked', label: 'Blocked on you', pulls: snapshot.blocked.filter(match), tint: true },
+      {
+        id: 'review', label: 'Awaiting your review', pulls: snapshot.reviewRequested.filter(match), tint: false
+      },
       { id: 'open', label: 'Open', pulls: rest.filter((p) => !p.isDraft).filter(match), tint: false },
       {
         id: 'drafts',
@@ -428,7 +536,10 @@ export function App() {
       },
       { id: 'merged', label: 'Recently merged', pulls: snapshot.merged.filter(match), tint: false }
     ].filter((g) => g.pulls.length > 0);
-  }, [view, snapshot, match]);
+  }, [snapshot, match]);
+
+  const pullFacets = useMemo(() => pullFacetValues(pullUniverse(snapshot)), [snapshot]);
+  const pullFilterCount = PULL_FACETS.reduce((n, f) => n + pullFilters[f.key].size, 0);
 
   const loadMoreMerged = useCallback(() => {
     void window.baton.loadMoreMerged(snapshot.merged.length + MERGED_STEP).then(accept);
@@ -548,7 +659,7 @@ export function App() {
                 <div className="queue-head">
                   <div className="queue-title-row">
                     <h1>{current.label}</h1>
-                    {view === 'tickets' && (
+                    {view === 'tickets' ? (
                       <>
                         <TicketFilterMenu
                           values={ticketFacets}
@@ -558,12 +669,19 @@ export function App() {
                         />
                         <TicketSortMenu value={ticketSort} onChange={setTicketSort} />
                       </>
-                    )}
-                    {view !== 'tickets' && (
-                      <button type="button" className="icon-button" aria-label="Sort">
-                        <SortIcon />
-                      </button>
-                    )}
+                    ) : view === 'pulls' ? (
+                      <>
+                        <PullFilterMenu
+                          values={pullFacets}
+                          active={pullFilters}
+                          onToggle={togglePullFilter}
+                          onClear={clearPullFilters}
+                        />
+                        <button type="button" className="icon-button" aria-label="Sort">
+                          <SortIcon />
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                   <div className="search">
                     <SearchIcon />
@@ -614,7 +732,7 @@ export function App() {
                     )
                   ) : groups.length === 0 ? (
                     <p className="quiet">
-                      {view === 'review' ? 'Nothing is waiting on your review.' : 'Nothing open.'}
+                      {filter || pullFilterCount > 0 ? 'Nothing matches.' : 'Nothing open.'}
                     </p>
                   ) : (
                     groups.map((group) => {

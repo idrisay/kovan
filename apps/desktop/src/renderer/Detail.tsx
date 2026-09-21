@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { formatAge, isMerged } from '@baton/core';
 import { States } from './rows';
 import { Prose } from './Prose';
+import { RunViewer } from './RunViewer';
 import type {
   AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, Reviewer, RunKind, SessionInfo
 } from './types';
@@ -115,6 +116,7 @@ function LiveSessions({
 
 function History({ subject }: { subject: string }) {
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [viewing, setViewing] = useState<AgentRun>();
 
   useEffect(() => {
     void window.baton.runHistory(subject).then(setRuns);
@@ -124,35 +126,30 @@ function History({ subject }: { subject: string }) {
     return null;
   }
   return (
-    <section>
-      <h3>History</h3>
-      <ul className="runs">
-        {runs.map((run) => (
-          <li key={run.id}>
-            <span className="run-kind">{run.kind}</span>
-            <span className="run-when">{new Date(run.startedAt).toLocaleString()}</span>
-            {run.confidence !== undefined && <span className="score">{run.confidence}/100</span>}
-            {run.verdict !== 'unknown' && <span className="verdict">{run.verdict}</span>}
-            {run.reportPath && (
-              <button
-                className="link"
-                onClick={() => void window.baton.openExternal(`file://${run.reportPath}`)}
-              >
-                report
-              </button>
-            )}
-            {run.promptPath && (
-              <button
-                className="link"
-                onClick={() => void window.baton.openExternal(`file://${run.promptPath}`)}
-              >
-                prompt
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
+    <>
+      <section>
+        <h3>History</h3>
+        <ul className="runs">
+          {runs.map((run) => {
+            const hasFiles = Boolean(run.reportPath || run.promptPath) || run.shots.length > 0;
+            return (
+              <li key={run.id}>
+                <span className="run-kind">{run.kind}</span>
+                <span className="run-when">{new Date(run.startedAt).toLocaleString()}</span>
+                {run.confidence !== undefined && <span className="score">{run.confidence}/100</span>}
+                {run.verdict !== 'unknown' && <span className="verdict">{run.verdict}</span>}
+                {hasFiles && (
+                  <button className="link" onClick={() => setViewing(run)}>
+                    view
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+      {viewing && <RunViewer run={viewing} onClose={() => setViewing(undefined)} />}
+    </>
   );
 }
 

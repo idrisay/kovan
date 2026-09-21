@@ -7,7 +7,7 @@
  * that records it (`RunStore`).
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import {
   DEFAULTISSUETEMPLATE,
@@ -319,5 +319,24 @@ export class Agents {
 
   history(subject: string) {
     return this.store.list(subject);
+  }
+
+  /** A run's own report.md or prompt.md, read for the in-app viewer. */
+  async readRunText(file: string): Promise<string> {
+    if (!this.store.owns(file)) {
+      throw new Error('Not a run file.');
+    }
+    return readFile(file, 'utf8');
+  }
+
+  /** A run's own screenshot, as a data URL the renderer can put straight in an `<img>`. */
+  async readRunImage(file: string): Promise<string> {
+    if (!this.store.owns(file)) {
+      throw new Error('Not a run file.');
+    }
+    const bytes = await readFile(file);
+    const ext = path.extname(file).slice(1).toLowerCase();
+    const mime = ext === 'jpg' ? 'jpeg' : ext || 'png';
+    return `data:image/${mime};base64,${bytes.toString('base64')}`;
   }
 }
