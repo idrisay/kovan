@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatAge, isMerged } from '@baton/core';
 import { States } from './rows';
 import { Prose } from './Prose';
 import { RunViewer } from './RunViewer';
 import { Terminal } from './Terminal';
+import { DockBottomIcon, DockLeftIcon, DockRightIcon, DockTopIcon } from './icons';
 import type {
   AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, Reviewer, RunKind, SessionInfo
 } from './types';
@@ -155,31 +156,171 @@ function History({ subject }: { subject: string }) {
 }
 
 /**
- * The session an agent run started in, docked at the bottom of the pane it
- * was started from — not a jump to the Sessions tab. Starting a run and
- * losing sight of the ticket you started it on was the whole complaint this
- * fixes.
+ * Where the inline terminal docks against the pane it was started from. A
+ * global preference, not one per ticket/PR — you pick a side once and every
+ * run from then on opens there, the same way the sidebar's width is one
+ * setting rather than one per view.
+ */
+type DockPosition = 'bottom' | 'top' | 'left' | 'right';
+
+const DOCK_KEY = 'baton.terminal-dock';
+const HEIGHT_KEY = 'baton.terminal-height';
+const WIDTH_KEY = 'baton.terminal-width';
+const MIN_SIZE = 140;
+const MAX_SIZE = 720;
+const DEFAULT_HEIGHT = 320;
+const DEFAULT_WIDTH = 420;
+
+function isDockPosition(value: unknown): value is DockPosition {
+  return value === 'bottom' || value === 'top' || value === 'left' || value === 'right';
+}
+
+function storedDock(): DockPosition {
+  try {
+    const raw = localStorage.getItem(DOCK_KEY);
+    return isDockPosition(raw) ? raw : 'bottom';
+  } catch {
+    return 'bottom';
+  }
+}
+
+function storedSize(key: string, fallback: number): number {
+  try {
+    const raw = Number(localStorage.getItem(key));
+    return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const clampSize = (px: number) => Math.min(MAX_SIZE, Math.max(MIN_SIZE, Math.round(px)));
+
+const DOCK_OPTIONS: { id: DockPosition; label: string; Icon: (p: { size?: number }) => JSX.Element }[] = [
+  { id: 'top', label: 'Dock top', Icon: DockTopIcon },
+  { id: 'bottom', label: 'Dock bottom', Icon: DockBottomIcon },
+  { id: 'left', label: 'Dock left', Icon: DockLeftIcon },
+  { id: 'right', label: 'Dock right', Icon: DockRightIcon }
+];
+
+/**
+ * The session an agent run started in, docked against the pane it was
+ * started from — not a jump to the Sessions tab. Starting a run and losing
+ * sight of the ticket you started it on was the whole complaint this fixes.
+ *
+ * It docks to any of the four edges and resizes by dragging the edge that
+ * borders the reading area, the same pointer-capture technique as `Resizer`
+ * but generalised to whichever axis the current dock position resizes along.
  */
 function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () => void }) {
+  const [dock, setDock] = useState<DockPosition>(storedDock);
+  const [height, setHeight] = useState(() => storedSize(HEIGHT_KEY, DEFAULT_HEIGHT));
+  const [width, setWidth] = useState(() => storedSize(WIDTH_KEY, DEFAULT_WIDTH));
+  const panel = useRef<HTMLDivElement>(null);
+  const grab = useRef(0);
+  const vertical = dock === 'left' || dock === 'right';
+
+  const changeDock = useCallback((next: DockPosition) => {
+    setDock(next);
+    try { localStorage.setItem(DOCK_KEY, next); } catch { /* a preference, not a requirement */ }
+  }, []);
+
+  function down(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    const rect = panel.current?.getBoundingClientRect();
+    if (!rect) return;
+    // The edge that borders the reading area — the one dragging actually
+    // moves — expressed once, in mouse coordinates, so `move` never has to
+    // re-derive it from a rect that is itself changing size as the drag runs.
+    const edge = dock === 'bottom' ? rect.top : dock === 'top' ? rect.bottom
+      : dock === 'left' ? rect.right : rect.left;
+    grab.current = (vertical ? event.clientX : event.clientY) - edge;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.classList.add('dragging');
+    document.body.classList.add(vertical ? 'resizing' : 'resizing-row');
+    event.preventDefault();
+  }
+
+  function move(event: React.PointerEvent<HTMLDivElement>) {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    // Measured against the shell, not the panel: the shell's own box does not
+    // move mid-drag, where the panel's does — the whole edge being dragged.
+    const shell = panel.current?.parentElement?.getBoundingClientRect();
+    if (!shell) return;
+    const pos = (vertical ? event.clientX : event.clientY) - grab.current;
+    if (dock === 'bottom') setHeight(clampSize(shell.bottom - pos));
+    else if (dock === 'top') setHeight(clampSize(pos - shell.top));
+    else if (dock === 'left') setWidth(clampSize(pos - shell.left));
+    else setWidth(clampSize(shell.right - pos));
+  }
+
+  function up(event: React.PointerEvent<HTMLDivElement>) {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    event.currentTarget.classList.remove('dragging');
+    document.body.classList.remove('resizing', 'resizing-row');
+    try {
+      localStorage.setItem(vertical ? WIDTH_KEY : HEIGHT_KEY, String(vertical ? width : height));
+    } catch { /* a preference, not a requirement */ }
+  }
+
+  const handle = (
+    <div
+      className={vertical ? 'terminal-resizer vertical' : 'terminal-resizer horizontal'}
+      role="separator"
+      aria-orientation={vertical ? 'vertical' : 'horizontal'}
+      aria-label="Resize terminal"
+      onPointerDown={down}
+      onPointerMove={move}
+      onPointerUp={up}
+      onPointerCancel={up}
+    />
+  );
+
+  const style = vertical ? { width } : { height };
+  // The handle sits on whichever edge borders the reading area. A bottom or
+  // right dock has that edge first (top or left of the panel itself); a top
+  // or left dock has it last (bottom or right) — the opposite of where the
+  // panel as a whole sits relative to the reading area.
+  const handleFirst = dock === 'bottom' || dock === 'right';
+
   return (
-    <div className="detail-terminal">
-      <div className="term-head">
-        <span className="state">
-          <span className={session.running ? 'dot live' : 'dot'} />
-          {session.running ? (session.kind ?? session.runnerName) : `exited ${session.exitCode ?? ''}`}
-        </span>
-        <div className="term-head-actions">
-          <button className="ghost" onClick={onHide}>
-            Hide
-          </button>
-          <button className="ghost" onClick={() => void window.baton.sessionClose(session.id)}>
-            Close
-          </button>
+    <div ref={panel} className={`detail-terminal dock-${dock}`} style={style}>
+      {handleFirst && handle}
+      <div className="detail-terminal-body">
+        <div className="term-head">
+          <span className="state">
+            <span className={session.running ? 'dot live' : 'dot'} />
+            {session.running ? (session.kind ?? session.runnerName) : `exited ${session.exitCode ?? ''}`}
+          </span>
+          <div className="term-head-actions">
+            <div className="dock-picker" role="group" aria-label="Dock position">
+              {DOCK_OPTIONS.map(({ id, label, Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={id === dock ? 'icon-button active' : 'icon-button'}
+                  aria-label={label}
+                  aria-pressed={id === dock}
+                  title={label}
+                  onClick={() => changeDock(id)}
+                >
+                  <Icon size={13} />
+                </button>
+              ))}
+            </div>
+            <button className="ghost" onClick={onHide}>
+              Hide
+            </button>
+            <button className="ghost" onClick={() => void window.baton.sessionClose(session.id)}>
+              Close
+            </button>
+          </div>
+        </div>
+        <div className="term">
+          <Terminal sessionId={session.id} />
         </div>
       </div>
-      <div className="term">
-        <Terminal sessionId={session.id} />
-      </div>
+      {!handleFirst && handle}
     </div>
   );
 }

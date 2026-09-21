@@ -444,12 +444,55 @@ button { font: inherit; cursor: pointer; }
  * terminal once there is one to show.
  */
 .detail-shell { height: 100%; display: flex; flex-direction: column; min-height: 0; }
-.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.detail-shell:has(.detail-terminal.dock-left),
+.detail-shell:has(.detail-terminal.dock-right) { flex-direction: row; }
+.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; order: 2; }
+/*
+ * `.detail-terminal` is only the outer edge the panel docks against and
+ * resizes along — its own direction flips with the dock so the resize handle
+ * (a sibling of `.detail-terminal-body`, not a child of it) spans the full
+ * edge instead of collapsing to its own content size. The header-plus-xterm
+ * stack that used to be this element's own children lives in the body now,
+ * which is always a column regardless of which way the outer box runs.
+ */
 .detail-terminal {
-  flex: none; height: 320px; display: flex; flex-direction: column;
-  border-top: 1px solid var(--hair-strong); background: var(--editor);
+  flex: none; display: flex; position: relative;
+  order: 3; background: var(--editor);
 }
-.term-head-actions { display: flex; gap: 6px; }
+.detail-terminal.dock-top,
+.detail-terminal.dock-bottom { flex-direction: column; width: 100%; }
+.detail-terminal.dock-left,
+.detail-terminal.dock-right { flex-direction: row; height: 100%; min-width: 0; }
+.detail-terminal.dock-top,
+.detail-terminal.dock-left { order: 1; }
+.detail-terminal.dock-bottom { border-top: 1px solid var(--hair-strong); }
+.detail-terminal.dock-top { border-bottom: 1px solid var(--hair-strong); }
+.detail-terminal.dock-left { border-right: 1px solid var(--hair-strong); }
+.detail-terminal.dock-right { border-left: 1px solid var(--hair-strong); }
+.detail-terminal-body {
+  flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
+}
+.term-head-actions { display: flex; align-items: center; gap: 6px; }
+.dock-picker { display: flex; align-items: center; gap: 1px; margin-right: 4px; }
+
+/* The edge of the terminal panel that borders the reading area — dragging it
+   resizes the panel, the same interaction as the sidebar's own `.resizer`,
+   just generalised to whichever axis the current dock position resizes on. */
+.terminal-resizer {
+  flex: none; position: relative; z-index: 6;
+  background: none; border: 0; padding: 0; touch-action: none;
+}
+.terminal-resizer.horizontal { height: 8px; margin: -4px 0; cursor: row-resize; }
+.terminal-resizer.vertical { width: 8px; margin: 0 -4px; cursor: col-resize; }
+.terminal-resizer::after {
+  content: ''; position: absolute; background: transparent; transition: background 120ms ease;
+}
+.terminal-resizer.horizontal::after { inset: 3px 0; }
+.terminal-resizer.vertical::after { inset: 0 3px; }
+.terminal-resizer:hover::after,
+.terminal-resizer.dragging::after { background: var(--clay); }
+
+body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-select: none; }
 
 /* --- Two columns, once there is room for two ------------------------------
  *

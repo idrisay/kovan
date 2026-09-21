@@ -502,6 +502,102 @@ export async function smokeUi(
     console.log(`shot: ${process.env['BATON_SHOT_PR_INLINE_TERMINAL']}`);
   }
 
+  // --- Moving the inline terminal to each of its four docks -----------------
+  // The complaint this answers: a run's terminal always landed at the bottom
+  // of the pane with no way to move it. Checked the same way the sidebar
+  // splitter is — real mouse events through the debugger protocol, because a
+  // handler that only reacts to `pointermove` needs actual pointer capture,
+  // which a dispatched DOM event cannot grant itself.
+  if (process.env['BATON_SHOT_TERMINAL_DOCK']) {
+    const prefix = process.env['BATON_SHOT_TERMINAL_DOCK'];
+    await read(win, `document.querySelector('.rows .row')?.click()`);
+    await until(win, `document.querySelector('.detail-actions .primary')`, 5_000);
+    await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
+    await until(win, `document.querySelector('.run-controls select')`, 5_000);
+    await until(win, `document.querySelector('.sheet-foot .primary:not(:disabled)')`, 10_000);
+    await read(win, `document.querySelector('.sheet-foot .primary')?.click()`);
+    await until(win, `document.querySelector('.detail-terminal')`, 10_000);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const state = () =>
+      read(
+        win,
+        `(() => { const t = document.querySelector('.detail-terminal');
+          return t ? {
+            dockClass: [...t.classList].find(c => c.startsWith('dock-')),
+            shellDirection: getComputedStyle(document.querySelector('.detail-shell')).flexDirection,
+            rect: (({ width, height }) => ({ width: Math.round(width), height: Math.round(height) }))(t.getBoundingClientRect())
+          } : null; })()`
+      ) as Promise<{ dockClass: string; shellDirection: string; rect: { width: number; height: number } } | null>;
+    const clickDock = (label: string) =>
+      read(win, `document.querySelector('[aria-label="Dock ${label}"]')?.click()`);
+    const shot = async (name: string) => {
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+
+    const dockedBottom = await state();
+    await shot('bottom');
+
+    await clickDock('right');
+    await new Promise((r) => setTimeout(r, 150));
+    const dockedRight = await state();
+    await shot('right');
+
+    // A real drag on the edge the panel resizes along, through the debugger
+    // protocol — see the sidebar's own resize test for why not sendInputEvent.
+    const handle = (await read(
+      win,
+      `(() => { const r = document.querySelector('.terminal-resizer')?.getBoundingClientRect();
+        return r ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null; })()`
+    )) as { x: number; y: number } | null;
+    let widthAfterDrag: unknown = 'not attempted';
+    let attached = false;
+    try {
+      win.webContents.debugger.attach('1.3');
+      attached = true;
+    } catch (error) {
+      widthAfterDrag = `skipped: ${(error as Error).message}`;
+    }
+    if (handle && attached) {
+      const mouse = (type: string, x: number, y: number, buttons: number) =>
+        win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+          type, x, y, button: 'left', buttons, clickCount: 1, pointerType: 'mouse'
+        });
+      await mouse('mousePressed', handle.x, handle.y, 1);
+      for (const x of [handle.x - 60, handle.x - 120]) {
+        await mouse('mouseMoved', x, handle.y, 1);
+      }
+      await new Promise((r) => setTimeout(r, 80));
+      await mouse('mouseReleased', handle.x - 120, handle.y, 0);
+      await new Promise((r) => setTimeout(r, 80));
+      win.webContents.debugger.detach();
+      widthAfterDrag = ((await state()) as { rect: { width: number } } | null)?.rect.width;
+    }
+
+    await clickDock('bottom');
+    await new Promise((r) => setTimeout(r, 150));
+    await clickDock('top');
+    await new Promise((r) => setTimeout(r, 150));
+    const dockedTop = await state();
+    await shot('top');
+
+    await clickDock('left');
+    await new Promise((r) => setTimeout(r, 150));
+    const dockedLeft = await state();
+    await shot('left');
+
+    console.log(
+      'terminalDock:',
+      JSON.stringify({
+        dockedBottom, dockedRight, dockedTop, dockedLeft,
+        widthBeforeDrag: dockedRight?.rect.width, widthAfterDrag,
+        storedDock: await read(win, `localStorage.getItem('baton.terminal-dock')`),
+        storedWidth: await read(win, `localStorage.getItem('baton.terminal-width')`)
+      })
+    );
+  }
+
   const result: Record<string, unknown> = {
     rendererMounted: await read(win, `document.querySelector('#root')?.children.length > 0`),
     preloadApi: await read(win, `typeof window.baton?.refresh`),

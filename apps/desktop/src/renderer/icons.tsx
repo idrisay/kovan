@@ -213,3 +213,43 @@ export function MoreIcon({ size = 14 }: Props) {
     </svg>
   );
 }
+
+/**
+ * Dock position icons: a window frame with one edge filled in, so which side
+ * a panel is about to move to reads at a glance rather than from a tooltip.
+ */
+export function DockBottomIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3.5" y="3.5" width="17" height="17" rx="1.6" {...stroke} strokeWidth={1.5} />
+      <rect x="4.3" y="14.8" width="15.4" height="5" rx="0.8" fill="currentColor" opacity="0.55" />
+    </svg>
+  );
+}
+
+export function DockTopIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3.5" y="3.5" width="17" height="17" rx="1.6" {...stroke} strokeWidth={1.5} />
+      <rect x="4.3" y="4.2" width="15.4" height="5" rx="0.8" fill="currentColor" opacity="0.55" />
+    </svg>
+  );
+}
+
+export function DockLeftIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3.5" y="3.5" width="17" height="17" rx="1.6" {...stroke} strokeWidth={1.5} />
+      <rect x="4.2" y="4.3" width="6.2" height="15.4" rx="0.8" fill="currentColor" opacity="0.55" />
+    </svg>
+  );
+}
+
+export function DockRightIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3.5" y="3.5" width="17" height="17" rx="1.6" {...stroke} strokeWidth={1.5} />
+      <rect x="13.6" y="4.3" width="6.2" height="15.4" rx="0.8" fill="currentColor" opacity="0.55" />
+    </svg>
+  );
+}
