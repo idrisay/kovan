@@ -290,7 +290,6 @@ button { font: inherit; cursor: pointer; }
   cursor: default;
 }
 .filter-option:hover { background: rgba(255, 255, 255, 0.06); color: var(--title); }
-.filter-option input { accent-color: rgb(217, 119, 87); }
 
 .search {
   display: flex; align-items: center; gap: 7px; margin-top: 9px;
@@ -615,23 +614,40 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 }
 .prose th { background: rgba(255, 255, 255, 0.04); color: var(--secondary); font-weight: 600; }
 /*
- * Jira/GitHub task-list checkboxes come through as a plain, disabled native
- * `<input>` — nothing here styles that, so a dark page under Chromium's
- * default disabled-checkbox skin renders as a flat grey box with no visible
- * tick either way. Drawn by hand instead, so checked actually looks checked.
+ * Jira/GitHub task-list checkboxes, and every settings toggle, come through
+ * as a plain native `<input>` — unstyled, that is Chromium's flat grey box
+ * with no visible tick either way, and `accent-color` alone only ever
+ * touches the checked state, leaving the unchecked box a stark white square
+ * that ignores the theme entirely. Drawn by hand instead, on both selectors,
+ * so a checkbox reads as part of this design whichever state it is in.
  */
 .prose li:has(input[type='checkbox']) { list-style: none; }
-.prose input[type='checkbox'] {
+.prose input[type='checkbox'],
+.checkbox-row input[type='checkbox'],
+.filter-option input[type='checkbox'] {
   appearance: none; -webkit-appearance: none; flex: none;
   width: 14px; height: 14px; margin: 0 7px -2px 0;
   border: 1.5px solid var(--hair-strong); border-radius: 3px;
-  background: rgba(255, 255, 255, 0.05);
-  position: relative; cursor: default;
+  background: var(--wash);
+  position: relative;
 }
-.prose input[type='checkbox']:checked {
+.prose input[type='checkbox'] { cursor: default; }
+.checkbox-row input[type='checkbox'],
+.filter-option input[type='checkbox'] { cursor: pointer; margin: 0; }
+.checkbox-row input[type='checkbox']:hover,
+.filter-option input[type='checkbox']:hover { border-color: rgb(217, 119, 87); }
+.checkbox-row input[type='checkbox']:focus-visible,
+.filter-option input[type='checkbox']:focus-visible {
+  outline: 2px solid rgba(217, 119, 87, 0.45); outline-offset: 1px;
+}
+.prose input[type='checkbox']:checked,
+.checkbox-row input[type='checkbox']:checked,
+.filter-option input[type='checkbox']:checked {
   background: rgb(217, 119, 87); border-color: rgb(217, 119, 87);
 }
-.prose input[type='checkbox']:checked::after {
+.prose input[type='checkbox']:checked::after,
+.checkbox-row input[type='checkbox']:checked::after,
+.filter-option input[type='checkbox']:checked::after {
   content: ''; position: absolute; left: 4px; top: 1px;
   width: 4px; height: 7px;
   border: solid #1a1310; border-width: 0 1.6px 1.6px 0;
@@ -799,7 +815,6 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   flex-direction: row; align-items: center; gap: 9px;
 }
 .checkbox-row span { color: var(--secondary); font-size: 12.5px; }
-.checkbox-row input[type='checkbox'] { accent-color: rgb(217, 119, 87); }
 
 .settings-note {
   color: var(--dim); font-size: 11px; line-height: 1.55; margin: 2px 0 13px;
