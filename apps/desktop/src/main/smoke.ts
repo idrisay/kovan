@@ -149,7 +149,7 @@ export function fixtureSnapshot(mergedCount: number) {
     merged: mergedFixture(mergedCount),
     mergedTotal: MERGED_TOTAL,
     loadingMerged: false,
-    tickets: [TICKET],
+    tickets: [TICKET, TICKET_LOW, TICKET_HIGHEST],
     connected: ['github' as const],
     errors: [],
     refreshing: false
@@ -192,6 +192,42 @@ const TICKET = {
       body: 'Re-tested on iPad landscape. The scrollbar is there now, but **Mark Reviewed** still cannot be tapped.'
     }
   ],
+  links: []
+};
+
+/**
+ * Two more, older than `TICKET` so it stays the first row under the default
+ * "recently updated" sort — but at opposite ends of the priority scale, so
+ * switching to "Priority" visibly reorders the list rather than just adding
+ * a label nobody can see move.
+ */
+const TICKET_LOW = {
+  key: 'ACME-1000',
+  summary: 'Tidy up the empty-state copy on the dashboard',
+  url: 'https://example.invalid/browse/ACME-1000',
+  status: 'To Do',
+  statusCategory: 'new' as const,
+  issueType: 'Task',
+  priority: 'Low',
+  updated: new Date(Date.now() - 200_000_000).toISOString(),
+  description: '',
+  subtasks: [],
+  comments: [],
+  links: []
+};
+
+const TICKET_HIGHEST = {
+  key: 'ACME-2500',
+  summary: 'Checkout throws a 500 on submit in production',
+  url: 'https://example.invalid/browse/ACME-2500',
+  status: 'In Progress',
+  statusCategory: 'indeterminate' as const,
+  issueType: 'Bug',
+  priority: 'Highest',
+  updated: new Date(Date.now() - 300_000_000).toISOString(),
+  description: '',
+  subtasks: [],
+  comments: [],
   links: []
 };
 
@@ -792,6 +828,35 @@ export async function smokeUi(
       (await win.webContents.capturePage()).toPNG()
     );
     console.log(`shot: ${process.env['BATON_SHOT_TICKET_FILTER']}`);
+    // Close it before whatever runs next, so an unrelated shot doesn't
+    // inherit an open menu it never asked for.
+    await read(win, `document.body.click()`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  if (process.env['BATON_SHOT_TICKET_SORT']) {
+    await read(win, `document.querySelector('[aria-label="Sort tickets"]')?.click()`);
+    await until(win, `document.querySelector('.menu-host .menu')`, 5_000);
+    await new Promise((r) => setTimeout(r, 150));
+    await writeFile(
+      process.env['BATON_SHOT_TICKET_SORT'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_TICKET_SORT']}`);
+
+    if (process.env['BATON_SHOT_TICKET_SORTED']) {
+      await read(
+        win,
+        `Array.from(document.querySelectorAll('.menu-host .menu button'))
+          .find(b => b.textContent.includes('Priority'))?.click()`
+      );
+      await new Promise((r) => setTimeout(r, 150));
+      await writeFile(
+        process.env['BATON_SHOT_TICKET_SORTED'],
+        (await win.webContents.capturePage()).toPNG()
+      );
+      console.log(`shot: ${process.env['BATON_SHOT_TICKET_SORTED']}`);
+    }
   }
 
   if (process.env['BATON_SHOT_NEW_SESSION']) {

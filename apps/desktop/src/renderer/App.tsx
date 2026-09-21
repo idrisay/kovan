@@ -197,6 +197,86 @@ function TicketFilterMenu({
   );
 }
 
+type TicketSort = 'updated' | 'priority' | 'key';
+
+const TICKET_SORTS: { id: TicketSort; label: string }[] = [
+  { id: 'updated', label: 'Recently updated' },
+  { id: 'priority', label: 'Priority' },
+  { id: 'key', label: 'Ticket key' }
+];
+
+/**
+ * Most urgent first. Jira priorities are per-site configuration with no
+ * order of their own — `JiraClient.getPriorities()` can read a site's actual
+ * rank, but nothing in this app calls it yet, so this covers the names every
+ * default Jira scheme actually uses. An unrecognised priority sorts after
+ * the known ones rather than crashing the sort.
+ */
+const PRIORITY_RANK: Record<string, number> = {
+  highest: 0, blocker: 0, urgent: 0,
+  critical: 1, high: 1,
+  medium: 2, normal: 2,
+  low: 3,
+  lowest: 4, minor: 4, trivial: 4
+};
+
+function priorityRank(priority?: string): number {
+  if (!priority) return 99;
+  return PRIORITY_RANK[priority.toLowerCase()] ?? 50;
+}
+
+/** Only the urgent end of the scale earns a colour; Medium/Low read as plain text. */
+function priorityTone(priority: string): string {
+  const rank = priorityRank(priority);
+  return rank === 0 ? 'fail' : rank === 1 ? 'running' : '';
+}
+
+/** The sort icon next to Filter — a menu instead of the dead button it used to be. */
+function TicketSortMenu({
+  value, onChange
+}: {
+  value: TicketSort;
+  onChange: (sort: TicketSort) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = () => setOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [open]);
+
+  return (
+    <div className="menu-host">
+      <button
+        type="button"
+        className={value !== 'updated' ? 'icon-button active' : 'icon-button'}
+        aria-label="Sort tickets" aria-expanded={open}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+      >
+        <SortIcon />
+      </button>
+      {open && (
+        <div className="menu" role="menu" onClick={(e) => e.stopPropagation()}>
+          <p className="menu-head">Sort by</p>
+          {TICKET_SORTS.map((opt) => (
+            <button
+              key={opt.id}
+              role="menuitemradio"
+              aria-checked={opt.id === value}
+              className={opt.id === value ? 'active' : ''}
+              onClick={() => { onChange(opt.id); setOpen(false); }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY);
   const [view, setView] = useState<ViewId>('pulls');
@@ -209,6 +289,7 @@ export function App() {
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsed);
   const [ticketFilters, setTicketFilters] = useState<TicketFilters>(emptyTicketFilters);
+  const [ticketSort, setTicketSort] = useState<TicketSort>('updated');
   const [theme, setThemeState] = useState<ThemeChoice>('system');
 
   // Seeded once from disk, then applied — and re-applied live if "System" is
@@ -358,7 +439,7 @@ export function App() {
 
   const tickets = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return snapshot.tickets.filter((t) => {
+    const matching = snapshot.tickets.filter((t) => {
       if (q && !t.summary.toLowerCase().includes(q) && !t.key.toLowerCase().includes(q)) {
         return false;
       }
@@ -367,7 +448,16 @@ export function App() {
         return selected.size === 0 || selected.has(t[key] ?? '');
       });
     });
-  }, [snapshot.tickets, filter, ticketFilters]);
+    const sorted = [...matching];
+    if (ticketSort === 'priority') {
+      sorted.sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority) || b.updated.localeCompare(a.updated));
+    } else if (ticketSort === 'key') {
+      sorted.sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
+    } else {
+      sorted.sort((a, b) => b.updated.localeCompare(a.updated));
+    }
+    return sorted;
+  }, [snapshot.tickets, filter, ticketFilters, ticketSort]);
 
   const onStarted = (sessionId: string) => {
     setRunSheet(undefined);
@@ -459,16 +549,21 @@ export function App() {
                   <div className="queue-title-row">
                     <h1>{current.label}</h1>
                     {view === 'tickets' && (
-                      <TicketFilterMenu
-                        values={ticketFacets}
-                        active={ticketFilters}
-                        onToggle={toggleTicketFilter}
-                        onClear={clearTicketFilters}
-                      />
+                      <>
+                        <TicketFilterMenu
+                          values={ticketFacets}
+                          active={ticketFilters}
+                          onToggle={toggleTicketFilter}
+                          onClear={clearTicketFilters}
+                        />
+                        <TicketSortMenu value={ticketSort} onChange={setTicketSort} />
+                      </>
                     )}
-                    <button type="button" className="icon-button" aria-label="Sort">
-                      <SortIcon />
-                    </button>
+                    {view !== 'tickets' && (
+                      <button type="button" className="icon-button" aria-label="Sort">
+                        <SortIcon />
+                      </button>
+                    )}
                   </div>
                   <div className="search">
                     <SearchIcon />
@@ -504,6 +599,11 @@ export function App() {
                                   <span className={`dot ${issue.statusCategory === 'done' ? 'pass' : 'waiting'}`} />
                                   {issue.status}
                                 </span>
+                                {issue.priority && (
+                                  <span className={`priority-tag ${priorityTone(issue.priority)}`}>
+                                    {issue.priority}
+                                  </span>
+                                )}
                                 <span className="spacer" />
                                 <span className="row-age">{formatAge(issue.updated)}</span>
                               </span>
