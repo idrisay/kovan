@@ -62,8 +62,17 @@
   --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
   --display: 'Space Grotesk', var(--sans);
 
-  /* Prose is capped at a 720px measure wherever it appears. */
+  /* Prose is capped at a 720px measure wherever it appears. A wider line is
+     not more readable, it is harder to track back to the next one — so extra
+     width goes to a second column, never to longer lines. */
   --measure: 720px;
+  /* The column the measure sits in. Wider, because a table or a code block is
+     scanned rather than read and wants every pixel the measure will not take. */
+  --column: 1040px;
+  /* Both columns and the gap between them. Past this the page centres rather
+     than spreading: two blocks pinned to opposite edges of a 2500px monitor
+     stop reading as one page and start reading as two. */
+  --page: 1480px;
 }
 
 /**
@@ -334,8 +343,45 @@ button { font: inherit; cursor: pointer; }
 .pane {
   flex: 1; min-width: 0; overflow-y: auto;
   background: var(--editor);
+  /* A container, not a media query: the sidebar is draggable now, so the
+     detail has to answer to the width it actually got, not to the window's. */
+  container: pane / inline-size;
 }
-.detail { max-width: var(--measure); padding: 22px 26px 40px; }
+.detail { max-width: var(--page); margin-inline: auto; padding: 22px 30px 44px; }
+
+/* --- Two columns, once there is room for two ------------------------------
+ *
+ * The header spans: a title, its facts and its actions belong to the whole
+ * page. Below it the split is by kind, not by length — prose and review
+ * conversation are read, so they keep the measure; checks and file lists are
+ * scanned, so they go in a rail at the right edge. Neither column is filler
+ * for the other, which is why this collapses cleanly at narrow widths instead
+ * of stretching one of them.
+ */
+
+.detail-body { display: grid; gap: 0 34px; align-items: start; }
+.detail-main { min-width: 0; max-width: var(--column); }
+.detail-side { min-width: 0; }
+/* Nothing to read — no description, no open threads — so the rail spans
+   rather than leaving half the page blank next to it. */
+.detail-body.solo .detail-main { display: none; }
+
+@container pane (min-width: 1120px) {
+  .detail-body:not(.solo) {
+    /* A fixed gap, not space-between: --page already stops the two columns
+       drifting apart, and slack-as-gap would reopen the hole it closes. */
+    grid-template-columns: minmax(0, var(--column)) minmax(280px, 340px);
+    gap: 0 40px;
+  }
+  .detail-body:not(.solo) .detail-side {
+    position: sticky; top: 18px;
+    /* Capped, because a sticky block taller than the screen strands its own
+       bottom: it pins at the top and the rest can never be scrolled to. */
+    max-height: calc(100vh - 96px); overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: var(--hair-strong) transparent;
+  }
+  .detail-body:not(.solo) .detail-side > section:first-child { margin-top: 0; }
+}
 .detail-head h2 {
   margin: 0 0 7px;
   font-family: var(--display); font-size: 21px; font-weight: 600;
@@ -346,8 +392,9 @@ button { font: inherit; cursor: pointer; }
   display: flex; flex-wrap: wrap; gap: 8px;
 }
 .detail-states { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 11.5px; color: var(--meta); }
-.detail-actions { display: flex; gap: 8px; margin-top: 14px; }
-.run-buttons { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+/* One row: the agent runs, then the escape hatch out to the web. */
+.detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+.run-buttons { display: contents; }
 
 .detail section { margin-top: 26px; }
 .detail h3 {
@@ -359,19 +406,31 @@ button { font: inherit; cursor: pointer; }
 /* Rendered markdown. `white-space: pre-wrap` lived here when this was raw
    text; left in place over real HTML it preserved every source newline and
    doubled the gaps between blocks. */
+/* Two tracks: the measure, and whatever is left over. Paragraphs, headings
+   and lists sit in the first and stay readable; a table or a code block — read
+   by scanning columns, not by tracking lines — spans both and uses the width
+   the measure declines. Grid rather than a max-width, because a child cannot
+   escape its parent's max-width without negative margins that guess. */
 .prose {
-  max-width: var(--measure);
+  display: grid;
+  grid-template-columns: min(var(--measure), 100%) minmax(0, 1fr);
+  /* Grid items do not collapse margins, so the rhythm is a gap instead, and
+     the direct children give theirs up. Nested ones keep theirs. */
+  row-gap: 11px;
   font-size: 13px; line-height: 1.65; color: var(--prose);
   word-break: break-word;
 }
-.prose > :first-child { margin-top: 0; }
-.prose > :last-child { margin-bottom: 0; }
+.prose > * { grid-column: 1; min-width: 0; margin-top: 0; margin-bottom: 0; }
+.prose > pre, .prose > table { grid-column: 1 / -1; justify-self: start; max-width: 100%; }
 .prose p { margin: 0 0 11px; }
 .prose h1, .prose h2, .prose h3, .prose h4 {
   font-family: var(--display); color: var(--title);
   letter-spacing: -0.012em; line-height: 1.3;
   margin: 20px 0 9px; font-weight: 600;
 }
+/* 11px of gap plus this is the 20px the collapsed margin used to give. */
+.prose > h1, .prose > h2, .prose > h3, .prose > h4 { margin-top: 9px; }
+.prose > :first-child { margin-top: 0; }
 .prose h1 { font-size: 17px; }
 .prose h2 { font-size: 15px; }
 .prose h3 { font-size: 13.5px; }
@@ -399,6 +458,9 @@ button { font: inherit; cursor: pointer; }
 .prose hr { border: 0; border-top: 1px solid var(--hair); margin: 16px 0; }
 .prose img { max-width: 100%; border-radius: 8px; }
 .prose table { border-collapse: collapse; margin: 0 0 12px; font-size: 12px; }
+/* Wider than even the full column: scroll it rather than squeeze every cell
+   into two-character wraps, which is what a hard max-width does to it. */
+.prose > table { display: block; width: max-content; overflow-x: auto; }
 .prose th, .prose td {
   border: 1px solid var(--hair); padding: 5px 9px; text-align: left;
 }

@@ -21,7 +21,7 @@ import { BatonTray } from './tray';
 import { Activity } from './notify';
 import { CREDENTIAL_FIELDS, HttpClient, fetchPullDetail } from '@baton/providers';
 import { adoptImportedTokens } from './adopt';
-import { smokePty, smokeUi, type SmokeMode } from './smoke';
+import { smokePty, smokeUi, type SmokeMode, detailFixture } from './smoke';
 import { Sessions } from './sessions';
 import { Agents } from './agents';
 import { Workspaces } from './workspace';
@@ -182,6 +182,11 @@ app.whenReady().then(async () => {
 
   // --- Detail ---------------------------------------------------------------
   ipcMain.handle('baton:pull-detail', async (_event, repo: string, number: number) => {
+    // Guarded by BATON_USER_DATA, the same way workspace seeding is: a fixture
+    // can only ever be served to a throwaway profile, never to a real one.
+    if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+      return detailFixture(repo, number);
+    }
     const token = await host.secrets.get('github');
     if (!token) {
       throw new Error('GitHub is not connected');

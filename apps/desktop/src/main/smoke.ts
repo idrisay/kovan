@@ -47,6 +47,134 @@ const FIXTURE = {
   viewerReviewed: false
 };
 
+/** A ticket with both halves of the split: prose to read, subtasks to scan. */
+const TICKET = {
+  key: 'ACME-2393',
+  summary: 'Make cut-off tables scroll and reveal check-in row actions on hover',
+  url: 'https://example.invalid/browse/ACME-2393',
+  status: 'In Progress',
+  statusCategory: 'indeterminate' as const,
+  issueType: 'Bug',
+  priority: 'High',
+  updated: new Date(Date.now() - 172_800_000).toISOString(),
+  description: [
+    'Tables wider than their container are silently cut off on tablet and',
+    'mobile: no scrollbar appears, and the right-hand columns cannot be',
+    'reached at all.',
+    '',
+    'Second round of QA after the August fix. See the linked PR for the',
+    'root cause — a block-level wrapper that can never be wider than its',
+    'own scroll container.'
+  ].join('\n'),
+  subtasks: [
+    { key: 'ACME-2401', summary: 'Persistent scrollbar styling', status: 'Done', url: 'https://example.invalid/browse/ACME-2401' },
+    { key: 'ACME-2402', summary: 'Row actions on hover and focus', status: 'In Review', url: 'https://example.invalid/browse/ACME-2402' },
+    { key: 'ACME-2403', summary: 'Touch fallback above 1000px', status: 'To Do', url: 'https://example.invalid/browse/ACME-2403' }
+  ],
+  comments: [
+    {
+      author: 'qa',
+      created: new Date(Date.now() - 90_000_000).toISOString(),
+      body: 'Re-tested on iPad landscape. The scrollbar is there now, but **Mark Reviewed** still cannot be tapped.'
+    }
+  ]
+};
+
+/**
+ * A pull request detail rich enough to judge the layout by: a long body with a
+ * table and a code block, checks, threads and a file list. Served instead of
+ * the network only when BATON_USER_DATA is also set, so it can never reach a
+ * real profile.
+ */
+export function detailFixture(repo: string, number: number) {
+  return {
+    number,
+    repo,
+    title: FIXTURE.title,
+    url: FIXTURE.url,
+    body: [
+      '## Tablet and mobile QA, second round',
+      '',
+      'The first round shipped in August and QA re-tested 75 minutes after the',
+      'merge. The overlaps are still reproducible, plus a new ask: **the scrollbar',
+      'should be there whenever a table is cut off, not only on hover.**',
+      '',
+      '### The actual bug behind "still reproducible"',
+      '',
+      'Both question tables wrapped their grid like this:',
+      '',
+      '```html',
+      '<div class="overflow-x-auto">          <- scroll container',
+      '  <div class="min-w-full overflow-hidden">   <- rounded-corner box',
+      '    <div class="grid grid-cols-[...fixed px...]">  <- ~765px of fixed columns',
+      '```',
+      '',
+      'The middle box is block-level, so it is *exactly* as wide as the scroll',
+      'container and never wider. The fixed columns therefore overflowed it, were',
+      'clipped by its own `overflow-hidden`, and the scroll container never saw',
+      'any overflow at all — so no scrollbar appeared.',
+      '',
+      '### Changes',
+      '',
+      '| Area | Change |',
+      '| --- | --- |',
+      '| `globals.css` | New `.table-scroll-x`: horizontal scroll with a persistent styled bar (11px thumb, radius 1000px, `#f9f9fa` track — per Figma) |',
+      '| `tailwind.config.ts` | New `hover-wide` screen: `(hover: hover) and (min-width: 1001px)` |',
+      '| Question tables | `min-w-full` → `min-w-[860px]` / `min-w-[800px]`; header padding aligned to rows |',
+      '| Learning path tables | `min-w-max` → definite floors (840/920, 1000/880) |',
+      '| LP performance header | Title capped at 2 lines with ellipsis + `title` attribute |',
+      '| Check-in card | Row actions reveal on hover/focus; `StudentRow` extracted so each row owns its state |',
+      '',
+      '### Why `hover-wide` rather than a plain width breakpoint',
+      '',
+      'Gating the hover-reveal on width alone strands touch devices over 1000px',
+      '(iPad in landscape, touch laptops): with no hover to trigger the reveal, a',
+      'tap on the faded button falls straight through to the row\'s stretched link',
+      'and navigates away, so **Mark Reviewed can never be reached there**.'
+    ].join('\n'),
+    baseRef: 'develop',
+    headRef: 'fix/ACME-2393-tablet-mobile-qa-round2',
+    additions: 214,
+    deletions: 63,
+    changedFiles: 7,
+    checks: [
+      { name: 'build', status: 'failure' as const, url: 'https://example.invalid/checks/1' },
+      { name: 'lint', status: 'success' as const, url: 'https://example.invalid/checks/2' },
+      { name: 'unit (node 20)', status: 'success' as const, url: 'https://example.invalid/checks/3' },
+      { name: 'visual regression', status: 'pending' as const, url: 'https://example.invalid/checks/4' }
+    ],
+    files: [
+      { path: 'src/styles/globals.css', additions: 41, deletions: 2 },
+      { path: 'tailwind.config.ts', additions: 6, deletions: 0 },
+      { path: 'src/components/QuestionTable.tsx', additions: 58, deletions: 19 },
+      { path: 'src/components/LearningPathTable.tsx', additions: 44, deletions: 21 },
+      { path: 'src/components/StudentRow.tsx', additions: 52, deletions: 0 },
+      { path: 'src/components/CheckInCard.tsx', additions: 9, deletions: 18 },
+      { path: 'src/hooks/useRowActionsHover.ts', additions: 4, deletions: 3 }
+    ],
+    threads: [
+      {
+        id: 't1',
+        isResolved: false,
+        path: 'src/components/QuestionTable.tsx',
+        line: 118,
+        comments: [
+          {
+            author: 'reviewer',
+            createdAt: new Date(Date.now() - 7_200_000).toISOString(),
+            body: 'Can the `860px` floor come from the column definitions instead of a literal? It will drift the next time a column is added.'
+          },
+          {
+            author: 'idrisay',
+            createdAt: new Date(Date.now() - 5_400_000).toISOString(),
+            body: 'It can, but the grid template is built at render time and the floor is needed before layout. I left a comment pointing at the two places to keep in step.'
+          }
+        ]
+      }
+    ]
+  };
+}
+
 /** The terminal layer, which depends on a native module matching Electron's ABI. */
 export async function smokePty(
   sessions: Sessions,
@@ -115,7 +243,7 @@ export async function smokeUi(
       blocked: [FIXTURE],
       mine: [FIXTURE],
       reviewRequested: [],
-      tickets: [],
+      tickets: [TICKET],
       connected: ['github'],
       errors: [],
       refreshing: false
@@ -213,12 +341,119 @@ export async function smokeUi(
     })`
   );
 
+  // --- The two-column detail --------------------------------------------
+  // The container query keys off the pane, not the window, because the sidebar
+  // is draggable — so this drags the sidebar and checks the layout answers.
+  const layout = () =>
+    read(
+      win,
+      `(() => {
+         const round = (n) => Math.round(n);
+         const pane = document.querySelector('.pane').getBoundingClientRect();
+         const main = document.querySelector('.detail-main')?.getBoundingClientRect();
+         const side = document.querySelector('.detail-side')?.getBoundingClientRect();
+         const table = document.querySelector('.prose > table')?.getBoundingClientRect();
+         const para = document.querySelector('.prose > p')?.getBoundingClientRect();
+         return {
+           pane: round(pane.width),
+           main: main ? round(main.width) : null,
+           side: side ? round(side.width) : null,
+           // Side by side, not stacked, when there is room for two columns.
+           sideBySide: Boolean(main && side && side.left >= main.right - 1),
+           // The rail should end at the content's right edge, not float mid-pane.
+           sideAtRightEdge: side ? round(pane.right - side.right) : null,
+           sticky: side
+             ? getComputedStyle(document.querySelector('.detail-side')).position
+             : null,
+           paragraph: para ? round(para.width) : null,
+           table: table ? round(table.width) : null
+         };
+       })()`
+    );
+
+  // A wide window, because the two-column layout is the thing under test and
+  // the smoke's default window is narrower than the threshold. Clamped to the
+  // display, so this does not silently do nothing on a small screen.
+  const { screen } = await import('electron');
+  const work = screen.getPrimaryDisplay().workAreaSize;
+  win.setBounds({
+    x: 0, y: 0,
+    width: Math.min(1800, work.width),
+    height: Math.min(1150, work.height)
+  });
+  await new Promise((r) => setTimeout(r, 250));
+
+  result['layoutWide'] = await layout();
+
   if (process.env['BATON_SHOT_DETAIL']) {
     await writeFile(
       process.env['BATON_SHOT_DETAIL'],
       (await win.webContents.capturePage()).toPNG()
     );
     console.log(`shot: ${process.env['BATON_SHOT_DETAIL']}`);
+  }
+
+  // The screen this runs on tops out around 1500 logical pixels, and the
+  // layout has to hold on a 2500px monitor too. Zooming out multiplies CSS
+  // pixels without needing the hardware: the page sees a 2500px viewport.
+  await win.webContents.setZoomFactor(0.6);
+  await new Promise((r) => setTimeout(r, 250));
+  result['layoutUltra'] = await layout();
+
+  if (process.env['BATON_SHOT_ULTRA']) {
+    await writeFile(
+      process.env['BATON_SHOT_ULTRA'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_ULTRA']}`);
+  }
+  await win.webContents.setZoomFactor(1);
+  await new Promise((r) => setTimeout(r, 200));
+
+  // Squeeze the pane by widening the sidebar, and check it collapses to one
+  // column rather than crushing both.
+  await read(win, `document.documentElement.style.setProperty('--queue-w', '620px')`);
+  await new Promise((r) => setTimeout(r, 200));
+  result['layoutNarrow'] = await layout();
+
+  if (process.env['BATON_SHOT_NARROW']) {
+    await writeFile(
+      process.env['BATON_SHOT_NARROW'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_NARROW']}`);
+  }
+  await read(win, `document.documentElement.style.removeProperty('--queue-w')`);
+
+  // The ticket pane got the same two-column treatment, so it gets the same
+  // measurement rather than a shrug that it typechecks.
+  await read(win, `document.querySelector('.rail-item[aria-label="Tickets"]')?.click()`);
+  await until(win, `document.querySelector('.row')`, 10_000);
+  await read(win, `document.querySelector('.row')?.click()`);
+  await until(win, `document.querySelector('.detail-head h2')`, 10_000);
+  result['ticket'] = {
+    heading: await read(win, `document.querySelector('.detail-head h2')?.textContent ?? ''`),
+    actions: await read(
+      win,
+      `Array.from(document.querySelectorAll('.detail-actions button')).map(b => b.textContent)`
+    ),
+    main: await read(
+      win,
+      `Array.from(document.querySelectorAll('.detail-main h3')).map(h => h.textContent)`
+    ),
+    side: await read(
+      win,
+      `Array.from(document.querySelectorAll('.detail-side h3')).map(h => h.textContent)`
+    ),
+    layout: await layout()
+  };
+
+  if (process.env['BATON_SHOT_TICKET']) {
+    await writeFile(
+      process.env['BATON_SHOT_TICKET'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_TICKET']}`);
   }
 
   return result;
