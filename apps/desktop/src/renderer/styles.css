@@ -650,6 +650,7 @@ button { font: inherit; cursor: pointer; }
 .verdict { font-size: 11px; color: var(--pass); text-transform: capitalize; }
 
 .quiet { color: var(--muted); font-size: 12.5px; padding: 20px 4px; }
+.group-empty { padding: 2px 4px 12px; font-size: 12px; }
 .centred { display: grid; place-items: center; height: 100%; text-align: center; padding: 20px; }
 .small { font-size: 11px; }
 .key { font-family: var(--mono); color: var(--clay); }

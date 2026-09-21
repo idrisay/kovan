@@ -516,6 +516,11 @@ export function App() {
    * *this one* failed. Grouped, only the first section is tinted and the
    * rest state themselves in grey, which is the design's rule.
    *
+   * Every section always shows, even at zero — a section that only
+   * appears once something lands in it reads as broken the rest of the
+   * time, not as "you're caught up". The fixed set of five is what you
+   * check, not just whatever happens to be non-empty today.
+   *
    * Drafts sit last because a draft is not waiting on anyone.
    */
   const groups = useMemo((): Group[] => {
@@ -539,7 +544,7 @@ export function App() {
         note: countBlocked(drafts) > 0 ? `${countBlocked(drafts)} blocked` : undefined
       },
       { id: 'merged', label: 'Recently merged', pulls: snapshot.merged.filter(match), tint: false }
-    ].filter((g) => g.pulls.length > 0);
+    ];
   }, [snapshot, match]);
 
   const pullFacets = useMemo(() => pullFacetValues(pullUniverse(snapshot)), [snapshot]);
@@ -736,13 +741,10 @@ export function App() {
                         ))}
                       </ul>
                     )
-                  ) : groups.length === 0 ? (
-                    <p className="quiet">
-                      {filter || pullFilterCount > 0 ? 'Nothing matches.' : 'Nothing open.'}
-                    </p>
                   ) : (
                     groups.map((group) => {
                       const open = !collapsed.has(group.id);
+                      const empty = group.pulls.length === 0;
                       return (
                         <section key={group.id}>
                           <GroupHead
@@ -750,11 +752,16 @@ export function App() {
                             count={group.pulls.length}
                             total={group.id === 'merged' ? snapshot.mergedTotal : undefined}
                             open={open}
-                            tint={group.tint}
+                            tint={group.tint && !empty}
                             note={group.note}
                             onToggle={() => toggleGroup(group.id)}
                           />
-                          {open && (
+                          {open && empty && (
+                            <p className="quiet group-empty">
+                              {filter || pullFilterCount > 0 ? 'Nothing matches.' : 'Nothing here.'}
+                            </p>
+                          )}
+                          {open && !empty && (
                             <>
                               <ul className="rows">
                                 {group.pulls.map((pull) => (
