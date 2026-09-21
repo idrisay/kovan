@@ -172,6 +172,32 @@ export class Agents {
   }
 
   /**
+   * The dev-environment credentials a "verify" run signs in with — handed to
+   * the agent only as environment variables, never woven into the prompt
+   * text, and named to match what `DEFAULTVERIFYTEMPLATE` already tells the
+   * agent to read: `$BATON_ENV_USER`/`$BATON_ENV_PASSWORD` for the app's own
+   * sign-in, `$BATON_ENV_BASIC_USER`/`$BATON_ENV_BASIC_PASSWORD` for an HTTP
+   * Basic Auth wall in front of it. A field left unconfigured is simply
+   * omitted, the same as an unanswered review request — the agent finds it
+   * unset and reports `could not check` rather than guessing.
+   */
+  private async verifyEnv(): Promise<Record<string, string>> {
+    const vars: Record<string, string> = {};
+    const username = this.host.config.get('verify.username', '');
+    const password = await this.host.secrets.get('verify.password');
+    if (username) vars['BATON_ENV_USER'] = username;
+    if (password) vars['BATON_ENV_PASSWORD'] = password;
+
+    if (this.host.config.get('verify.basicAuth', false)) {
+      const basicUsername = this.host.config.get('verify.basicUsername', '');
+      const basicPassword = await this.host.secrets.get('verify.basicPassword');
+      if (basicUsername) vars['BATON_ENV_BASIC_USER'] = basicUsername;
+      if (basicPassword) vars['BATON_ENV_BASIC_PASSWORD'] = basicPassword;
+    }
+    return vars;
+  }
+
+  /**
    * The folder to start in.
    *
    * The clone matching the pull request's repository, when there is one.
@@ -231,13 +257,18 @@ export class Agents {
     // from nothing. The prompts tell it to read this first.
     const ticketFile = await this.writeTicketFile(run.directory, subject);
 
+    const env = {
+      ...this.store.env(run, ticketFile),
+      ...(request.kind === 'verify' ? await this.verifyEnv() : {})
+    };
+
     const result = await this.sessions.run({
       runner: this.runnerFor(runner, request.kind),
       prompt,
       cwd,
       title: `${request.kind} · ${subjectId}`,
       run,
-      env: this.store.env(run, ticketFile)
+      env
     });
 
     if ('error' in result) {

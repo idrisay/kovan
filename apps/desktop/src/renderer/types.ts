@@ -17,6 +17,9 @@ export type {
 /** A repo's status plus the de-duplicated count the badge shows. */
 export type WorkspaceStatus = RepoStatus & { changes: number };
 
+/** 'system' follows the OS; the other two hold regardless of it. */
+export type ThemeChoice = 'system' | 'light' | 'dark';
+
 export interface SessionInfo {
   id: string;
   title: string;

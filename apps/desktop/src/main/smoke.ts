@@ -794,6 +794,51 @@ export async function smokeUi(
     console.log(`shot: ${process.env['BATON_SHOT_TICKET_FILTER']}`);
   }
 
+  if (process.env['BATON_SHOT_SETTINGS']) {
+    await read(win, `document.querySelector('[aria-label="Settings"]')?.click()`);
+    await until(win, `document.querySelector('.settings-nav')`, 5_000);
+    await new Promise((r) => setTimeout(r, 150));
+    await writeFile(
+      process.env['BATON_SHOT_SETTINGS'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_SETTINGS']}`);
+
+    if (process.env['BATON_SHOT_SETTINGS_ENV']) {
+      await read(
+        win,
+        `Array.from(document.querySelectorAll('.settings-nav button'))
+          .find(b => b.textContent.includes('Dev environment'))?.click()`
+      );
+      await new Promise((r) => setTimeout(r, 150));
+      await writeFile(
+        process.env['BATON_SHOT_SETTINGS_ENV'],
+        (await win.webContents.capturePage()).toPNG()
+      );
+      console.log(`shot: ${process.env['BATON_SHOT_SETTINGS_ENV']}`);
+    }
+
+    if (process.env['BATON_SHOT_SETTINGS_LIGHT']) {
+      await read(
+        win,
+        `Array.from(document.querySelectorAll('.settings-nav button'))
+          .find(b => b.textContent.includes('General'))?.click()`
+      );
+      await new Promise((r) => setTimeout(r, 100));
+      await read(
+        win,
+        `Array.from(document.querySelectorAll('.theme-picker button'))
+          .find(b => b.textContent === 'Light')?.click()`
+      );
+      await new Promise((r) => setTimeout(r, 250));
+      await writeFile(
+        process.env['BATON_SHOT_SETTINGS_LIGHT'],
+        (await win.webContents.capturePage()).toPNG()
+      );
+      console.log(`shot: ${process.env['BATON_SHOT_SETTINGS_LIGHT']}`);
+    }
+  }
+
   return result;
 }
 

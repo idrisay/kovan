@@ -88,56 +88,60 @@
  *
  * The status hues are darkened rather than reused — the dark theme's #6FA97F
  * on a near-white ground fails contrast, and the design supplies its own set.
+ *
+ * Applied by an explicit `data-theme="light"` on `<html>` rather than a
+ * `prefers-color-scheme` media query: the app's own theme setting (System /
+ * Light / Dark, `App.tsx`) always resolves to a concrete choice and writes it
+ * as this attribute, including for "System" — so the OS is only consulted
+ * once, in JS, and this rule stays a plain reflection of that decision.
  */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme='dark']) {
-    --rail: #edebe5;
-    --sidebar: #f4f2ec;
-    --editor: #fbfaf7;
-    --card: #ffffff;
+:root[data-theme='light'] {
+  --rail: #edebe5;
+  --sidebar: #f4f2ec;
+  --editor: #fbfaf7;
+  --card: #ffffff;
 
-    --title: #16171a;
-    --strong: #1b1c20;
-    --body: #2a2b2f;
-    --prose: #2a2b2f;
-    --secondary: #4a4a47;
-    --meta: #5c5c58;
-    --muted: #77767a;
-    --dim: #8a8984;
+  --title: #16171a;
+  --strong: #1b1c20;
+  --body: #2a2b2f;
+  --prose: #2a2b2f;
+  --secondary: #4a4a47;
+  --meta: #5c5c58;
+  --muted: #77767a;
+  --dim: #8a8984;
 
-    --clay: #c0603c;
-    --clay-bright: #a8502f;
-    --merged: #7a5aa8;
-    --pass: #4e8a62;
-    --running: #a9783a;
-    --blocked: #b4544a;
-    --blocked-bright: #a5473e;
-    --waiting: #4c74ae;
+  --clay: #c0603c;
+  --clay-bright: #a8502f;
+  --merged: #7a5aa8;
+  --pass: #4e8a62;
+  --running: #a9783a;
+  --blocked: #b4544a;
+  --blocked-bright: #a5473e;
+  --waiting: #4c74ae;
 
-    --hair: rgba(20, 20, 19, 0.09);
-    --hair-strong: rgba(20, 20, 19, 0.14);
-    --wash: rgba(20, 20, 19, 0.05);
-  }
-  :root:not([data-theme='dark']) .ghost {
-    background: rgba(20, 20, 19, 0.03);
-    border-color: rgba(20, 20, 19, 0.12);
-  }
-  :root:not([data-theme='dark']) .primary { color: #fff7f2; }
-  :root:not([data-theme='dark']) .row:hover { background: rgba(20, 20, 19, 0.035); }
-  :root:not([data-theme='dark']) .row.blocked {
-    background: rgba(180, 84, 74, 0.08);
-    border-color: rgba(180, 84, 74, 0.20);
-  }
-  :root:not([data-theme='dark']) .errors { background: rgba(180, 84, 74, 0.08); }
-  :root:not([data-theme='dark']) .error { color: #a5473e; }
-  :root:not([data-theme='dark']) .search,
-  :root:not([data-theme='dark']) .rail-item:hover { background: rgba(20, 20, 19, 0.04); }
-  :root:not([data-theme='dark']) .rail-item.active { background: rgba(20, 20, 19, 0.07); }
-  :root:not([data-theme='dark']) .sheet-backdrop { background: rgba(60, 58, 54, 0.35); }
-  :root:not([data-theme='dark']) .prose code,
-  :root:not([data-theme='dark']) .prose th { background: rgba(20, 20, 19, 0.05); }
-  :root:not([data-theme='dark']) .badge { background: rgba(78, 138, 98, 0.14); color: #3e7350; }
+  --hair: rgba(20, 20, 19, 0.09);
+  --hair-strong: rgba(20, 20, 19, 0.14);
+  --wash: rgba(20, 20, 19, 0.05);
 }
+:root[data-theme='light'] .ghost {
+  background: rgba(20, 20, 19, 0.03);
+  border-color: rgba(20, 20, 19, 0.12);
+}
+:root[data-theme='light'] .primary { color: #fff7f2; }
+:root[data-theme='light'] .row:hover { background: rgba(20, 20, 19, 0.035); }
+:root[data-theme='light'] .row.blocked {
+  background: rgba(180, 84, 74, 0.08);
+  border-color: rgba(180, 84, 74, 0.20);
+}
+:root[data-theme='light'] .errors { background: rgba(180, 84, 74, 0.08); }
+:root[data-theme='light'] .error { color: #a5473e; }
+:root[data-theme='light'] .search,
+:root[data-theme='light'] .rail-item:hover { background: rgba(20, 20, 19, 0.04); }
+:root[data-theme='light'] .rail-item.active { background: rgba(20, 20, 19, 0.07); }
+:root[data-theme='light'] .sheet-backdrop { background: rgba(60, 58, 54, 0.35); }
+:root[data-theme='light'] .prose code,
+:root[data-theme='light'] .prose th { background: rgba(20, 20, 19, 0.05); }
+:root[data-theme='light'] .badge { background: rgba(78, 138, 98, 0.14); color: #3e7350; }
 
 * { box-sizing: border-box; }
 
@@ -682,6 +686,54 @@ button { font: inherit; cursor: pointer; }
   outline: none; border-color: rgba(217, 119, 87, 0.5);
 }
 .run-controls { display: flex; gap: 12px; }
+
+/* --- Settings: a sidebar of sections, not one long scrolling list -------- */
+.sheet.settings {
+  max-width: 800px; padding: 0;
+  display: flex; flex-direction: column; height: 74vh; max-height: 620px;
+}
+.sheet.settings .sheet-head {
+  margin: 0; padding: 16px 20px 13px; border-bottom: 1px solid var(--hair);
+  flex: none;
+}
+.settings-layout { flex: 1; min-height: 0; display: flex; }
+.settings-nav {
+  flex: none; width: 190px; padding: 12px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+  border-right: 1px solid var(--hair);
+}
+.settings-nav button {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  background: none; border: 0; border-radius: 7px; padding: 7px 9px;
+  color: var(--secondary); font-size: 12.5px;
+}
+.settings-nav button:hover { background: rgba(255, 255, 255, 0.05); color: var(--title); }
+.settings-nav button.active { background: rgba(217, 119, 87, 0.12); color: rgb(217, 119, 87); }
+.settings-nav button .badge { margin-left: auto; }
+.settings-body { flex: 1; min-width: 0; padding: 18px 22px; overflow-y: auto; }
+.settings-body .provider { border-top: 0; padding: 0; }
+.settings-body .provider h3:not(:first-child) { margin-top: 20px; }
+
+.theme-picker { display: flex; gap: 6px; }
+.theme-picker button {
+  flex: 1; background: var(--rail); border: 1px solid var(--hair-strong);
+  border-radius: 8px; padding: 7px 0; color: var(--secondary); font-size: 12px;
+}
+.theme-picker button:hover { color: var(--title); }
+.theme-picker button.active {
+  background: rgba(217, 119, 87, 0.14); border-color: rgba(217, 119, 87, 0.5);
+  color: rgb(217, 119, 87);
+}
+
+.provider .checkbox-row {
+  flex-direction: row; align-items: center; gap: 9px;
+}
+.checkbox-row span { color: var(--secondary); font-size: 12.5px; }
+.checkbox-row input[type='checkbox'] { accent-color: rgb(217, 119, 87); }
+
+.settings-note {
+  color: var(--dim); font-size: 11px; line-height: 1.55; margin: 2px 0 13px;
+}
 .run-controls label { flex: 1; }
 .prompt-label textarea {
   font-family: var(--mono); font-size: 11.5px; line-height: 1.6;
@@ -1108,26 +1160,24 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .tok-strong { font-weight: 600; }
 .tok-link { color: var(--clay); text-decoration: underline; }
 
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme='dark']) .tok-keyword,
-  :root:not([data-theme='dark']) .tok-modifier,
-  :root:not([data-theme='dark']) .tok-controlKeyword,
-  :root:not([data-theme='dark']) .tok-operatorKeyword,
-  :root:not([data-theme='dark']) .tok-definitionKeyword,
-  :root:not([data-theme='dark']) .tok-moduleKeyword,
-  :root:not([data-theme='dark']) .tok-self,
-  :root:not([data-theme='dark']) .tok-atom { color: #8341a0; }
-  :root:not([data-theme='dark']) .tok-comment,
-  :root:not([data-theme='dark']) .tok-lineComment,
-  :root:not([data-theme='dark']) .tok-blockComment { color: #77767a; }
-  :root:not([data-theme='dark']) .tab-close:hover { background: rgba(20, 20, 19, 0.08); }
-  :root:not([data-theme='dark']) .change:hover,
-  :root:not([data-theme='dark']) .tree-row:hover,
-  :root:not([data-theme='dark']) .repo:hover { background: rgba(20, 20, 19, 0.04); }
-  :root:not([data-theme='dark']) .icon-button.boxed:hover:not(:disabled) {
-    background: rgba(20, 20, 19, 0.07);
-  }
-  :root:not([data-theme='dark']) .diff-add { background: rgba(78, 138, 98, 0.13); }
-  :root:not([data-theme='dark']) .diff-del { background: rgba(180, 84, 74, 0.11); }
-  :root:not([data-theme='dark']) .status-bar .save { color: #fff7f2; }
+:root[data-theme='light'] .tok-keyword,
+:root[data-theme='light'] .tok-modifier,
+:root[data-theme='light'] .tok-controlKeyword,
+:root[data-theme='light'] .tok-operatorKeyword,
+:root[data-theme='light'] .tok-definitionKeyword,
+:root[data-theme='light'] .tok-moduleKeyword,
+:root[data-theme='light'] .tok-self,
+:root[data-theme='light'] .tok-atom { color: #8341a0; }
+:root[data-theme='light'] .tok-comment,
+:root[data-theme='light'] .tok-lineComment,
+:root[data-theme='light'] .tok-blockComment { color: #77767a; }
+:root[data-theme='light'] .tab-close:hover { background: rgba(20, 20, 19, 0.08); }
+:root[data-theme='light'] .change:hover,
+:root[data-theme='light'] .tree-row:hover,
+:root[data-theme='light'] .repo:hover { background: rgba(20, 20, 19, 0.04); }
+:root[data-theme='light'] .icon-button.boxed:hover:not(:disabled) {
+  background: rgba(20, 20, 19, 0.07);
 }
+:root[data-theme='light'] .diff-add { background: rgba(78, 138, 98, 0.13); }
+:root[data-theme='light'] .diff-del { background: rgba(180, 84, 74, 0.11); }
+:root[data-theme='light'] .status-bar .save { color: #fff7f2; }

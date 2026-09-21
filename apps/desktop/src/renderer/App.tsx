@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatAge, isBlocked } from '@baton/core';
-import type { JiraIssue, PullSummary, RunKind, SessionInfo, Snapshot } from './types';
-import { Connect } from './Connect';
+import type { JiraIssue, PullSummary, RunKind, SessionInfo, Snapshot, ThemeChoice } from './types';
+import { Settings } from './Settings';
 import { PullPane, TicketPane } from './Detail';
 import { RunSheet } from './RunSheet';
 import { Terminal } from './Terminal';
@@ -33,6 +33,22 @@ const EMPTY: Snapshot = {
 const MERGED_STEP = 10;
 
 const COLLAPSED_KEY = 'baton.collapsed-groups';
+
+/** 'system' resolved against the OS right now — never left unresolved. */
+function resolveTheme(choice: ThemeChoice): 'light' | 'dark' {
+  return choice === 'system'
+    ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+    : choice;
+}
+
+/**
+ * Writes the resolved theme onto `<html>`, which is all the CSS in
+ * `styles.css` keys off — see the note on `:root[data-theme='light']`
+ * there for why this replaced a `prefers-color-scheme` media query.
+ */
+function applyTheme(choice: ThemeChoice): void {
+  document.documentElement.dataset.theme = resolveTheme(choice);
+}
 
 /**
  * Which sections start folded.
@@ -192,6 +208,33 @@ export function App() {
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsed);
   const [ticketFilters, setTicketFilters] = useState<TicketFilters>(emptyTicketFilters);
+  const [theme, setThemeState] = useState<ThemeChoice>('system');
+
+  // Seeded once from disk, then applied — and re-applied live if "System" is
+  // the choice and the OS itself changes appearance underneath it.
+  useEffect(() => {
+    void window.baton.settings().then((settings) => {
+      const choice = (settings['appearance.theme'] as ThemeChoice) || 'system';
+      setThemeState(choice);
+      applyTheme(choice);
+    });
+  }, []);
+
+  useEffect(() => {
+    applyTheme(theme);
+    if (theme !== 'system') {
+      return undefined;
+    }
+    const mql = matchMedia('(prefers-color-scheme: light)');
+    const onChange = () => applyTheme('system');
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, [theme]);
+
+  const setTheme = useCallback((choice: ThemeChoice) => {
+    setThemeState(choice);
+    void window.baton.setSetting('appearance.theme', choice);
+  }, []);
 
   const toggleTicketFilter = useCallback((facet: TicketFacetKey, value: string) => {
     setTicketFilters((current) => {
@@ -387,7 +430,7 @@ export function App() {
               <RefreshIcon />
             </button>
             <button
-              type="button" aria-label="Connections" className="rail-item"
+              type="button" aria-label="Settings" className="rail-item"
               onClick={() => setConnecting(true)}
             >
               <SettingsIcon />
@@ -546,7 +589,14 @@ export function App() {
         </div>
       )}
 
-      {connecting && <Connect onClose={() => setConnecting(false)} connected={snapshot.connected} />}
+      {connecting && (
+        <Settings
+          onClose={() => setConnecting(false)}
+          connected={snapshot.connected}
+          theme={theme}
+          onThemeChange={setTheme}
+        />
+      )}
       {runSheet && (
         <RunSheet
           kind={runSheet.kind} pull={runSheet.pull} issue={runSheet.issue}

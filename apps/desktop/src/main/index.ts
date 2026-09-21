@@ -127,6 +127,17 @@ function applyLoginItem(): void {
   }
 }
 
+/**
+ * Native chrome follows the same choice the page does — the window's own
+ * `backgroundColor` at creation (used for the flash-free first paint above),
+ * and OS-drawn bits the CSS can never reach, like a native `<select>` or a
+ * scrollbar. `nativeTheme.themeSource` is Electron's side of exactly the
+ * System/Light/Dark choice `data-theme` is the renderer's side of.
+ */
+function applyTheme(): void {
+  nativeTheme.themeSource = host.config.get('appearance.theme', 'system');
+}
+
 function broadcast(snapshot: Snapshot): void {
   tray?.update(snapshot);
   if (window && !window.isDestroyed()) {
@@ -173,6 +184,9 @@ app.whenReady().then(async () => {
     await host.config.set(key, value);
     if (key === 'launchAtLogin') {
       applyLoginItem();
+    }
+    if (key === 'appearance.theme') {
+      applyTheme();
     }
   });
   ipcMain.handle('baton:set-secret', async (_event, key: string, value: string) => {
@@ -316,6 +330,7 @@ app.whenReady().then(async () => {
   await adoptImportedTokens(host);
 
   applyLoginItem();
+  applyTheme();
 
   // Seeds the workspace the UI smoke then drives. Guarded by the same env var
   // that redirects userData, so it can only ever touch a throwaway profile.

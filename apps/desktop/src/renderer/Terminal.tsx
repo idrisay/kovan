@@ -17,9 +17,11 @@ export function Terminal({ sessionId }: { sessionId: string }) {
     if (!host.current) return;
 
     // The terminal has no CSS custom properties of its own, so its theme is
-    // read from the page at construction and swapped when the OS appearance
-    // changes. Without this it stayed dark on a light desktop.
-    const light = matchMedia('(prefers-color-scheme: light)').matches;
+    // read from the page at construction. `data-theme` is App.tsx's already
+    // resolved choice — System included, it never leaves that unresolved —
+    // so this follows the in-app theme setting rather than the raw OS media
+    // query, which would ignore an explicit Light/Dark override.
+    const light = document.documentElement.dataset.theme === 'light';
     const term = new Xterm({
       fontFamily: "'IBM Plex Mono', ui-monospace, Menlo, monospace",
       fontSize: 12,

@@ -17,6 +17,9 @@ export interface Settings {
   ticketKeyPattern: string;
   branchTemplate: string;
 
+  /** 'system' follows the OS; the other two hold regardless of it. */
+  'appearance.theme': 'system' | 'light' | 'dark';
+
   'jira.baseUrl': string;
   'jira.email': string;
   'jira.jql': string;
@@ -59,10 +62,17 @@ export interface Settings {
   'workspaces.list': { id: string; name: string; folders: string[] }[];
   'workspaces.active': string;
 
-  /** Where "Check it shipped" sends an agent to look. See DOCS.md, Verify. */
+  /**
+   * Where "Check it shipped" sends an agent to look, and what it signs in
+   * with. The password and the basic-auth password are never settings —
+   * they live in the SecretStore under `verify.password` /
+   * `verify.basicPassword`, the same way a provider token does.
+   */
   'verify.environment': string;
   'verify.site': string;
+  'verify.username': string;
   'verify.basicAuth': boolean;
+  'verify.basicUsername': string;
 
   'runner.default': string;
   'runner.custom': unknown[];
@@ -81,6 +91,8 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   ticketKeyPattern: '[A-Z][A-Z0-9]+-\\d+',
   branchTemplate: '${key}-${slug}',
+
+  'appearance.theme': 'system',
 
   'jira.baseUrl': '',
   'jira.email': '',
@@ -126,7 +138,9 @@ export const DEFAULT_SETTINGS: Settings = {
 
   'verify.environment': '',
   'verify.site': '',
+  'verify.username': '',
   'verify.basicAuth': false,
+  'verify.basicUsername': '',
 
   'runner.default': '',
   'runner.custom': [],
