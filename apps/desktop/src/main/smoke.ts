@@ -794,6 +794,30 @@ export async function smokeUi(
     console.log(`shot: ${process.env['BATON_SHOT_TICKET_FILTER']}`);
   }
 
+  if (process.env['BATON_SHOT_NEW_SESSION']) {
+    await read(win, `document.querySelector('.rail-item[aria-label="Sessions"]')?.click()`);
+    await until(win, `document.querySelector('[aria-label="New session"]')`, 5_000);
+    await read(win, `document.querySelector('[aria-label="New session"]')?.click()`);
+    await until(win, `document.querySelector('.new-session-host .menu')`, 5_000);
+    await new Promise((r) => setTimeout(r, 150));
+    await writeFile(
+      process.env['BATON_SHOT_NEW_SESSION'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_NEW_SESSION']}`);
+
+    if (process.env['BATON_SHOT_NEW_SESSION_OPENED']) {
+      await read(win, `document.querySelector('.new-session-host .menu button[role="menuitem"]')?.click()`);
+      await until(win, `document.querySelector('.term-head')`, 10_000);
+      await new Promise((r) => setTimeout(r, 250));
+      await writeFile(
+        process.env['BATON_SHOT_NEW_SESSION_OPENED'],
+        (await win.webContents.capturePage()).toPNG()
+      );
+      console.log(`shot: ${process.env['BATON_SHOT_NEW_SESSION_OPENED']}`);
+    }
+  }
+
   if (process.env['BATON_SHOT_SETTINGS']) {
     await read(win, `document.querySelector('[aria-label="Settings"]')?.click()`);
     await until(win, `document.querySelector('.settings-nav')`, 5_000);

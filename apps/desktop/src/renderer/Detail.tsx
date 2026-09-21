@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { formatAge, isMerged } from '@baton/core';
 import { States } from './rows';
 import { Prose } from './Prose';
-import type { AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, Reviewer, RunKind } from './types';
+import type {
+  AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, Reviewer, RunKind, SessionInfo
+} from './types';
 
 /** What a reviewer's last action reads as, and who it puts the ball with. */
 const TURN: Record<Reviewer['turn'], { status: string; label: string; tone: 'waiting' | 'fail' | 'pass' }> = {
@@ -72,6 +74,45 @@ function RunButtons({
   );
 }
 
+/**
+ * Every terminal session started from this ticket or pull request — running
+ * or already exited, as long as it is still open — so the one place work
+ * gets started is also the one place it can be picked back up, instead of
+ * making you go hunt for it in Sessions.
+ */
+function LiveSessions({
+  subject, sessions, onOpen
+}: {
+  subject: string;
+  sessions: SessionInfo[];
+  onOpen: (id: string) => void;
+}) {
+  const mine = sessions.filter((s) => s.subject === subject);
+  if (mine.length === 0) {
+    return null;
+  }
+  return (
+    <section>
+      <h3>Sessions</h3>
+      <ul className="runs">
+        {mine.map((s) => (
+          <li key={s.id}>
+            <span className="run-kind">{s.kind ?? 'terminal'}</span>
+            <span className="state">
+              <span className={s.running ? 'dot live' : 'dot'} />
+              {s.running ? 'running' : `exited ${s.exitCode ?? ''}`}
+            </span>
+            <span className="run-when">{formatAge(new Date(s.startedAt).toISOString())}</span>
+            <button className="link" onClick={() => onOpen(s.id)}>
+              open
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function History({ subject }: { subject: string }) {
   const [runs, setRuns] = useState<AgentRun[]>([]);
 
@@ -118,11 +159,15 @@ function History({ subject }: { subject: string }) {
 export function PullPane({
   pull,
   viewer,
-  onRun
+  sessions,
+  onRun,
+  onOpenSession
 }: {
   pull: PullSummary;
   viewer: string;
+  sessions: SessionInfo[];
   onRun: (kind: RunKind, pull: PullSummary) => void;
+  onOpenSession: (id: string) => void;
 }) {
   const [detail, setDetail] = useState<PullDetail>();
   const [error, setError] = useState('');
@@ -142,6 +187,10 @@ export function PullPane({
   // make the one useful button the second-guessed one.
   const mine = pull.author.toLowerCase() === viewer.toLowerCase();
   const kinds: RunKind[] = isMerged(pull) ? ['verify'] : mine ? ['unblock', 'verify'] : ['review'];
+  // The same string `Agents.subjectFor()` computes in main, so a session or a
+  // past run started from this pull is found under the ticket it carried,
+  // not filed separately under the pull request that happened to open it.
+  const subject = pull.title.match(/[A-Z][A-Z0-9]+-\d+/)?.[0] ?? `${pull.repo}#${pull.number}`;
 
   const unresolved = detail?.threads.filter((t) => !t.isResolved) ?? [];
   // Whether the left column has anything in it. A PR with no description and
@@ -287,9 +336,8 @@ export function PullPane({
             </section>
           )}
 
-          <History
-            subject={pull.title.match(/[A-Z][A-Z0-9]+-\d+/)?.[0] ?? `${pull.repo}#${pull.number}`}
-          />
+          <LiveSessions subject={subject} sessions={sessions} onOpen={onOpenSession} />
+          <History subject={subject} />
         </aside>
       </div>
     </div>
@@ -298,10 +346,14 @@ export function PullPane({
 
 export function TicketPane({
   issue,
-  onRun
+  sessions,
+  onRun,
+  onOpenSession
 }: {
   issue: JiraIssue;
+  sessions: SessionInfo[];
   onRun: (kind: RunKind, issue: JiraIssue) => void;
+  onOpenSession: (id: string) => void;
 }) {
   // The list `issue` renders immediately — summary, status, subtasks are
   // already in hand. Only the description and comments are re-fetched, the
@@ -389,6 +441,7 @@ export function TicketPane({
             </section>
           )}
 
+          <LiveSessions subject={issue.key} sessions={sessions} onOpen={onOpenSession} />
           <History subject={issue.key} />
         </aside>
       </div>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatAge, isBlocked } from '@baton/core';
-import type { JiraIssue, PullSummary, RunKind, SessionInfo, Snapshot, ThemeChoice } from './types';
+import type { JiraIssue, PullSummary, RunKind, RunTarget, SessionInfo, Snapshot, ThemeChoice } from './types';
 import { Settings } from './Settings';
 import { PullPane, TicketPane } from './Detail';
 import { RunSheet } from './RunSheet';
@@ -10,7 +10,7 @@ import { WorkspaceView } from './Workspace';
 import { Resizer } from './Resizer';
 import {
   PullRequestIcon, ReviewIcon, TicketIcon, TerminalIcon, WorkspaceIcon,
-  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon
+  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon
 } from './icons';
 
 type ViewId = 'pulls' | 'review' | 'tickets' | 'workspace' | 'sessions';
@@ -203,6 +203,7 @@ export function App() {
   const [connecting, setConnecting] = useState(false);
   const [selected, setSelected] = useState<Selection>({});
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [targets, setTargets] = useState<RunTarget[]>([]);
   const [activeSession, setActiveSession] = useState<string>();
   const [runSheet, setRunSheet] = useState<({ kind: RunKind } & Selection) | undefined>();
   const [filter, setFilter] = useState('');
@@ -269,6 +270,7 @@ export function App() {
   useEffect(() => {
     void window.baton.snapshot().then(accept);
     void window.baton.sessions().then(setSessions);
+    void window.baton.runTargets().then(setTargets);
     const offSnapshot = window.baton.onSnapshot(accept);
     const offSessions = window.baton.onSessions(setSessions);
     return () => { offSnapshot(); offSessions(); };
@@ -290,6 +292,12 @@ export function App() {
       setActiveSession(s.id);
       setView('sessions');
     });
+  }, []);
+
+  /** Jumping to a session already running, from wherever it is found. */
+  const openSession = useCallback((id: string) => {
+    setActiveSession(id);
+    setView('sessions');
   }, []);
 
   const current = VIEWS.find((v) => v.id === view)!;
@@ -438,7 +446,10 @@ export function App() {
           </nav>
 
           {view === 'sessions' ? (
-            <Sessions sessions={sessions} active={activeSession} onSelect={setActiveSession} />
+            <Sessions
+              sessions={sessions} active={activeSession} onSelect={setActiveSession}
+              targets={targets} onOpen={openTerminal}
+            />
           ) : view === 'workspace' ? (
             <WorkspaceView onTerminal={openTerminal} />
           ) : (
@@ -571,12 +582,16 @@ export function App() {
                   <PullPane
                     pull={selected.pull}
                     viewer={snapshot.viewer}
+                    sessions={sessions}
                     onRun={(kind, pull) => setRunSheet({ kind, pull })}
+                    onOpenSession={openSession}
                   />
                 ) : selected.issue ? (
                   <TicketPane
                     issue={selected.issue}
+                    sessions={sessions}
                     onRun={(kind, issue) => setRunSheet({ kind, issue })}
+                    onOpenSession={openSession}
                   />
                 ) : (
                   <p className="quiet centred">
@@ -607,19 +622,66 @@ export function App() {
   );
 }
 
+/** Picks a watched folder to open a fresh, subject-less terminal in. */
+function NewSessionMenu({
+  targets, onOpen
+}: {
+  targets: RunTarget[];
+  onOpen: (cwd?: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = () => setOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [open]);
+
+  return (
+    <div className="new-session-host">
+      <button
+        type="button" className="icon-button" aria-label="New session" aria-expanded={open}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+      >
+        <PlusIcon />
+      </button>
+      {open && (
+        <div className="menu" role="menu" onClick={(e) => e.stopPropagation()}>
+          <p className="menu-head">Open a terminal in</p>
+          {targets.length === 0 ? (
+            <p className="menu-empty">No watched folders yet.</p>
+          ) : (
+            targets.map((t) => (
+              <button key={t.path} role="menuitem" onClick={() => { setOpen(false); onOpen(t.path); }}>
+                {t.label}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Sessions({
-  sessions, active, onSelect
+  sessions, active, onSelect, targets, onOpen
 }: {
   sessions: SessionInfo[];
   active?: string;
   onSelect: (id: string) => void;
+  targets: RunTarget[];
+  onOpen: (cwd?: string) => void;
 }) {
   const current = active ?? sessions[0]?.id;
   return (
     <>
       <aside className="queue" aria-label="Sessions">
         <div className="queue-head">
-          <div className="queue-title-row"><h1>Sessions</h1></div>
+          <div className="queue-title-row">
+            <h1>Sessions</h1>
+            <NewSessionMenu targets={targets} onOpen={onOpen} />
+          </div>
         </div>
         <div className="queue-list">
           {sessions.length === 0 ? (
