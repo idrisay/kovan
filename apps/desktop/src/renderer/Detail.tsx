@@ -3,6 +3,7 @@ import { formatAge, isMerged } from '@baton/core';
 import { States } from './rows';
 import { Prose } from './Prose';
 import { RunViewer } from './RunViewer';
+import { Terminal } from './Terminal';
 import type {
   AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, Reviewer, RunKind, SessionInfo
 } from './types';
@@ -153,16 +154,48 @@ function History({ subject }: { subject: string }) {
   );
 }
 
+/**
+ * The session an agent run started in, docked at the bottom of the pane it
+ * was started from — not a jump to the Sessions tab. Starting a run and
+ * losing sight of the ticket you started it on was the whole complaint this
+ * fixes.
+ */
+function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () => void }) {
+  return (
+    <div className="detail-terminal">
+      <div className="term-head">
+        <span className="state">
+          <span className={session.running ? 'dot live' : 'dot'} />
+          {session.running ? (session.kind ?? session.runnerName) : `exited ${session.exitCode ?? ''}`}
+        </span>
+        <div className="term-head-actions">
+          <button className="ghost" onClick={onHide}>
+            Hide
+          </button>
+          <button className="ghost" onClick={() => void window.baton.sessionClose(session.id)}>
+            Close
+          </button>
+        </div>
+      </div>
+      <div className="term">
+        <Terminal sessionId={session.id} />
+      </div>
+    </div>
+  );
+}
+
 export function PullPane({
   pull,
   viewer,
   sessions,
+  activeSession,
   onRun,
   onOpenSession
 }: {
   pull: PullSummary;
   viewer: string;
   sessions: SessionInfo[];
+  activeSession?: string;
   onRun: (kind: RunKind, pull: PullSummary) => void;
   onOpenSession: (id: string) => void;
 }) {
@@ -189,6 +222,15 @@ export function PullPane({
   // not filed separately under the pull request that happened to open it.
   const subject = pull.title.match(/[A-Z][A-Z0-9]+-\d+/)?.[0] ?? `${pull.repo}#${pull.number}`;
 
+  // Only the session App.tsx currently has in mind, and only when it is
+  // actually this pull's own — otherwise a run started elsewhere would
+  // follow you here the moment you opened an unrelated pull request.
+  const inlineSession = sessions.find((s) => s.id === activeSession && s.subject === subject);
+  const [showTerminal, setShowTerminal] = useState(true);
+  useEffect(() => {
+    setShowTerminal(true);
+  }, [inlineSession?.id]);
+
   const unresolved = detail?.threads.filter((t) => !t.isResolved) ?? [];
   // Whether the left column has anything in it. A PR with no description and
   // no open threads should not leave a blank half: the rail spans instead.
@@ -199,6 +241,8 @@ export function PullPane({
   );
 
   return (
+    <div className="detail-shell">
+    <div className="detail-scroll">
     <div className="detail">
       <header className="detail-head">
         <h2>{pull.title}</h2>
@@ -338,17 +382,24 @@ export function PullPane({
         </aside>
       </div>
     </div>
+    </div>
+    {inlineSession && showTerminal && (
+      <InlineTerminal session={inlineSession} onHide={() => setShowTerminal(false)} />
+    )}
+    </div>
   );
 }
 
 export function TicketPane({
   issue,
   sessions,
+  activeSession,
   onRun,
   onOpenSession
 }: {
   issue: JiraIssue;
   sessions: SessionInfo[];
+  activeSession?: string;
   onRun: (kind: RunKind, issue: JiraIssue) => void;
   onOpenSession: (id: string) => void;
 }) {
@@ -371,7 +422,15 @@ export function TicketPane({
   const description = detail?.description ?? issue.description;
   const comments = detail?.comments ?? issue.comments;
 
+  const inlineSession = sessions.find((s) => s.id === activeSession && s.subject === issue.key);
+  const [showTerminal, setShowTerminal] = useState(true);
+  useEffect(() => {
+    setShowTerminal(true);
+  }, [inlineSession?.id]);
+
   return (
+    <div className="detail-shell">
+    <div className="detail-scroll">
     <div className="detail">
       <header className="detail-head">
         <h2>
@@ -442,6 +501,11 @@ export function TicketPane({
           <History subject={issue.key} />
         </aside>
       </div>
+    </div>
+    </div>
+    {inlineSession && showTerminal && (
+      <InlineTerminal session={inlineSession} onHide={() => setShowTerminal(false)} />
+    )}
     </div>
   );
 }

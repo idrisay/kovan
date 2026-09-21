@@ -436,6 +436,21 @@ button { font: inherit; cursor: pointer; }
 }
 .detail { max-width: var(--page); margin-inline: auto; padding: 22px 30px 44px; }
 
+/*
+ * A run started from this pull or ticket docks its terminal right here
+ * instead of sending you to the Sessions tab to find it. `.pane` still owns
+ * the scrollbar in the common case (no session docked) — this only splits
+ * it into an independently-scrolling reading area plus a fixed-height
+ * terminal once there is one to show.
+ */
+.detail-shell { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.detail-terminal {
+  flex: none; height: 320px; display: flex; flex-direction: column;
+  border-top: 1px solid var(--hair-strong); background: var(--editor);
+}
+.term-head-actions { display: flex; gap: 6px; }
+
 /* --- Two columns, once there is room for two ------------------------------
  *
  * The header spans: a title, its facts and its actions belong to the whole

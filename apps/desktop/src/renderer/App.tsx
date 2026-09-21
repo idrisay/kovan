@@ -479,10 +479,14 @@ export function App() {
     });
   }, []);
 
-  /** Jumping to a session already running, from wherever it is found. */
+  /**
+   * Bringing a session into view, from wherever it is found. Deliberately
+   * does not change `view` — called from a pull request or ticket's own
+   * "Sessions" list, it should surface the terminal right there, docked at
+   * the bottom of the pane already open, not jump to the separate tab.
+   */
   const openSession = useCallback((id: string) => {
     setActiveSession(id);
-    setView('sessions');
   }, []);
 
   const current = VIEWS.find((v) => v.id === view)!;
@@ -573,7 +577,9 @@ export function App() {
   const onStarted = (sessionId: string) => {
     setRunSheet(undefined);
     setActiveSession(sessionId);
-    setView('sessions');
+    // No view change: a run is always started from the pull request or
+    // ticket it is about, and that pane docks the new session's terminal
+    // itself the moment `sessions` includes it — see `PullPane`/`TicketPane`.
     void window.baton.sessions().then(setSessions);
   };
 
@@ -801,6 +807,7 @@ export function App() {
                     pull={selected.pull}
                     viewer={snapshot.viewer}
                     sessions={sessions}
+                    activeSession={activeSession}
                     onRun={(kind, pull) => setRunSheet({ kind, pull })}
                     onOpenSession={openSession}
                   />
@@ -808,6 +815,7 @@ export function App() {
                   <TicketPane
                     issue={selected.issue}
                     sessions={sessions}
+                    activeSession={activeSession}
                     onRun={(kind, issue) => setRunSheet({ kind, issue })}
                     onOpenSession={openSession}
                   />

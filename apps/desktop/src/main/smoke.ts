@@ -481,6 +481,27 @@ export async function smokeUi(
     await new Promise((r) => setTimeout(r, 100));
   }
 
+  if (process.env['BATON_SHOT_PR_INLINE_TERMINAL']) {
+    await read(win, `document.querySelector('.rows .row')?.click()`);
+    await until(win, `document.querySelector('.detail-actions .primary')`, 5_000);
+    await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
+    await until(win, `document.querySelector('.run-controls select')`, 5_000);
+    await until(win, `document.querySelector('.sheet-foot .primary:not(:disabled)')`, 10_000);
+    await read(win, `document.querySelector('.sheet-foot .primary')?.click()`);
+    await until(win, `document.querySelector('.detail-terminal')`, 10_000);
+    await new Promise((r) => setTimeout(r, 400));
+    const stayedOnPulls = await read(
+      win,
+      `document.querySelector('.rail-item[aria-label="Pull requests"]')?.classList.contains('active')`
+    );
+    console.log('stayedOnPulls:', stayedOnPulls);
+    await writeFile(
+      process.env['BATON_SHOT_PR_INLINE_TERMINAL'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_PR_INLINE_TERMINAL']}`);
+  }
+
   const result: Record<string, unknown> = {
     rendererMounted: await read(win, `document.querySelector('#root')?.children.length > 0`),
     preloadApi: await read(win, `typeof window.baton?.refresh`),
@@ -845,6 +866,30 @@ export async function smokeUi(
       (await win.webContents.capturePage()).toPNG()
     );
     console.log(`shot: ${process.env['BATON_SHOT_TICKET']}`);
+  }
+
+  if (process.env['BATON_SHOT_INLINE_TERMINAL']) {
+    await read(
+      win,
+      `Array.from(document.querySelectorAll('.detail-actions .primary'))
+        .find(b => b.textContent.includes('Work on this'))?.click()`
+    );
+    await until(win, `document.querySelector('.run-controls select')`, 5_000);
+    // Runner + folder options load async; the Run button stays disabled
+    // until both are populated.
+    await until(win, `document.querySelector('.sheet-foot .primary:not(:disabled)')`, 10_000);
+    await read(win, `document.querySelector('.sheet-foot .primary')?.click()`);
+    await until(win, `document.querySelector('.detail-terminal')`, 10_000);
+    await new Promise((r) => setTimeout(r, 400));
+    result['stayedOnTicket'] = await read(
+      win,
+      `document.querySelector('.rail-item[aria-label="Tickets"]')?.classList.contains('active')`
+    );
+    await writeFile(
+      process.env['BATON_SHOT_INLINE_TERMINAL'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_INLINE_TERMINAL']}`);
   }
 
   if (process.env['BATON_SHOT_RUN_VIEWER']) {
