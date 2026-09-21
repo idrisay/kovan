@@ -4,7 +4,7 @@ import { States } from './rows';
 import { Prose } from './Prose';
 import { RunViewer } from './RunViewer';
 import { Terminal } from './Terminal';
-import { DockBottomIcon, DockLeftIcon, DockRightIcon, DockTopIcon } from './icons';
+import { DockBottomIcon, DockLeftIcon, DockRightIcon, DockTopIcon, TerminalIcon } from './icons';
 import type {
   AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, Reviewer, RunKind, SessionInfo
 } from './types';
@@ -325,6 +325,43 @@ function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () 
   );
 }
 
+/**
+ * A terminal that belongs to *looking at* this ticket or pull request, not to
+ * a run started from it — no prompt, no history, no report. It is scoped to
+ * whichever one is open: switching to another closes it, because every
+ * session here is filed under the ticket/PR it was opened for, and a scratch
+ * terminal left running under the one you just navigated away from is a
+ * session you will not think to go looking for in Sessions.
+ */
+function useQuickTerminal(
+  identity: string,
+  cwdHint: string | undefined,
+  subject: string,
+  onOpenSession: (id: string) => void
+): () => void {
+  const sessionId = useRef<string>();
+
+  const open = useCallback(() => {
+    void window.baton.defaultCwd(cwdHint).then((cwd) =>
+      window.baton.openTerminal(cwd, subject, `Terminal — ${subject}`)
+    ).then((session) => {
+      sessionId.current = session.id;
+      onOpenSession(session.id);
+    });
+  }, [cwdHint, subject, onOpenSession]);
+
+  useEffect(() => {
+    return () => {
+      if (sessionId.current) {
+        void window.baton.sessionClose(sessionId.current);
+        sessionId.current = undefined;
+      }
+    };
+  }, [identity]);
+
+  return open;
+}
+
 export function PullPane({
   pull,
   viewer,
@@ -372,6 +409,10 @@ export function PullPane({
     setShowTerminal(true);
   }, [inlineSession?.id]);
 
+  const openQuickTerminal = useQuickTerminal(
+    `${pull.repo}#${pull.number}`, pull.repo, subject, onOpenSession
+  );
+
   const unresolved = detail?.threads.filter((t) => !t.isResolved) ?? [];
   // Whether the left column has anything in it. A PR with no description and
   // no open threads should not leave a blank half: the rail spans instead.
@@ -401,6 +442,9 @@ export function PullPane({
             app exists, and 'Open on GitHub' is the escape hatch. */}
         <div className="detail-actions">
           <RunButtons kinds={kinds} onRun={(kind) => onRun(kind, pull)} />
+          <button className="ghost" onClick={openQuickTerminal}>
+            <TerminalIcon size={13} /> Terminal
+          </button>
           <button className="ghost" onClick={() => void window.baton.openExternal(pull.url)}>
             Open on GitHub
           </button>
@@ -569,6 +613,8 @@ export function TicketPane({
     setShowTerminal(true);
   }, [inlineSession?.id]);
 
+  const openQuickTerminal = useQuickTerminal(issue.key, undefined, issue.key, onOpenSession);
+
   return (
     <div className="detail-shell">
     <div className="detail-scroll">
@@ -591,6 +637,9 @@ export function TicketPane({
         </div>
         <div className="detail-actions">
           <RunButtons kinds={['implement']} onRun={(kind) => onRun(kind, issue)} />
+          <button className="ghost" onClick={openQuickTerminal}>
+            <TerminalIcon size={13} /> Terminal
+          </button>
           <button className="ghost" onClick={() => void window.baton.openExternal(issue.url)}>
             Open in Jira
           </button>

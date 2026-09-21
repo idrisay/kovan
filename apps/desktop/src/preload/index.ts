@@ -71,7 +71,8 @@ const api = {
   sessionResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.invoke('baton:session-resize', id, cols, rows),
   sessionClose: (id: string) => ipcRenderer.invoke('baton:session-close', id),
-  openTerminal: (cwd?: string) => ipcRenderer.invoke('baton:open-terminal', cwd),
+  openTerminal: (cwd?: string, subject?: string, title?: string) =>
+    ipcRenderer.invoke('baton:open-terminal', cwd, subject, title),
   onSessionOutput: (listener: (id: string, data: string) => void) => {
     const handler = (_e: unknown, id: string, data: string) => listener(id, data);
     ipcRenderer.on('baton:session-output', handler);

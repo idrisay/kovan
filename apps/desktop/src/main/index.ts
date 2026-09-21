@@ -315,13 +315,16 @@ app.whenReady().then(async () => {
     sessions.resize(id, cols, rows);
   });
   ipcMain.handle('baton:session-close', (_event, id: string) => sessions.close(id));
-  ipcMain.handle('baton:open-terminal', async (_event, cwd?: string) => {
-    const target = cwd ?? (await agents.defaultCwd());
-    if (!target) {
-      throw new Error('No folder to open a terminal in');
+  ipcMain.handle(
+    'baton:open-terminal',
+    async (_event, cwd?: string, subject?: string, title?: string) => {
+      const target = cwd ?? (await agents.defaultCwd());
+      if (!target) {
+        throw new Error('No folder to open a terminal in');
+      }
+      return sessions.open({ cwd: target, title: title ?? 'Terminal', runnerName: 'Shell', subject });
     }
-    return sessions.open({ cwd: target, title: 'Terminal', runnerName: 'Shell' });
-  });
+  );
 
   sessions.onOutput(({ id, data }) => {
     if (window && !window.isDestroyed()) {

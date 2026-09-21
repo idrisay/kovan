@@ -106,7 +106,7 @@ export interface BatonApi {
   sessionWrite(id: string, data: string): Promise<void>;
   sessionResize(id: string, cols: number, rows: number): Promise<void>;
   sessionClose(id: string): Promise<void>;
-  openTerminal(cwd?: string): Promise<SessionInfo>;
+  openTerminal(cwd?: string, subject?: string, title?: string): Promise<SessionInfo>;
   onSessionOutput(listener: (id: string, data: string) => void): () => void;
   onSessions(listener: (list: SessionInfo[]) => void): () => void;
 }

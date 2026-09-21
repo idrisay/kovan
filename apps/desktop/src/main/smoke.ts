@@ -588,6 +588,39 @@ export async function smokeUi(
     console.log(`shot: ${process.env['BATON_SHOT_PR_INLINE_TERMINAL']}`);
   }
 
+  // --- The quick terminal: scoped to looking at one ticket/PR, not a run ----
+  // Opened from the "Terminal" button rather than a run sheet, and closed the
+  // moment you navigate to a different pull request — unlike an agent run's
+  // session, which is meant to outlive the pane it was started from.
+  if (process.env['BATON_SHOT_QUICK_TERMINAL']) {
+    await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+    await until(win, `document.querySelector('.detail-actions .ghost')`, 5_000);
+    await read(
+      win,
+      `Array.from(document.querySelectorAll('.detail-actions .ghost'))
+        .find(b => b.textContent.includes('Terminal'))?.click()`
+    );
+    await until(win, `document.querySelector('.detail-terminal')`, 10_000);
+    await new Promise((r) => setTimeout(r, 300));
+    await writeFile(
+      process.env['BATON_SHOT_QUICK_TERMINAL'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_QUICK_TERMINAL']}`);
+
+    const openedCount = (await read(win, `window.baton.sessions()`) as { id: string }[]).length;
+
+    // A different pull request — the quick terminal belongs to the first one.
+    await read(win, `document.querySelectorAll('.rows .row')[1]?.click()`);
+    await new Promise((r) => setTimeout(r, 400));
+    const afterNavCount = (await read(win, `window.baton.sessions()`) as { id: string }[]).length;
+
+    console.log(
+      'quickTerminalClosedOnNavigate:',
+      JSON.stringify({ openedCount, afterNavCount, closed: afterNavCount < openedCount })
+    );
+  }
+
   // --- Moving the inline terminal to each of its four docks -----------------
   // The complaint this answers: a run's terminal always landed at the bottom
   // of the pane with no way to move it. Checked the same way the sidebar
