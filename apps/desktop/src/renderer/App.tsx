@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatAge, isBlocked } from '@baton/core';
-import type { JiraIssue, PullSummary, RunKind, RunTarget, SessionInfo, Snapshot, ThemeChoice } from './types';
+import type {
+  JiraIssue, PolledProvider, PullSummary, RunKind, RunTarget, SessionInfo, Snapshot, ThemeChoice
+} from './types';
 import { Settings } from './Settings';
 import { PullPane, TicketPane } from './Detail';
 import { RunSheet } from './RunSheet';
@@ -25,8 +27,16 @@ const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JS
 const EMPTY: Snapshot = {
   at: 0, viewer: '', blocked: [], mine: [], reviewRequested: [],
   merged: [], mergedTotal: 0, loadingMerged: false,
-  tickets: [], connected: [], errors: [], refreshing: false
+  tickets: [], connected: [], errors: [], refreshing: false,
+  refreshedAt: {}, refreshingProviders: []
 };
+
+/** The two providers a per-provider refresh actually has something to do
+ *  for, and what the menu calls each one. */
+const REFRESHABLE: { id: PolledProvider; label: string }[] = [
+  { id: 'github', label: 'Pull requests' },
+  { id: 'jira', label: 'Jira tickets' }
+];
 
 /** How many more merged pull requests one press of the footer asks for. */
 const MERGED_STEP = 10;
@@ -370,6 +380,78 @@ function PullFilterMenu({
   );
 }
 
+/**
+ * The "just now" stamp in the titlebar, turned into a menu.
+ *
+ * It always answers "refresh all" — that button used to be the whole of the
+ * stamp's job — but a slow provider no longer has to hold up a fast one: each
+ * connected provider gets its own age and its own refresh, for the ticket
+ * that only wants Jira re-asked without waiting on GitHub too.
+ */
+function RefreshMenu({
+  snapshot, onRefreshAll, onRefreshProvider
+}: {
+  snapshot: Snapshot;
+  onRefreshAll: () => void;
+  onRefreshProvider: (id: PolledProvider) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = () => setOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [open]);
+
+  const rows = REFRESHABLE.filter((p) => snapshot.connected.includes(p.id));
+
+  return (
+    <div className="menu-host">
+      <button
+        type="button"
+        className="stamp"
+        aria-label="Refresh"
+        aria-expanded={open}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+      >
+        {snapshot.refreshing ? 'refreshing' : formatAge(new Date(snapshot.at).toISOString())}
+      </button>
+      {open && (
+        <div className="menu stamp-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button" role="menuitem" className="menu-refresh-all"
+            disabled={snapshot.refreshing}
+            onClick={() => { onRefreshAll(); setOpen(false); }}
+          >
+            <RefreshIcon size={13} />
+            {snapshot.refreshing ? 'Refreshing…' : 'Refresh all'}
+          </button>
+          {rows.length > 0 && <div className="menu-rule" />}
+          {rows.map(({ id, label }) => {
+            const busy = snapshot.refreshingProviders.includes(id);
+            const at = snapshot.refreshedAt[id];
+            return (
+              <div key={id} className="menu-refresh-row">
+                <span className="menu-refresh-label">{label}</span>
+                <span className="menu-refresh-age">
+                  {busy ? 'refreshing' : at ? formatAge(new Date(at).toISOString()) : 'never'}
+                </span>
+                <button
+                  type="button" className="icon-button" aria-label={`Refresh ${label}`}
+                  disabled={busy} onClick={() => onRefreshProvider(id)}
+                >
+                  <RefreshIcon size={12} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY);
   const [view, setView] = useState<ViewId>('pulls');
@@ -597,11 +679,11 @@ export function App() {
         {snapshot.viewer && <span className="viewer">{snapshot.viewer}</span>}
         <span className="spacer" />
         {snapshot.at > 0 && (
-          <span className="stamp">
-            {snapshot.refreshing
-              ? 'refreshing'
-              : formatAge(new Date(snapshot.at).toISOString())}
-          </span>
+          <RefreshMenu
+            snapshot={snapshot}
+            onRefreshAll={refresh}
+            onRefreshProvider={(id) => void window.baton.refreshProvider(id)}
+          />
         )}
       </header>
 

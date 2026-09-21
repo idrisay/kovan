@@ -12,6 +12,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 const api = {
   snapshot: () => ipcRenderer.invoke('baton:snapshot'),
   refresh: () => ipcRenderer.invoke('baton:refresh'),
+  refreshProvider: (id: string) => ipcRenderer.invoke('baton:refresh-provider', id),
   openExternal: (url: string) => ipcRenderer.invoke('baton:open-external', url),
   credentialFields: () => ipcRenderer.invoke('baton:credential-fields'),
   loadMoreMerged: (limit: number) => ipcRenderer.invoke('baton:merged-more', limit),

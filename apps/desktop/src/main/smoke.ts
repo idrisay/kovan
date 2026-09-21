@@ -24,7 +24,7 @@ import { app, type BrowserWindow } from 'electron';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import type { Agents } from './agents';
-import type { Poller } from './poller';
+import type { Poller, Snapshot } from './poller';
 import type { Sessions } from './sessions';
 
 export type SmokeMode = '1' | 'seeded' | 'live' | 'pty' | 'workspace';
@@ -154,7 +154,7 @@ export function mergedFixture(count: number) {
  * pressing the footer goes through the real IPC round trip instead of the
  * smoke quietly pushing a bigger list at the renderer.
  */
-export function fixtureSnapshot(mergedCount: number) {
+export function fixtureSnapshot(mergedCount: number): Snapshot {
   return {
     at: Date.now(),
     viewer: 'idrisay',
@@ -167,7 +167,9 @@ export function fixtureSnapshot(mergedCount: number) {
     tickets: [TICKET, TICKET_LOW, TICKET_HIGHEST],
     connected: ['github' as const],
     errors: [],
-    refreshing: false
+    refreshing: false,
+    refreshedAt: { github: Date.now() - 90_000 },
+    refreshingProviders: []
   };
 }
 
@@ -477,6 +479,42 @@ export async function smokeUi(
       (await win.webContents.capturePage()).toPNG()
     );
     console.log(`shot: ${process.env['BATON_SHOT_PULL_FILTER']}`);
+    await read(win, `document.body.click()`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  // --- The "just now" stamp, as a refresh menu -------------------------------
+  // `connected` here is the seeded fixture's (github only) — the real poller
+  // underneath never saw a token in this profile, so clicking a provider's
+  // own refresh exercises the button and the IPC round trip without needing
+  // a real GitHub/Jira connection.
+  if (process.env['BATON_SHOT_REFRESH_MENU']) {
+    await read(win, `document.querySelector('[aria-label="Refresh"]')?.click()`);
+    await until(win, `document.querySelector('.stamp-menu')`, 5_000);
+    await new Promise((r) => setTimeout(r, 150));
+    const rows = (await read(
+      win,
+      `Array.from(document.querySelectorAll('.menu-refresh-row')).map(r => ({
+         label: r.querySelector('.menu-refresh-label')?.textContent ?? '',
+         age: r.querySelector('.menu-refresh-age')?.textContent ?? ''
+       }))`
+    )) as { label: string; age: string }[];
+    console.log('refreshMenuRows:', JSON.stringify(rows));
+    await writeFile(
+      process.env['BATON_SHOT_REFRESH_MENU'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_REFRESH_MENU']}`);
+
+    const buttonExists = await read(
+      win, `Boolean(document.querySelector('[aria-label="Refresh Pull requests"]'))`
+    );
+    await read(win, `document.querySelector('[aria-label="Refresh Pull requests"]')?.click()`);
+    await new Promise((r) => setTimeout(r, 300));
+    console.log(
+      'refreshOneProvider:',
+      JSON.stringify({ rowFound: rows.length > 0, buttonExists })
+    );
     await read(win, `document.body.click()`);
     await new Promise((r) => setTimeout(r, 100));
   }

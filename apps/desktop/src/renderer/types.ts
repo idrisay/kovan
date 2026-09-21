@@ -20,6 +20,10 @@ export type WorkspaceStatus = RepoStatus & { changes: number };
 /** 'system' follows the OS; the other two hold regardless of it. */
 export type ThemeChoice = 'system' | 'light' | 'dark';
 
+/** The two providers a "refresh just this one" control has anything to do
+ *  for — see the note on `Snapshot['refreshedAt']` in `main/poller.ts`. */
+export type PolledProvider = 'github' | 'jira';
+
 export interface SessionInfo {
   id: string;
   title: string;
@@ -46,6 +50,8 @@ export interface Snapshot {
   connected: ProviderId[];
   errors: { provider: ProviderId; message: string }[];
   refreshing: boolean;
+  refreshedAt: Partial<Record<PolledProvider, number>>;
+  refreshingProviders: PolledProvider[];
 }
 
 export type StartResult = { ok: true; sessionId: string } | { ok: false; error: string };
@@ -53,6 +59,7 @@ export type StartResult = { ok: true; sessionId: string } | { ok: false; error: 
 export interface BatonApi {
   snapshot(): Promise<Snapshot>;
   refresh(): Promise<Snapshot>;
+  refreshProvider(id: PolledProvider): Promise<Snapshot>;
   openExternal(url: string): Promise<void>;
   credentialFields(): Promise<Record<string, { key: string; label: string; placeholder?: string; secret?: boolean }[]>>;
   settings(): Promise<Record<string, unknown>>;

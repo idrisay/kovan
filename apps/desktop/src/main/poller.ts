@@ -22,6 +22,11 @@ import { findClones } from '@baton/git';
 import { EventEmitter } from '@baton/host';
 import type { DesktopHost } from './host';
 
+/** The two providers the poller itself fetches queues from — the ones a
+ *  "refresh just this one" control actually has something to do for.
+ *  Sentry/Grafana/Figma are connectable in Settings but never polled here. */
+export type PolledProvider = 'github' | 'jira';
+
 export interface Snapshot {
   at: number;
   viewer: string;
@@ -39,6 +44,11 @@ export interface Snapshot {
   connected: ProviderId[];
   errors: { provider: ProviderId; message: string }[];
   refreshing: boolean;
+  /** When each polled provider was last asked, whether or not it answered. */
+  refreshedAt: Partial<Record<PolledProvider, number>>;
+  /** Which polled providers a single-provider refresh is in flight for —
+   *  distinct from `refreshing`, which is only ever true for a full refresh. */
+  refreshingProviders: PolledProvider[];
 }
 
 export const EMPTY: Snapshot = {
@@ -53,7 +63,9 @@ export const EMPTY: Snapshot = {
   tickets: [],
   connected: [],
   errors: [],
-  refreshing: false
+  refreshing: false,
+  refreshedAt: {},
+  refreshingProviders: []
 };
 
 export class Poller {
@@ -66,6 +78,7 @@ export class Poller {
   private timer?: NodeJS.Timeout;
   private inFlight?: AbortController;
   private lastRun = 0;
+  private readonly refreshingProviders = new Set<PolledProvider>();
 
   constructor(private readonly host: DesktopHost) {
     this.http = new HttpClient(host.log);
@@ -123,8 +136,9 @@ export class Poller {
       return this.snapshot;
     }
 
+    const now = Date.now();
     const next: Snapshot = {
-      at: Date.now(),
+      at: now,
       viewer: github?.viewer ?? '',
       blocked: (github?.mine ?? []).filter((pull) => isBlocked(pull)),
       mine: github?.mine ?? [],
@@ -138,7 +152,69 @@ export class Poller {
       tickets: jira ?? [],
       connected,
       errors,
-      refreshing: false
+      refreshing: false,
+      refreshedAt: {
+        ...this.snapshot.refreshedAt,
+        ...(connected.includes('github') ? { github: now } : {}),
+        ...(connected.includes('jira') ? { jira: now } : {})
+      },
+      refreshingProviders: []
+    };
+    this.publish(next);
+    return next;
+  }
+
+  /**
+   * Refreshes one provider's own queue, leaving the other's exactly as it
+   * was — the "or can update just one of them" half of the timestamp menu.
+   * Skipped entirely for a provider that is not connected: there is nothing
+   * to ask, and stamping `refreshedAt` for it would claim a refresh that
+   * never happened.
+   */
+  async refreshProvider(id: PolledProvider): Promise<Snapshot> {
+    if (this.refreshingProviders.has(id)) {
+      return this.snapshot;
+    }
+    const connected = await this.credentials.connected();
+    if (!connected.includes(id)) {
+      return this.snapshot;
+    }
+
+    this.refreshingProviders.add(id);
+    this.publish({ ...this.snapshot, refreshingProviders: [...this.refreshingProviders] });
+
+    const errors = this.snapshot.errors.filter((e) => e.provider !== id);
+    const controller = new AbortController();
+
+    let patch: Partial<Snapshot> = {};
+    if (id === 'github') {
+      const github = await this.loadGitHub(connected, controller.signal, errors);
+      if (github) {
+        patch = {
+          viewer: github.viewer,
+          blocked: github.mine.filter((pull) => isBlocked(pull)),
+          mine: github.mine,
+          reviewRequested: github.reviewRequested,
+          merged: github.merged,
+          mergedTotal: github.mergedTotal,
+          loadingMerged: false
+        };
+      }
+    } else {
+      const jira = await this.loadJira(connected, controller.signal, errors);
+      if (jira) {
+        patch = { tickets: jira };
+      }
+    }
+
+    this.refreshingProviders.delete(id);
+    const next: Snapshot = {
+      ...this.snapshot,
+      ...patch,
+      connected,
+      errors,
+      refreshedAt: { ...this.snapshot.refreshedAt, [id]: Date.now() },
+      refreshingProviders: [...this.refreshingProviders]
     };
     this.publish(next);
     return next;

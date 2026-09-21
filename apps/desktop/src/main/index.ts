@@ -16,7 +16,7 @@ import { app, BrowserWindow, ipcMain, nativeTheme, shell } from 'electron';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHost } from './host';
-import { Poller, type Snapshot } from './poller';
+import { Poller, type PolledProvider, type Snapshot } from './poller';
 import { BatonTray } from './tray';
 import { Activity } from './notify';
 import { CREDENTIAL_FIELDS, HttpClient, JiraClient, fetchPullDetail } from '@baton/providers';
@@ -89,6 +89,12 @@ function createWindow(): void {
   });
 
   window.once('ready-to-show', () => window?.show());
+
+  if (process.env['BATON_SMOKE']) {
+    window.webContents.on('console-message', (_event, _level, message) => {
+      console.log('[renderer]', message);
+    });
+  }
 
   // Destroy, don't hide. See the note at the top of this file.
   window.on('closed', () => {
@@ -177,6 +183,7 @@ app.whenReady().then(async () => {
   // --- here but never sent back out, so the renderer cannot leak one.
   ipcMain.handle('baton:snapshot', () => poller.current());
   ipcMain.handle('baton:refresh', () => poller.refresh(true));
+  ipcMain.handle('baton:refresh-provider', (_event, id: PolledProvider) => poller.refreshProvider(id));
   ipcMain.handle('baton:open-external', (_event, url: string) => shell.openExternal(url));
   ipcMain.handle('baton:credential-fields', () => CREDENTIAL_FIELDS);
   ipcMain.handle('baton:settings', () => host.config.all());
