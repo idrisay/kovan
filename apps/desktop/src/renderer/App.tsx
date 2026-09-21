@@ -501,6 +501,81 @@ function RefreshMenu({
   );
 }
 
+/** Short names for the footer's connection dots — deliberately not exported
+ *  from Settings.tsx, which owns the fuller provider chrome (badges, fields).
+ *  A five-entry map duplicated once here is cheaper than coupling the two. */
+const STATUSBAR_PROVIDER: Record<string, string> = {
+  github: 'GitHub', jira: 'Jira', sentry: 'Sentry', grafana: 'Grafana', figma: 'Figma'
+};
+
+/**
+ * The window's own bottom bar, in the shape VS Code's is: a thin strip that
+ * is always there, connections on the left, activity counts on the right,
+ * every segment a shortcut to the view it summarises rather than a number
+ * with nowhere to go.
+ *
+ * Deliberately not the rail's job to say twice: the rail's pips answer
+ * "is anything waiting", the bar answers "how much, of what, and is a
+ * connection actually failing" — the closest thing this app has to Sign in
+ * to Bitbucket / 0 errors / 0 warnings on the reference screenshot.
+ */
+function StatusBar({
+  snapshot, sessions, onView
+}: {
+  snapshot: Snapshot;
+  sessions: SessionInfo[];
+  onView: (view: ViewId) => void;
+}) {
+  const running = sessions.filter((s) => s.running).length;
+  const failed = new Set(snapshot.errors.map((e) => e.provider));
+
+  return (
+    <footer className="statusbar">
+      <div className="statusbar-group">
+        {snapshot.connected.length === 0 ? (
+          <span className="statusbar-item quiet">Nothing connected</span>
+        ) : (
+          snapshot.connected.map((id) => (
+            <span
+              key={id}
+              className="statusbar-item"
+              title={failed.has(id) ? snapshot.errors.find((e) => e.provider === id)?.message : undefined}
+            >
+              <span className={`dot ${failed.has(id) ? 'fail' : 'pass'}`} />
+              {STATUSBAR_PROVIDER[id] ?? id}
+            </span>
+          ))
+        )}
+      </div>
+      <span className="spacer" />
+      <div className="statusbar-group">
+        <button
+          type="button"
+          className={snapshot.blocked.length > 0 ? 'statusbar-item fail' : 'statusbar-item'}
+          onClick={() => onView('pulls')}
+        >
+          <span className={`dot ${snapshot.blocked.length > 0 ? 'fail' : ''}`} />
+          {snapshot.blocked.length} blocked
+        </button>
+        <button type="button" className="statusbar-item" onClick={() => onView('pulls')}>
+          {snapshot.reviewRequested.length} awaiting review
+        </button>
+        <button type="button" className="statusbar-item" onClick={() => onView('tickets')}>
+          {snapshot.tickets.length} tickets
+        </button>
+        <button
+          type="button"
+          className={running > 0 ? 'statusbar-item live' : 'statusbar-item'}
+          onClick={() => onView('sessions')}
+        >
+          <span className={`dot ${running > 0 ? 'live' : ''}`} />
+          {running} running
+        </button>
+      </div>
+    </footer>
+  );
+}
+
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY);
   const [view, setView] = useState<ViewId>('pulls');
@@ -977,6 +1052,8 @@ export function App() {
           )}
         </div>
       )}
+
+      <StatusBar snapshot={snapshot} sessions={sessions} onView={setView} />
 
       {connecting && (
         <Settings

@@ -551,6 +551,36 @@ export async function smokeUi(
     console.log(`shot: ${process.env['BATON_SHOT_RUN_BUTTONS']}`);
   }
 
+  // --- The bottom status bar -------------------------------------------------
+  if (process.env['BATON_SHOT_STATUSBAR']) {
+    await writeFile(
+      process.env['BATON_SHOT_STATUSBAR'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_STATUSBAR']}`);
+
+    const text = () => read(win, `document.querySelector('.statusbar')?.textContent ?? ''`);
+    const before = await text();
+    // Every count on the right is a shortcut — "N tickets" switches to Tickets
+    // the same as clicking its rail icon would.
+    await read(
+      win,
+      `Array.from(document.querySelectorAll('.statusbar-item'))
+        .find(b => b.textContent.includes('tickets'))?.click()`
+    );
+    await until(win, `document.querySelector('.rail-item[aria-current]')?.getAttribute('aria-label') === 'Tickets'`, 5_000);
+    const activeViewAfterClick = await read(
+      win, `document.querySelector('.rail-item[aria-current]')?.getAttribute('aria-label')`
+    );
+    console.log(
+      'statusbar:',
+      JSON.stringify({ before, activeViewAfterClick })
+    );
+    // Back to Pulls, so nothing downstream inherits a view it never asked for.
+    await read(win, `document.querySelector('.rail-item[aria-label="Pull requests"]')?.click()`);
+    await new Promise((r) => setTimeout(r, 150));
+  }
+
   // --- The "just now" stamp, as a refresh menu -------------------------------
   // `connected` here is the seeded fixture's (github only) — the real poller
   // underneath never saw a token in this profile, so clicking a provider's

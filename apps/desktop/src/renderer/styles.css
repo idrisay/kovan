@@ -175,6 +175,28 @@ button { font: inherit; cursor: pointer; }
   font-size: 14px; font-weight: 600; letter-spacing: -0.015em;
   color: var(--title);
 }
+/*
+ * The window's own bottom bar — connections on the left, activity counts on
+ * the right, every segment a shortcut rather than a number with nowhere to
+ * go. Same band treatment as the titlebar (rule 1: the rail's own surface),
+ * just anchored to the other edge.
+ */
+.statusbar {
+  display: flex; align-items: center; gap: 4px;
+  height: 24px; flex: none; padding: 0 10px;
+  background: var(--rail); border-top: 1px solid var(--hair);
+  font-family: var(--mono); font-size: 10.5px; color: var(--dim);
+}
+.statusbar-group { display: flex; align-items: center; gap: 2px; }
+.statusbar-item {
+  display: flex; align-items: center; gap: 5px;
+  background: none; border: 0; padding: 2px 7px; border-radius: 5px;
+  color: inherit; font: inherit;
+}
+button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255, 255, 0.05); }
+.statusbar-item.fail { color: var(--blocked-bright); }
+.statusbar-item.live { color: var(--pass); }
+
 .viewer, .stamp { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
 .stamp {
   background: none; border: 0; padding: 2px 4px; margin: -2px -4px; border-radius: 5px;
