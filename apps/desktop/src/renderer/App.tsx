@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { formatAge, isBlocked } from '@baton/core';
+import { DEFAULT_PULL_SORT, formatAge, isBlocked, PULL_SORTS, sortPulls, type PullSort } from '@baton/core';
 import type {
   JiraIssue, PolledProvider, PullSummary, RunKind, RunTarget, SessionInfo, Snapshot, ThemeChoice
 } from './types';
@@ -286,6 +286,55 @@ function TicketSortMenu({
   );
 }
 
+/** The pull requests view's own sort icon — a menu now, not the dead button
+ *  it used to be. `sortPulls`/`PULL_SORTS` already existed in `@baton/core`
+ *  for the poller's own default ordering; nothing in the UI ever called them. */
+function PullSortMenu({
+  value, onChange
+}: {
+  value: PullSort;
+  onChange: (sort: PullSort) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = () => setOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [open]);
+
+  return (
+    <div className="menu-host">
+      <button
+        type="button"
+        className={value !== DEFAULT_PULL_SORT ? 'icon-button active' : 'icon-button'}
+        aria-label="Sort pull requests" aria-expanded={open}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+      >
+        <SortIcon />
+      </button>
+      {open && (
+        <div className="menu" role="menu" onClick={(e) => e.stopPropagation()}>
+          <p className="menu-head">Sort by</p>
+          {PULL_SORTS.map((opt) => (
+            <button
+              key={opt.key}
+              role="menuitemradio"
+              aria-checked={opt.key === value}
+              className={opt.key === value ? 'active' : ''}
+              title={opt.description}
+              onClick={() => { onChange(opt.key); setOpen(false); }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The pull request fields a facet filter narrows down. */
 type PullFacetKey = 'repo' | 'author' | 'checks';
 
@@ -464,6 +513,7 @@ export function App() {
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsed);
   const [pullFilters, setPullFilters] = useState<PullFilters>(emptyPullFilters);
+  const [pullSort, setPullSort] = useState<PullSort>(DEFAULT_PULL_SORT);
   const [ticketFilters, setTicketFilters] = useState<TicketFilters>(emptyTicketFilters);
   const [ticketSort, setTicketSort] = useState<TicketSort>('updated');
   const [theme, setThemeState] = useState<ThemeChoice>('system');
@@ -609,16 +659,27 @@ export function App() {
     const blockedIds = new Set(snapshot.blocked.map((p) => `${p.repo}#${p.number}`));
     const rest = snapshot.mine.filter((p) => !blockedIds.has(`${p.repo}#${p.number}`));
     const drafts = rest.filter((p) => p.isDraft).filter(match);
+    // Merged keeps its own newest-shipped order regardless of the sort menu:
+    // it is a window onto a much longer list, paginated by merge date, and
+    // re-sorting just the visible page by "created" or "updated" would make
+    // "Show more" fetch a wider window that no longer matches what is on screen.
     return [
-      { id: 'blocked', label: 'Blocked on you', pulls: snapshot.blocked.filter(match), tint: true },
       {
-        id: 'review', label: 'Awaiting your review', pulls: snapshot.reviewRequested.filter(match), tint: false
+        id: 'blocked', label: 'Blocked on you',
+        pulls: sortPulls(snapshot.blocked.filter(match), pullSort), tint: true
       },
-      { id: 'open', label: 'Open', pulls: rest.filter((p) => !p.isDraft).filter(match), tint: false },
+      {
+        id: 'review', label: 'Awaiting your review',
+        pulls: sortPulls(snapshot.reviewRequested.filter(match), pullSort), tint: false
+      },
+      {
+        id: 'open', label: 'Open',
+        pulls: sortPulls(rest.filter((p) => !p.isDraft).filter(match), pullSort), tint: false
+      },
       {
         id: 'drafts',
         label: 'Drafts',
-        pulls: drafts,
+        pulls: sortPulls(drafts, pullSort),
         tint: false,
         // A draft is not waiting on anyone, so the section is grey — but one
         // that cannot merge is still worth saying out loud from the outside,
@@ -627,7 +688,7 @@ export function App() {
       },
       { id: 'merged', label: 'Recently merged', pulls: snapshot.merged.filter(match), tint: false }
     ];
-  }, [snapshot, match]);
+  }, [snapshot, match, pullSort]);
 
   const pullFacets = useMemo(() => pullFacetValues(pullUniverse(snapshot)), [snapshot]);
   const pullFilterCount = PULL_FACETS.reduce((n, f) => n + pullFilters[f.key].size, 0);
@@ -770,9 +831,7 @@ export function App() {
                           onToggle={togglePullFilter}
                           onClear={clearPullFilters}
                         />
-                        <button type="button" className="icon-button" aria-label="Sort">
-                          <SortIcon />
-                        </button>
+                        <PullSortMenu value={pullSort} onChange={setPullSort} />
                       </>
                     ) : null}
                   </div>

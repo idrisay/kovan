@@ -483,6 +483,54 @@ export async function smokeUi(
     await new Promise((r) => setTimeout(r, 100));
   }
 
+  // --- Sorting pull requests — the icon used to do nothing at all -----------
+  if (process.env['BATON_SHOT_PULL_SORT']) {
+    // `read` only marshals JSON-able values across the bridge, so this reads
+    // text content into a plain array rather than a live NodeList.
+    const draftOrder = () =>
+      read(
+        win,
+        `[...document.querySelectorAll('section')]
+          .find(s => s.querySelector('.group-label')?.textContent === 'Drafts')
+          ?.querySelectorAll('.row-num')
+          ? Array.from([...document.querySelectorAll('section')]
+              .find(s => s.querySelector('.group-label')?.textContent === 'Drafts')
+              .querySelectorAll('.row-num'), n => n.textContent)
+          : []`
+      ) as Promise<string[]>;
+
+    const beforeOrder = await draftOrder();
+
+    await read(win, `document.querySelector('[aria-label="Sort pull requests"]')?.click()`);
+    await until(win, `document.querySelector('.menu-host .menu')`, 5_000);
+    await new Promise((r) => setTimeout(r, 150));
+    await writeFile(
+      process.env['BATON_SHOT_PULL_SORT'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_PULL_SORT']}`);
+
+    await read(
+      win,
+      `Array.from(document.querySelectorAll('.menu-host .menu button'))
+        .find(b => b.textContent.includes('Least recently updated'))?.click()`
+    );
+    await new Promise((r) => setTimeout(r, 150));
+    const afterOrder = await draftOrder();
+    console.log(
+      'pullSortReordered:',
+      JSON.stringify({ beforeOrder, afterOrder, reversed: JSON.stringify(beforeOrder) !== JSON.stringify(afterOrder) })
+    );
+
+    if (process.env['BATON_SHOT_PULL_SORTED']) {
+      await writeFile(
+        process.env['BATON_SHOT_PULL_SORTED'],
+        (await win.webContents.capturePage()).toPNG()
+      );
+      console.log(`shot: ${process.env['BATON_SHOT_PULL_SORTED']}`);
+    }
+  }
+
   // --- The "just now" stamp, as a refresh menu -------------------------------
   // `connected` here is the seeded fixture's (github only) — the real poller
   // underneath never saw a token in this profile, so clicking a provider's
