@@ -9,10 +9,14 @@
  * because red is reserved for something having actually failed.
  */
 
-import { formatAge, isBlocked, pullFlags, type PullFlagId, type PullSummary } from '@baton/core';
+import {
+  formatAge, isBlocked, isMerged, pullFlags, type PullFlagId, type PullSummary
+} from '@baton/core';
+import { ChevronIcon } from './icons';
 
 /** Which status colour a flag gets. The four are fixed by the design. */
-const TONE: Record<PullFlagId, 'pass' | 'running' | 'fail' | 'waiting' | ''> = {
+const TONE: Record<PullFlagId, 'pass' | 'running' | 'fail' | 'waiting' | 'merged' | ''> = {
+  merged: 'merged',
   conflict: 'fail',
   'changes-requested': 'fail',
   'checks-failing': 'fail',
@@ -53,6 +57,28 @@ export function PullRow({
   // blocked still appears in "awaiting your review" as somebody else's
   // problem, and colouring it there would say the wrong thing.
   const blocked = tint && isBlocked(pull);
+
+  // Merged work gets one line, not two.
+  //
+  // The second line exists to say what state a pull request is in, and every
+  // merged row would say the same word under a header that has just said it.
+  // Dated by `mergedAt`, because `updatedAt` on something merged in March
+  // reads "2d" the moment anybody comments on it — the one fact about a
+  // merged pull request you are least likely to want.
+  if (isMerged(pull)) {
+    return (
+      <li>
+        <button className={`row shipped${selected ? ' selected' : ''}`} onClick={onSelect}>
+          <span className="row-top">
+            <span className="row-num">{pull.number}</span>
+            <span className="row-title">{pull.title}</span>
+            <span className="row-age">{formatAge(pull.mergedAt!)}</span>
+          </span>
+        </button>
+      </li>
+    );
+  }
+
   return (
     <li>
       <button
@@ -73,12 +99,44 @@ export function PullRow({
   );
 }
 
-export function GroupHead({ label, count }: { label: string; count: number }) {
+/**
+ * A section header you can fold.
+ *
+ * The rule between the words and the count fills whatever the label leaves, so
+ * every header in the sidebar terminates on the same vertical line however
+ * long its title is — which is what makes four of them read as one list rather
+ * than four unrelated blocks. Borrowed from devhub-mac, where the same rule
+ * does the same job.
+ *
+ * Only the section that is actually waiting on you is tinted. A sidebar where
+ * every header is orange says exactly as much as one where none of them is.
+ */
+export function GroupHead({
+  label, count, total, open, tint = false, note, onToggle
+}: {
+  label: string;
+  count: number;
+  /** The full size of a windowed list, when the count is only part of it. */
+  total?: number;
+  open: boolean;
+  tint?: boolean;
+  note?: string;
+  onToggle: () => void;
+}) {
+  // "20" over a list of 34 is not a count, it is a wrong one.
+  const shown = total !== undefined && total > count ? `${count} of ${total}` : String(count);
   return (
-    <div className="group-head">
-      <span>{label}</span>
-      <span className="spacer" />
-      <span className="count">{count}</span>
-    </div>
+    <button
+      type="button"
+      className={`group-head${tint ? ' tint' : ''}`}
+      aria-expanded={open}
+      onClick={onToggle}
+    >
+      <ChevronIcon size={11} open={open} />
+      <span className="group-label">{label}</span>
+      {note && <span className="group-note">{note}</span>}
+      <span className="group-rule" />
+      <span className="count">{shown}</span>
+    </button>
   );
 }

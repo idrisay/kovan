@@ -40,6 +40,15 @@ export interface PullQueues {
   viewer: string;
   mine: PullSummary[];
   reviewRequested: PullSummary[];
+  /** The most recently merged, newest first. A window onto `mergedTotal`. */
+  merged: PullSummary[];
+  /**
+   * How many merged pull requests match altogether.
+   *
+   * Without it "Show more" cannot say what it would show, and a list that
+   * silently stops is a list you assume is complete.
+   */
+  mergedTotal: number;
   /** True when a repo scope had to be applied to the response instead of the query. */
   filteredClientSide: boolean;
 }
@@ -65,6 +74,7 @@ const PULL_FIELDS = `
   isDraft
   createdAt
   updatedAt
+  mergedAt
   additions
   deletions
   mergeable
@@ -79,7 +89,8 @@ const PULL_FIELDS = `
 `;
 
 const QUEUES_QUERY = `
-query BatonPullQueues($mine: String!, $review: String!, $first: Int!) {
+query BatonPullQueues($mine: String!, $review: String!, $merged: String!,
+                      $first: Int!, $mergedFirst: Int!) {
   viewer { login }
   mine: search(query: $mine, type: ISSUE, first: $first) {
     nodes { ... on PullRequest { ${PULL_FIELDS} } }
@@ -87,13 +98,45 @@ query BatonPullQueues($mine: String!, $review: String!, $first: Int!) {
   review: search(query: $review, type: ISSUE, first: $first) {
     nodes { ... on PullRequest { ${PULL_FIELDS} } }
   }
+  merged: search(query: $merged, type: ISSUE, first: $mergedFirst) {
+    issueCount
+    nodes { ... on PullRequest { ${PULL_FIELDS} } }
+  }
 }`;
+
+/**
+ * The merged queue on its own, for "Show more".
+ *
+ * Separate from QUEUES_QUERY on purpose: asking for ten more merged pull
+ * requests should not re-fetch both open queues, and it must not be able to
+ * fail them either — a rate limit hit while browsing history would otherwise
+ * blank the list of things actually blocked on you.
+ */
+const MERGED_QUERY = `
+query BatonMerged($merged: String!, $first: Int!) {
+  merged: search(query: $merged, type: ISSUE, first: $first) {
+    issueCount
+    nodes { ... on PullRequest { ${PULL_FIELDS} } }
+  }
+}`;
+
+/** `sort:` is part of the query because GitHub search has no order argument. */
+const MERGED_SEARCH = 'is:pr is:merged author:@me sort:updated-desc';
+
+/** What the merged list holds before anybody asks for more. */
+export const MERGED_PAGE = 10;
+
+interface MergedSearch {
+  issueCount?: number;
+  nodes?: (ApiPullNode | null)[] | null;
+}
 
 interface GraphResponse {
   data?: {
     viewer?: { login?: string };
     mine?: { nodes?: (ApiPullNode | null)[] | null };
     review?: { nodes?: (ApiPullNode | null)[] | null };
+    merged?: MergedSearch | null;
   };
   errors?: { message: string }[];
 }
@@ -211,10 +254,12 @@ export class GitHubClient {
     /** `undefined` surveys the whole account. See buildPullSearch. */
     repos: readonly RepoRef[] | undefined,
     limit: number,
-    signal?: CancelSignal
+    signal?: CancelSignal,
+    merged: number = MERGED_PAGE
   ): Promise<PullQueues> {
     const mineSearch = buildPullSearch('is:pr is:open author:@me', repos);
     const reviewSearch = buildPullSearch('is:pr is:open review-requested:@me', repos);
+    const mergedSearch = buildPullSearch(MERGED_SEARCH, repos);
 
     const response = await this.http.json<GraphResponse>(graphqlEndpoint(this.baseUrl), {
       method: 'POST',
@@ -224,7 +269,13 @@ export class GitHubClient {
       },
       body: {
         query: QUEUES_QUERY,
-        variables: { mine: mineSearch.query, review: reviewSearch.query, first: limit }
+        variables: {
+          mine: mineSearch.query,
+          review: reviewSearch.query,
+          merged: mergedSearch.query,
+          first: limit,
+          mergedFirst: merged
+        }
       },
       signal
     });
@@ -242,7 +293,50 @@ export class GitHubClient {
       viewer: response.data?.viewer?.login ?? '',
       mine: withinScope(read(response.data?.mine?.nodes), mineSearch.allow),
       reviewRequested: withinScope(read(response.data?.review?.nodes), reviewSearch.allow),
+      merged: withinScope(read(response.data?.merged?.nodes), mergedSearch.allow),
+      // GitHub's count, not the scoped array's length: it is what "Show 10
+      // more of 240" quotes, and it is also the only way to know that asking
+      // again would return anything.
+      mergedTotal: response.data?.merged?.issueCount ?? 0,
       filteredClientSide: mineSearch.filteredClientSide || reviewSearch.filteredClientSide
+    };
+  }
+
+  /**
+   * More of the merged list.
+   *
+   * Takes a total rather than a cursor because GitHub search pagination on a
+   * moving result set skips and repeats: something merging between two pages
+   * shifts everything down one. Re-asking for a bigger window costs one
+   * request and cannot lose a row.
+   */
+  async mergedPulls(
+    repos: readonly RepoRef[] | undefined,
+    limit: number,
+    signal?: CancelSignal
+  ): Promise<{ pulls: PullSummary[]; total: number }> {
+    const search = buildPullSearch(MERGED_SEARCH, repos);
+    const response = await this.http.json<GraphResponse>(graphqlEndpoint(this.baseUrl), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        Accept: 'application/vnd.github+json'
+      },
+      body: { query: MERGED_QUERY, variables: { merged: search.query, first: limit } },
+      signal
+    });
+
+    if (response.errors?.length) {
+      throw new Error(response.errors.map((e) => e.message).join('; '));
+    }
+
+    const nodes = (response.data?.merged?.nodes ?? [])
+      .filter((n): n is ApiPullNode => Boolean(n?.number))
+      .map(summaryFromApi);
+
+    return {
+      pulls: withinScope(nodes, search.allow),
+      total: response.data?.merged?.issueCount ?? 0
     };
   }
 

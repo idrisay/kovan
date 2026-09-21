@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { formatAge } from '@baton/core';
+import { formatAge, isBlocked } from '@baton/core';
 import type { JiraIssue, PullSummary, RunKind, SessionInfo, Snapshot } from './types';
 import { Connect } from './Connect';
 import { PullPane, TicketPane } from './Detail';
@@ -25,10 +25,58 @@ const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JS
 
 const EMPTY: Snapshot = {
   at: 0, viewer: '', blocked: [], mine: [], reviewRequested: [],
+  merged: [], mergedTotal: 0, loadingMerged: false,
   tickets: [], connected: [], errors: [], refreshing: false
 };
 
+/** How many more merged pull requests one press of the footer asks for. */
+const MERGED_STEP = 10;
+
+const COLLAPSED_KEY = 'baton.collapsed-groups';
+
+/**
+ * Which sections start folded.
+ *
+ * Merged work is reference, not a queue: it is there to check something
+ * shipped, not to be got through. It opens folded so the sections that *are*
+ * waiting on you keep the top of the sidebar.
+ */
+const FOLDED_BY_DEFAULT = ['merged'];
+
+/**
+ * Collapsed sections, remembered.
+ *
+ * The *collapsed* set is stored rather than the expanded one, so a section
+ * added in a later version defaults to open instead of being invisible to
+ * anyone whose preference predates it.
+ */
+function storedCollapsed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY);
+    if (raw === null) {
+      return new Set(FOLDED_BY_DEFAULT);
+    }
+    const parsed: unknown = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string') : []);
+  } catch {
+    // Corrupt or unavailable: the defaults are a fine answer, and a thrown
+    // preference must never take the sidebar with it.
+    return new Set(FOLDED_BY_DEFAULT);
+  }
+}
+
 interface Selection { pull?: PullSummary; issue?: JiraIssue }
+
+interface Group {
+  /** Stable across renames, because the collapsed set is stored on it. */
+  id: string;
+  label: string;
+  pulls: PullSummary[];
+  tint: boolean;
+  note?: string;
+}
+
+const countBlocked = (pulls: readonly PullSummary[]) => pulls.filter(isBlocked).length;
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY);
@@ -39,18 +87,34 @@ export function App() {
   const [activeSession, setActiveSession] = useState<string>();
   const [runSheet, setRunSheet] = useState<({ kind: RunKind } & Selection) | undefined>();
   const [filter, setFilter] = useState('');
+  const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsed);
+
+  const toggleGroup = useCallback((id: string) => {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) {
+        next.add(id);
+      }
+      try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next])); } catch { /* fine */ }
+      return next;
+    });
+  }, []);
+
+  // Never let an older snapshot win: the initial fetch, the push subscription
+  // and a "show more" all race, and a late-resolving one would roll the view
+  // back. Lifted out of the effect because every call that returns a snapshot
+  // has to go through the same gate, not just the ones the effect makes.
+  const accept = useCallback((next: Snapshot) => {
+    setSnapshot((current) => (next.at >= current.at ? next : current));
+  }, []);
 
   useEffect(() => {
-    // Never let an older snapshot win: the initial fetch and the push
-    // subscription race, and a late-resolving fetch would roll the view back.
-    const accept = (next: Snapshot) =>
-      setSnapshot((current) => (next.at >= current.at ? next : current));
     void window.baton.snapshot().then(accept);
     void window.baton.sessions().then(setSessions);
     const offSnapshot = window.baton.onSnapshot(accept);
     const offSessions = window.baton.onSessions(setSessions);
     return () => { offSnapshot(); offSessions(); };
-  }, []);
+  }, [accept]);
 
   const refresh = useCallback(() => void window.baton.refresh(), []);
 
@@ -90,9 +154,10 @@ export function App() {
    *
    * Drafts sit last because a draft is not waiting on anyone.
    */
-  const groups = useMemo(() => {
+  const groups = useMemo((): Group[] => {
     if (view === 'review') {
       return [{
+        id: 'review',
         label: 'Awaiting your review',
         pulls: snapshot.reviewRequested.filter(match),
         tint: false
@@ -100,12 +165,27 @@ export function App() {
     }
     const blockedIds = new Set(snapshot.blocked.map((p) => `${p.repo}#${p.number}`));
     const rest = snapshot.mine.filter((p) => !blockedIds.has(`${p.repo}#${p.number}`));
+    const drafts = rest.filter((p) => p.isDraft).filter(match);
     return [
-      { label: 'Blocked on you', pulls: snapshot.blocked.filter(match), tint: true },
-      { label: 'Open', pulls: rest.filter((p) => !p.isDraft).filter(match), tint: false },
-      { label: 'Drafts', pulls: rest.filter((p) => p.isDraft).filter(match), tint: false }
+      { id: 'blocked', label: 'Blocked on you', pulls: snapshot.blocked.filter(match), tint: true },
+      { id: 'open', label: 'Open', pulls: rest.filter((p) => !p.isDraft).filter(match), tint: false },
+      {
+        id: 'drafts',
+        label: 'Drafts',
+        pulls: drafts,
+        tint: false,
+        // A draft is not waiting on anyone, so the section is grey — but one
+        // that cannot merge is still worth saying out loud from the outside,
+        // because folded is exactly where it would otherwise go unnoticed.
+        note: countBlocked(drafts) > 0 ? `${countBlocked(drafts)} blocked` : undefined
+      },
+      { id: 'merged', label: 'Recently merged', pulls: snapshot.merged.filter(match), tint: false }
     ].filter((g) => g.pulls.length > 0);
   }, [view, snapshot, match]);
+
+  const loadMoreMerged = useCallback(() => {
+    void window.baton.loadMoreMerged(snapshot.merged.length + MERGED_STEP).then(accept);
+  }, [snapshot.merged.length, accept]);
 
   const tickets = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -248,25 +328,61 @@ export function App() {
                       {view === 'review' ? 'Nothing is waiting on your review.' : 'Nothing open.'}
                     </p>
                   ) : (
-                    groups.map((group) => (
-                      <section key={group.label}>
-                        <GroupHead label={group.label} count={group.pulls.length} />
-                        <ul className="rows">
-                          {group.pulls.map((pull) => (
-                            <PullRow
-                              key={`${pull.repo}#${pull.number}`}
-                              pull={pull}
-                              tint={group.tint}
-                              selected={
-                                selected.pull?.number === pull.number &&
-                                selected.pull?.repo === pull.repo
-                              }
-                              onSelect={() => setSelected({ pull })}
-                            />
-                          ))}
-                        </ul>
-                      </section>
-                    ))
+                    groups.map((group) => {
+                      const open = !collapsed.has(group.id);
+                      return (
+                        <section key={group.id}>
+                          <GroupHead
+                            label={group.label}
+                            count={group.pulls.length}
+                            total={group.id === 'merged' ? snapshot.mergedTotal : undefined}
+                            open={open}
+                            tint={group.tint}
+                            note={group.note}
+                            onToggle={() => toggleGroup(group.id)}
+                          />
+                          {open && (
+                            <>
+                              <ul className="rows">
+                                {group.pulls.map((pull) => (
+                                  <PullRow
+                                    key={`${pull.repo}#${pull.number}`}
+                                    pull={pull}
+                                    tint={group.tint}
+                                    selected={
+                                      selected.pull?.number === pull.number &&
+                                      selected.pull?.repo === pull.repo
+                                    }
+                                    onSelect={() => setSelected({ pull })}
+                                  />
+                                ))}
+                              </ul>
+                              {/*
+                                The merged list is a window onto a much longer
+                                one, and a list that stops without saying so is
+                                a list you assume is complete.
+                              */}
+                              {group.id === 'merged' &&
+                                snapshot.merged.length < snapshot.mergedTotal && (
+                                <button
+                                  type="button"
+                                  className="more"
+                                  disabled={snapshot.loadingMerged}
+                                  onClick={loadMoreMerged}
+                                >
+                                  {snapshot.loadingMerged
+                                    ? 'Loading…'
+                                    : `Show ${Math.min(
+                                        MERGED_STEP,
+                                        snapshot.mergedTotal - snapshot.merged.length
+                                      )} more of ${snapshot.mergedTotal}`}
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </section>
+                      );
+                    })
                   )}
                 </div>
               </aside>

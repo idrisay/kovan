@@ -14,6 +14,7 @@ import {
   DEFAULTREVIEWTEMPLATE,
   DEFAULTUPDATETEMPLATE,
   DEFAULTVERIFYTEMPLATE,
+  renderVerifyPrompt,
   renderIssuePrompt,
   renderPullPrompt,
   ticketKeyInTitle,
@@ -89,12 +90,27 @@ export class Agents {
     if (!subject.pull) {
       return '';
     }
+    if (kind === 'verify') {
+      // Its own renderer: the verify template needs ${env}, ${site},
+      // ${verdicts} and ${basicAuth}, none of which renderPullPrompt knows —
+      // and `substitute` leaves an unknown placeholder alone, so through the
+      // general path all four reached the agent as literal text.
+      return renderVerifyPrompt(
+        this.host.config.get('prompt.template.verify', '') || DEFAULTVERIFYTEMPLATE,
+        subject.pull,
+        {
+          name: this.host.config.get('verify.environment', ''),
+          site: this.host.config.get('verify.site', ''),
+          hasBasicAuth: this.host.config.get('verify.basicAuth', false)
+        },
+        { reviewers, conventions }
+      );
+    }
+
     const template =
       kind === 'review'
         ? this.host.config.get('prompt.template.review', '') || DEFAULTREVIEWTEMPLATE
-        : kind === 'verify'
-          ? this.host.config.get('prompt.template.verify', '') || DEFAULTVERIFYTEMPLATE
-          : this.host.config.get('prompt.template.unblock', '') || DEFAULTUPDATETEMPLATE;
+        : this.host.config.get('prompt.template.unblock', '') || DEFAULTUPDATETEMPLATE;
 
     return renderPullPrompt(template, subject.pull, { reviewers, conventions });
   }

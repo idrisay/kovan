@@ -36,6 +36,9 @@ export interface Snapshot {
   blocked: PullSummary[];
   mine: PullSummary[];
   reviewRequested: PullSummary[];
+  merged: PullSummary[];
+  mergedTotal: number;
+  loadingMerged: boolean;
   tickets: JiraIssue[];
   connected: ProviderId[];
   errors: { provider: ProviderId; message: string }[];
@@ -55,6 +58,8 @@ export interface BatonApi {
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
 
   pullDetail(repo: string, number: number): Promise<PullDetail>;
+  /** Widens the merged window to `limit` and returns the republished snapshot. */
+  loadMoreMerged(limit: number): Promise<Snapshot>;
 
   runners(): Promise<Runner[]>;
   runTargets(force?: boolean): Promise<RunTarget[]>;

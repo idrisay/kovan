@@ -27,6 +27,12 @@ export interface Snapshot {
   blocked: PullSummary[];
   mine: PullSummary[];
   reviewRequested: PullSummary[];
+  /** The most recently merged, newest first — a window onto `mergedTotal`. */
+  merged: PullSummary[];
+  /** How many merged pull requests exist, so "Show more" can say what it means. */
+  mergedTotal: number;
+  /** True while a "Show more" is in flight, for the footer's own spinner. */
+  loadingMerged: boolean;
   tickets: JiraIssue[];
   connected: ProviderId[];
   errors: { provider: ProviderId; message: string }[];
@@ -39,6 +45,9 @@ export const EMPTY: Snapshot = {
   blocked: [],
   mine: [],
   reviewRequested: [],
+  merged: [],
+  mergedTotal: 0,
+  loadingMerged: false,
   tickets: [],
   connected: [],
   errors: [],
@@ -118,6 +127,12 @@ export class Poller {
       blocked: (github?.mine ?? []).filter((pull) => isBlocked(pull)),
       mine: github?.mine ?? [],
       reviewRequested: github?.reviewRequested ?? [],
+      // A refresh resets the window to its first page. Keeping an expanded
+      // list across refreshes would mean quietly re-fetching however many
+      // pages the user had opened, on a timer, for the rest of the session.
+      merged: github?.merged ?? [],
+      mergedTotal: github?.mergedTotal ?? 0,
+      loadingMerged: false,
       tickets: jira ?? [],
       connected,
       errors,
@@ -125,6 +140,55 @@ export class Poller {
     };
     this.publish(next);
     return next;
+  }
+
+  /**
+   * Widens the merged window and republishes.
+   *
+   * Deliberately not a `refresh()`: it must not be able to fail the open
+   * queues, and it must not reset them either. On an error the list stays
+   * exactly as it was and the error joins the snapshot's own list, so the
+   * footer can say what went wrong without the sidebar going blank.
+   */
+  async loadMoreMerged(limit: number): Promise<Snapshot> {
+    if (this.snapshot.loadingMerged) {
+      return this.snapshot;
+    }
+    const token = await this.credentials.token('github');
+    if (!token) {
+      return this.snapshot;
+    }
+
+    this.publish({ ...this.snapshot, loadingMerged: true });
+    try {
+      const client = new GitHubClient(
+        this.http,
+        this.host.config.get('github.baseUrl', 'https://api.github.com'),
+        token
+      );
+      const more = await client.mergedPulls(this.scopedRepos(), limit);
+      const next: Snapshot = {
+        ...this.snapshot,
+        merged: byMergedAt(more.pulls),
+        mergedTotal: more.total,
+        loadingMerged: false,
+        errors: this.snapshot.errors.filter((e) => e.provider !== 'github')
+      };
+      this.publish(next);
+      return next;
+    } catch (err) {
+      this.host.log.error('Loading more merged pull requests failed', err);
+      const next: Snapshot = {
+        ...this.snapshot,
+        loadingMerged: false,
+        errors: [
+          ...this.snapshot.errors.filter((e) => e.provider !== 'github'),
+          { provider: 'github' as const, message: message(err) }
+        ]
+      };
+      this.publish(next);
+      return next;
+    }
   }
 
   private publish(snapshot: Snapshot): void {
@@ -136,7 +200,16 @@ export class Poller {
     connected: readonly ProviderId[],
     signal: AbortSignal,
     errors: Snapshot['errors']
-  ): Promise<{ viewer: string; mine: PullSummary[]; reviewRequested: PullSummary[] } | undefined> {
+  ): Promise<
+    | {
+        viewer: string;
+        mine: PullSummary[];
+        reviewRequested: PullSummary[];
+        merged: PullSummary[];
+        mergedTotal: number;
+      }
+    | undefined
+  > {
     if (!connected.includes('github') || !this.host.config.get('github.enabled', true)) {
       return undefined;
     }
@@ -158,7 +231,9 @@ export class Poller {
       return {
         viewer: queues.viewer,
         mine: sortPulls(queues.mine, 'updated-desc'),
-        reviewRequested: sortPulls(queues.reviewRequested, 'updated-desc')
+        reviewRequested: sortPulls(queues.reviewRequested, 'updated-desc'),
+        merged: byMergedAt(queues.merged),
+        mergedTotal: queues.mergedTotal
       };
     } catch (err) {
       if (!signal.aborted) {
@@ -224,4 +299,18 @@ export class Poller {
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Newest merge first.
+ *
+ * On `mergedAt`, not `updatedAt`: a comment left today on something that
+ * shipped in March should not push it above what shipped this morning. A row
+ * without a merge date sorts last rather than being dropped — the field is
+ * optional on the type, and losing a row to a missing timestamp would be a
+ * worse failure than showing it at the bottom.
+ */
+function byMergedAt(pulls: readonly PullSummary[]): PullSummary[] {
+  const at = (pull: PullSummary) => (pull.mergedAt ? Date.parse(pull.mergedAt) : 0);
+  return [...pulls].sort((a, b) => at(b) - at(a));
 }

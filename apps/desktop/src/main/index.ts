@@ -21,7 +21,7 @@ import { BatonTray } from './tray';
 import { Activity } from './notify';
 import { CREDENTIAL_FIELDS, HttpClient, fetchPullDetail } from '@baton/providers';
 import { adoptImportedTokens } from './adopt';
-import { smokePty, smokeUi, type SmokeMode, detailFixture } from './smoke';
+import { smokePty, smokeUi, type SmokeMode, detailFixture, fixtureSnapshot } from './smoke';
 import { Sessions } from './sessions';
 import { Agents } from './agents';
 import { Workspaces } from './workspace';
@@ -181,6 +181,18 @@ app.whenReady().then(async () => {
   });
 
   // --- Detail ---------------------------------------------------------------
+  ipcMain.handle('baton:merged-more', (_event, limit: number) => {
+    const want = Math.max(1, Math.min(100, Math.floor(limit)));
+    // Same guard as the detail fixture: only ever a throwaway profile. The
+    // handler answers the limit it was asked for, so the footer is driven
+    // through the real IPC round trip rather than by the smoke pushing a
+    // longer list at the renderer and calling that a test.
+    if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+      return fixtureSnapshot(want);
+    }
+    return poller.loadMoreMerged(want);
+  });
+
   ipcMain.handle('baton:pull-detail', async (_event, repo: string, number: number) => {
     // Guarded by BATON_USER_DATA, the same way workspace seeding is: a fixture
     // can only ever be served to a throwaway profile, never to a real one.
@@ -311,8 +323,16 @@ app.whenReady().then(async () => {
     const win = window!;
     win.webContents.once('did-finish-load', async () => {
       const mode = process.env['BATON_SMOKE'] as SmokeMode;
-      console.log(JSON.stringify(await smokeUi(win, poller, mode), null, 2));
-      app.exit(0);
+      // A throw in here used to reject into nothing: `app.exit` never ran and
+      // the run hung until whatever was waiting on it gave up, with the actual
+      // error nowhere in the output. A smoke that cannot fail is not a check.
+      try {
+        console.log(JSON.stringify(await smokeUi(win, poller, mode), null, 2));
+        app.exit(0);
+      } catch (err) {
+        console.error('smoke failed:', err instanceof Error ? err.stack ?? err.message : err);
+        app.exit(1);
+      }
     });
     return;
   }

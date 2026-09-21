@@ -14,6 +14,7 @@ const api = {
   refresh: () => ipcRenderer.invoke('baton:refresh'),
   openExternal: (url: string) => ipcRenderer.invoke('baton:open-external', url),
   credentialFields: () => ipcRenderer.invoke('baton:credential-fields'),
+  loadMoreMerged: (limit: number) => ipcRenderer.invoke('baton:merged-more', limit),
   settings: () => ipcRenderer.invoke('baton:settings'),
   setSetting: (key: string, value: unknown) => ipcRenderer.invoke('baton:set-setting', key, value),
   setSecret: (key: string, value: string) => ipcRenderer.invoke('baton:set-secret', key, value),

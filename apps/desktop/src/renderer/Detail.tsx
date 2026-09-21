@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { formatAge } from '@baton/core';
+import { formatAge, isMerged } from '@baton/core';
 import { States } from './rows';
 import { Prose } from './Prose';
 import type { AgentRun, JiraIssue, PullDetail, PullSummary, RunKind } from './types';
@@ -93,9 +93,11 @@ export function PullPane({
   }, [pull.repo, pull.number]);
 
   // Yours or theirs decides what you can do with it: you unblock your own and
-  // review other people's.
+  // review other people's. Merged work can only be one thing — there is
+  // nothing left to unblock, and offering it next to "Check it shipped" would
+  // make the one useful button the second-guessed one.
   const mine = pull.author.toLowerCase() === viewer.toLowerCase();
-  const kinds: RunKind[] = mine ? ['unblock', 'verify'] : ['review'];
+  const kinds: RunKind[] = isMerged(pull) ? ['verify'] : mine ? ['unblock', 'verify'] : ['review'];
 
   const unresolved = detail?.threads.filter((t) => !t.isResolved) ?? [];
   // Whether the left column has anything in it. A PR with no description and
@@ -112,7 +114,7 @@ export function PullPane({
           <span>{pull.repo}</span>
           <span>#{pull.number}</span>
           <span>{pull.author}</span>
-          <span>{formatAge(pull.updatedAt)}</span>
+          <span>{isMerged(pull) ? `merged ${formatAge(pull.mergedAt!)}` : formatAge(pull.updatedAt)}</span>
           {detail && <span>{detail.baseRef} ← {detail.headRef}</span>}
         </div>
         <div className="detail-states">

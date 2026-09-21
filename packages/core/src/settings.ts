@@ -59,6 +59,11 @@ export interface Settings {
   'workspaces.list': { id: string; name: string; folders: string[] }[];
   'workspaces.active': string;
 
+  /** Where "Check it shipped" sends an agent to look. See DOCS.md, Verify. */
+  'verify.environment': string;
+  'verify.site': string;
+  'verify.basicAuth': boolean;
+
   'runner.default': string;
   'runner.custom': unknown[];
   'runner.reviewers': string[];
@@ -112,6 +117,10 @@ export const DEFAULT_SETTINGS: Settings = {
   'repos.folders': [],
   'workspaces.list': [],
   'workspaces.active': '',
+
+  'verify.environment': '',
+  'verify.site': '',
+  'verify.basicAuth': false,
 
   'runner.default': '',
   'runner.custom': [],

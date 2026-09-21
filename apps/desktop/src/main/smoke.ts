@@ -47,6 +47,115 @@ const FIXTURE = {
   viewerReviewed: false
 };
 
+/** One open pull request per section, so all four headers have something in them. */
+const OPEN_PULLS = [
+  {
+    ...FIXTURE,
+    number: 118,
+    title: 'Cache the pricing table between requests',
+    repo: 'acme/web',
+    author: 'idrisay',
+    mergeable: 'mergeable' as const,
+    reviewDecision: 'review_required' as const,
+    checks: 'success' as const,
+    unresolvedThreads: 0,
+    updatedAt: new Date(Date.now() - 18_000_000).toISOString()
+  },
+  {
+    ...FIXTURE,
+    number: 119,
+    title: 'Spike: replace the retry queue with a worker',
+    repo: 'acme/web',
+    author: 'idrisay',
+    isDraft: true,
+    mergeable: 'mergeable' as const,
+    reviewDecision: 'none' as const,
+    checks: 'pending' as const,
+    unresolvedThreads: 0,
+    updatedAt: new Date(Date.now() - 250_000_000).toISOString()
+  },
+  {
+    // A draft that also cannot merge: the case the "N blocked" note on a
+    // folded section exists for.
+    ...FIXTURE,
+    number: 120,
+    title: 'Draft: split the checkout reducer',
+    repo: 'acme/web',
+    author: 'idrisay',
+    isDraft: true,
+    mergeable: 'conflicting' as const,
+    reviewDecision: 'none' as const,
+    checks: 'success' as const,
+    unresolvedThreads: 0,
+    updatedAt: new Date(Date.now() - 400_000_000).toISOString()
+  }
+];
+
+/** More merged pull requests than one page, so "Show more" has work to do. */
+const MERGED_TOTAL = 34;
+
+const MERGED_TITLES = [
+  'Ship the persistent table scrollbar',
+  'Drop the unused Stripe webhook handler',
+  'Move the session cookie to SameSite=Lax',
+  'Bump the node image to 20.18',
+  'Fix the off-by-one in the invoice paginator',
+  'Add a health endpoint the load balancer can read',
+  'Retry FedEx rate calls once before failing',
+  'Stop logging the full request body on 500s',
+  'Teach the importer about quoted CSV headers',
+  'Collapse the two nearly identical row components',
+  'Make the cron lock actually expire',
+  'Trim 400ms off the cold start'
+];
+
+/**
+ * A page of merged pull requests.
+ *
+ * Generated from `count` rather than a fixed list so "Show more" can be driven
+ * for real: the handler answers the limit it was asked for, exactly as the
+ * live one re-asks GitHub for a wider window.
+ */
+export function mergedFixture(count: number) {
+  return Array.from({ length: Math.min(count, MERGED_TOTAL) }, (_, i) => ({
+    ...FIXTURE,
+    number: 300 - i,
+    title: MERGED_TITLES[i % MERGED_TITLES.length] ?? `Merged change ${i + 1}`,
+    repo: i % 3 === 0 ? 'acme/api' : 'acme/web',
+    author: 'idrisay',
+    isDraft: false,
+    mergeable: 'mergeable' as const,
+    reviewDecision: 'approved' as const,
+    checks: 'success' as const,
+    unresolvedThreads: 0,
+    updatedAt: new Date(Date.now() - (i + 1) * 43_200_000).toISOString(),
+    mergedAt: new Date(Date.now() - (i + 1) * 86_400_000).toISOString()
+  }));
+}
+
+/**
+ * The whole seeded snapshot, as a function of how far the merged window has
+ * been opened. Both the seeder and the "show more" handler build from this, so
+ * pressing the footer goes through the real IPC round trip instead of the
+ * smoke quietly pushing a bigger list at the renderer.
+ */
+export function fixtureSnapshot(mergedCount: number) {
+  return {
+    at: Date.now(),
+    viewer: 'idrisay',
+    blocked: [FIXTURE],
+    mine: [FIXTURE, ...OPEN_PULLS],
+    reviewRequested: [],
+    merged: mergedFixture(mergedCount),
+    mergedTotal: MERGED_TOTAL,
+    loadingMerged: false,
+    tickets: [TICKET],
+    connected: ['github' as const],
+    errors: [],
+    refreshing: false
+  };
+}
+
 /** A ticket with both halves of the split: prose to read, subtasks to scan. */
 const TICKET = {
   key: 'ACME-2393',
@@ -237,17 +346,7 @@ export async function smokeUi(
     // anyone is listening and is simply dropped, leaving the app on its empty
     // state with no rail to drive.
     await until(win, `document.querySelector('#root')?.children.length > 0`);
-    win.webContents.send('baton:snapshot', {
-      at: Date.now(),
-      viewer: 'idrisay',
-      blocked: [FIXTURE],
-      mine: [FIXTURE],
-      reviewRequested: [],
-      tickets: [TICKET],
-      connected: ['github'],
-      errors: [],
-      refreshing: false
-    });
+    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
     await until(win, `document.querySelector('.rail')`);
   }
 
@@ -317,6 +416,189 @@ export async function smokeUi(
     },
     userData: app.getPath('userData')
   };
+
+  // --- The sections, and the merged accordion ------------------------------
+  if (mode === 'seeded') {
+    const heads = () =>
+      read(
+        win,
+        `Array.from(document.querySelectorAll('.group-head')).map(h => ({
+           label: h.querySelector('.group-label')?.textContent ?? '',
+           count: h.querySelector('.count')?.textContent ?? '',
+           note: h.querySelector('.group-note')?.textContent ?? null,
+           open: h.getAttribute('aria-expanded') === 'true',
+           tint: h.classList.contains('tint'),
+           // The rule between the words and the count is what lines the
+           // headers up; if it collapsed to nothing the design is not there.
+           rule: Math.round(h.querySelector('.group-rule')?.getBoundingClientRect().width ?? 0)
+         }))`
+      );
+
+    const clickHead = (label: string) =>
+      read(
+        win,
+        `(() => {
+           const h = Array.from(document.querySelectorAll('.group-head'))
+             .find(h => h.querySelector('.group-label')?.textContent === ${JSON.stringify(label)});
+           if (!h) return false;
+           h.click();
+           return true;
+         })()`
+      );
+
+    const rowCount = () => read(win, `document.querySelectorAll('.row').length`);
+
+    const before = (await rowCount()) as number;
+    const sections = await heads();
+
+    // Fold the noisiest section and check its rows actually leave the DOM.
+    await clickHead('Open');
+    await new Promise((r) => setTimeout(r, 120));
+    const folded = await rowCount();
+    await clickHead('Open');
+    await new Promise((r) => setTimeout(r, 120));
+
+    // Merged starts folded, so unfolding it is what puts the window on screen.
+    await clickHead('Recently merged');
+    await until(win, `document.querySelector('.more')`, 5_000);
+    const mergedRows = () =>
+      read(win, `document.querySelectorAll('.row.shipped').length`);
+    const firstPage = (await mergedRows()) as number;
+    const footer = await read(win, `document.querySelector('.more')?.textContent ?? ''`);
+
+    await read(win, `document.querySelector('.more')?.click()`);
+    await until(win, `document.querySelectorAll('.row.shipped').length > ${firstPage}`, 10_000);
+
+    result['sections'] = {
+      rowsBefore: before,
+      sections,
+      // Headers all terminate on one vertical line, so the rules differ.
+      rulesVary: Array.isArray(sections) && new Set(
+        (sections as { rule: number }[]).map((s) => s.rule)
+      ).size > 1,
+      rowsWithOpenFolded: folded,
+      foldRemovedRows: typeof folded === 'number' && folded < before
+    };
+
+    result['merged'] = {
+      firstPage,
+      footer,
+      afterShowMore: await mergedRows(),
+      footerAfter: await read(win, `document.querySelector('.more')?.textContent ?? ''`),
+      // One line, dated by when it shipped. The second line is dropped on
+      // purpose: it would say "Merged" under a header that just did.
+      firstRow: await read(
+        win,
+        `(() => { const r = document.querySelector('.row.shipped'); return r ? {
+           title: r.querySelector('.row-title')?.textContent,
+           age: r.querySelector('.row-age')?.textContent,
+           secondLine: Boolean(r.querySelector('.row-state')),
+           height: Math.round(r.getBoundingClientRect().height)
+         } : null; })()`
+      ),
+      // And the working rows above it keep theirs.
+      workingRowHeight: await read(
+        win,
+        `Math.round(document.querySelector('.row:not(.shipped)')?.getBoundingClientRect().height ?? 0)`
+      )
+    };
+
+    // A merged pull request opens like any other, but there is only one thing
+    // left to do with it.
+    await read(win, `document.querySelector('.row.shipped')?.click()`);
+    await until(win, `document.querySelector('.detail-head h2')`, 15_000);
+    await until(win, `!document.querySelector('.pane .quiet')`, 15_000);
+    result['mergedDetail'] = await read(
+      win,
+      `({
+        heading: document.querySelector('.detail-head h2')?.textContent ?? '',
+        meta: document.querySelector('.detail-meta')?.textContent ?? '',
+        states: document.querySelector('.detail-states')?.textContent ?? '',
+        actions: Array.from(document.querySelectorAll('.detail-actions button'))
+          .map(b => b.textContent)
+      })`
+    );
+
+    // And that the one button actually reaches an agent: the sheet has to
+    // open with a verify prompt in it, or "Check it shipped" is decoration.
+    await read(
+      win,
+      `(() => {
+         const b = Array.from(document.querySelectorAll('.detail-actions button'))
+           .find(b => b.textContent.includes('Check it shipped'));
+         if (b) b.click();
+         return Boolean(b);
+       })()`
+    );
+    const sheetOpened = await until(win, `document.querySelector('.sheet')`, 10_000);
+    // Runner discovery asks a login shell what is on the PATH, which takes
+    // about a second and a half. Reading the selects before it answers gets
+    // two empty ones and says nothing about whether the roster works.
+    const rosterFilled = await until(
+      win,
+      `document.querySelector('.run-controls select')?.options.length > 0`,
+      15_000
+    );
+    result['verifySheet'] = {
+      opened: sheetOpened,
+      rosterFilled,
+      subject: await read(win, `document.querySelector('.sheet .subject')?.textContent ?? ''`),
+      runners: await read(
+        win,
+        `Array.from(document.querySelectorAll('.run-controls select')).map(s => s.options.length)`
+      ),
+      // The prompt is what the agent is actually handed.
+      promptBytes: await read(win, `document.querySelector('.sheet textarea')?.value.length ?? 0`),
+      promptHead: await read(
+        win,
+        `(document.querySelector('.sheet textarea')?.value ?? '')
+           .split(String.fromCharCode(10))[0]`
+      ),
+      // The prompt the agent is actually handed: no placeholder may survive
+      // into it. Four of them used to.
+      unfilledPlaceholders: await read(
+        win,
+        `((document.querySelector('.sheet textarea')?.value ?? '')
+           .match(/\\$\\{\\w+\\}/g) ?? []).join(',')`
+      ),
+      mentionsThePull: await read(
+        win,
+        `(document.querySelector('.sheet textarea')?.value ?? '').includes('300')`
+      ),
+      // Disabled without a working directory, which this throwaway profile has
+      // none of. That is the correct answer, not a broken button — an agent
+      // started in the wrong directory is worse than one not started.
+      startEnabled: await read(
+        win,
+        `!document.querySelector('.sheet-foot .primary')?.disabled`
+      ),
+      cwd: await read(
+        win,
+        `document.querySelectorAll('.run-controls select')[1]?.value ?? ''`
+      )
+    };
+    await read(win, `document.querySelector('.sheet-head .ghost')?.click()`);
+    await new Promise((r) => setTimeout(r, 120));
+
+    if (process.env['BATON_SHOT_MERGED']) {
+      await writeFile(
+        process.env['BATON_SHOT_MERGED'],
+        (await win.webContents.capturePage()).toPNG()
+      );
+      console.log(`shot: ${process.env['BATON_SHOT_MERGED']}`);
+    }
+
+    if (process.env['BATON_SHOT_SECTIONS']) {
+      await writeFile(
+        process.env['BATON_SHOT_SECTIONS'],
+        (await win.webContents.capturePage()).toPNG()
+      );
+      console.log(`shot: ${process.env['BATON_SHOT_SECTIONS']}`);
+    }
+
+    // Leave it folded again so the detail steps below start from a known list.
+    await clickHead('Recently merged');
+  }
 
   // Open the first row and read the detail pane that appears. Skipped for the
   // workspace mode: it runs on a throwaway profile with no GitHub token, so

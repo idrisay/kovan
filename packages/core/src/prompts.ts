@@ -180,6 +180,79 @@ Step 3 — write $BATON_REPORT. Its first line must be  exactly one of:
 
 Under it, say what you checked, what you saw, and which screenshot shows  it. If it is not there, say what is there instead. If you could not get  far enough to tell — the site is down, the login failed, the page needs  data you do not have — say \`could not check\` and write down what stopped  you, which is a useful answer and a guess is not.`;
 
+/**
+ * The four answers an agent is asked to choose between.
+ *
+ * Exported and rendered into the template rather than typed into it, so a
+ * fifth verdict cannot leave the prompt offering four options to something
+ * that knows five. Carried over from devhub-mac unchanged: these are the
+ * words already written into every report Baton will read back.
+ */
+export const VERDICTS = [
+  'implemented',
+  'partly implemented',
+  'not implemented',
+  'could not check'
+] as const;
+
+/** Indented, which is how the rest of the template marks text to copy exactly. */
+function verdictLines(): string {
+  return VERDICTS.map((v) => `        VERDICT: ${v}`).join('\n');
+}
+
+/**
+ * The extra paragraph about an HTTP Basic Auth wall, only when the
+ * environment actually has one. A clause about credentials that do not exist
+ * is an invitation to go looking for them.
+ */
+function basicAuthClause(hasBasicAuth: boolean): string {
+  if (!hasBasicAuth) {
+    return '';
+  }
+  return `
+Before that sign-in page, the site itself may ask for a separate username  and password in a browser dialog — an HTTP Basic Auth wall, not the app's  own login. If you see one, answer it with the username in  $BATON_ENV_BASIC_USER and the password in $BATON_ENV_BASIC_PASSWORD, then  continue signing in to the app as above.
+`;
+}
+
+export interface VerifyEnvironment {
+  /** The display name the sentence reads as — "Dev", "Staging". */
+  name: string;
+  /** The base URL the agent is sent to. */
+  site: string;
+  /** Whether there is a Basic Auth wall, distinct from the app's own sign-in. */
+  hasBasicAuth?: boolean;
+}
+
+/**
+ * The "check it shipped" prompt.
+ *
+ * Separate from `renderPullPrompt` because the verify template needs four
+ * values the others do not have, and `substitute` leaves an unknown
+ * placeholder alone: rendered through the general path, this template reached
+ * the agent still saying "The site is ${site}", which is not a prompt, it is a
+ * bug with instructions wrapped around it.
+ */
+export function renderVerifyPrompt(
+  template: string,
+  pull: PullSummary,
+  environment: VerifyEnvironment,
+  options: { ticketKey?: string; reviewers?: string[]; conventions?: Conventions } = {}
+): string {
+  // Nothing configured yet: say so in the prompt. An agent told to go and
+  // look at a site nobody named should stop and say it cannot, not guess a
+  // URL and report confidently on whatever answers.
+  const named = environment.name.trim() || 'the environment set in Baton';
+  const site = environment.site.trim()
+    || 'NOT CONFIGURED — no site is set in Baton. Stop here and report `could not check`, saying that no environment is configured.';
+
+  return substitute(renderPullPrompt(template, pull, options), {
+    env: named,
+    site,
+    verdicts: verdictLines(),
+    basicAuth: basicAuthClause(Boolean(environment.hasBasicAuth))
+  });
+}
+
 /** What `${state}` says when a pull request has nothing wrong with it. */
 const NOTHING_BLOCKING = 'nothing — check whether it is ready to merge';
 

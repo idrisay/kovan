@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   describePull,
   isBlocked,
+  isMerged,
   primaryFlag,
   pullFlags,
   reviewDecisionFrom,
@@ -126,5 +127,47 @@ describe('check roll-up', () => {
     expect(rollUpChecks(['success', 'pending'])).toBe('pending');
     expect(rollUpChecks(['success'])).toBe('success');
     expect(rollUpChecks([])).toBe('none');
+  });
+});
+
+describe('merged', () => {
+  const merged: PullState = { ...open, mergedAt: '2026-03-04T10:00:00Z' };
+
+  it('is the whole state, not one more flag beside the others', () => {
+    // The fields below all still say "this cannot merge yet". GitHub keeps
+    // reporting them after the fact, and every one of them is now a lie.
+    const noisy: PullState = {
+      ...merged,
+      mergeable: 'conflicting',
+      reviewDecision: 'review_required',
+      checks: 'failure',
+      unresolvedThreads: 4
+    };
+    expect(pullFlags(noisy).map((f) => f.id)).toEqual(['merged']);
+    expect(describePull(noisy)).toBe('Merged');
+  });
+
+  it('is never blocked, however it looked on the way in', () => {
+    expect(isBlocked({ ...merged, mergeable: 'conflicting', checks: 'failure' })).toBe(false);
+  });
+
+  it('reads merged only from a date, so an open pull request is unaffected', () => {
+    expect(isMerged(open)).toBe(false);
+    expect(isMerged(merged)).toBe(true);
+    expect(pullFlags(open).map((f) => f.id)).not.toContain('merged');
+  });
+
+  it('carries mergedAt off the wire, and leaves the key off an open one', () => {
+    const node = {
+      number: 7, title: 't', url: 'u', isDraft: false,
+      createdAt: '2026-03-01T00:00:00Z', updatedAt: '2026-03-02T00:00:00Z',
+      additions: 1, deletions: 0
+    };
+    expect(summaryFromApi({ ...node, mergedAt: '2026-03-04T10:00:00Z' }).mergedAt)
+      .toBe('2026-03-04T10:00:00Z');
+    // Absent, not undefined: an explicit undefined survives structuredClone
+    // over IPC as a present key, which `'mergedAt' in pull` would believe.
+    expect('mergedAt' in summaryFromApi({ ...node, mergedAt: null })).toBe(false);
+    expect('mergedAt' in summaryFromApi(node)).toBe(false);
   });
 });

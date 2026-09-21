@@ -26,9 +26,18 @@ export interface PullSummary {
   deletions: number;
   /** True when the viewer has already submitted a review on this PR. */
   viewerReviewed: boolean;
+  /**
+   * When it merged, or absent on an open one.
+   *
+   * The merged queue is ordered on this rather than on `updatedAt`: a comment
+   * left on something that shipped last month should not push it back above
+   * what shipped this morning.
+   */
+  mergedAt?: string;
 }
 
 export type PullFlagId =
+  | 'merged'
   | 'conflict'
   | 'changes-requested'
   | 'checks-failing'
@@ -54,7 +63,12 @@ export interface PullFlag {
 export type PullState = Pick<
   PullSummary,
   'mergeable' | 'reviewDecision' | 'checks' | 'unresolvedThreads' | 'isDraft'
->;
+> & Partial<Pick<PullSummary, 'mergedAt'>>;
+
+/** Whether it has already shipped. */
+export function isMerged(pull: Pick<PullState, 'mergedAt'>): boolean {
+  return Boolean(pull.mergedAt);
+}
 
 /**
  * The flags that stop a pull request merging, as opposed to the ones that
@@ -87,6 +101,15 @@ export function isBlocked(pull: PullState): boolean {
  */
 export function pullFlags(pull: PullState): PullFlag[] {
   const flags: PullFlag[] = [];
+
+  // Merged ends the story, so it is the whole story. Everything below asks
+  // what is stopping this from merging, and GitHub keeps answering after the
+  // fact — a merged pull request still reports `review_required` if nobody
+  // ever reviewed it, and "Awaiting review" on something that shipped last
+  // week is not a stale label, it is a false one.
+  if (isMerged(pull)) {
+    return [{ id: 'merged', label: 'Merged', icon: 'git-merge', color: 'charts.purple' }];
+  }
 
   if (pull.mergeable === 'conflicting') {
     flags.push({ id: 'conflict', label: 'Conflicts', icon: 'git-merge', color: 'charts.red' });
@@ -318,6 +341,7 @@ export interface ApiPullNode {
   isDraft: boolean;
   createdAt: string;
   updatedAt: string;
+  mergedAt?: string | null;
   additions: number;
   deletions: number;
   mergeable?: string | null;
@@ -356,7 +380,11 @@ export function summaryFromApi(node: ApiPullNode): PullSummary {
     unresolvedThreads: threads.filter((t) => t && t.isResolved === false).length,
     additions: node.additions ?? 0,
     deletions: node.deletions ?? 0,
-    viewerReviewed: Boolean(node.viewerLatestReview?.state)
+    viewerReviewed: Boolean(node.viewerLatestReview?.state),
+    // Left off rather than set to undefined: the field is optional, and an
+    // explicit `mergedAt: undefined` survives a structuredClone over IPC as a
+    // present key, which `'mergedAt' in pull` would then believe.
+    ...(node.mergedAt ? { mergedAt: node.mergedAt } : {})
   };
 }
 
