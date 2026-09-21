@@ -742,32 +742,83 @@ export async function smokeUi(
   // moment you navigate to a different pull request — unlike an agent run's
   // session, which is meant to outlive the pane it was started from.
   if (process.env['BATON_SHOT_QUICK_TERMINAL']) {
-    await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
-    await until(win, `document.querySelector('.detail-actions .ghost')`, 5_000);
+    // Counts how many times the resize IPC actually fires. `Terminal.tsx`
+    // used to call it on every ResizeObserver firing, whether or not the
+    // char grid changed — and a stray nested `.term` div (Detail.tsx wrapped
+    // `<Terminal>` in a *second* element also classed `.term`, so `flex: 1`
+    // never reached xterm's own container) kept that observer firing
+    // continuously. Each call sent a real SIGWINCH to the shell, and enough
+    // prompts redraw their whole line on any SIGWINCH that the redraw storm
+    // read as flicker and could eat a keystroke typed in between two of them.
     await read(
       win,
-      `Array.from(document.querySelectorAll('.detail-actions .ghost'))
-        .find(b => b.textContent.includes('Terminal'))?.click()`
+      `(() => {
+        window.__resizeCalls = 0;
+        const original = window.baton.sessionResize.bind(window.baton);
+        window.baton.sessionResize = (...args) => { window.__resizeCalls += 1; return original(...args); };
+      })()`
     );
+
+    const openQuickTerminal = () =>
+      read(
+        win,
+        `Array.from(document.querySelectorAll('.detail-actions .ghost'))
+          .find(b => b.textContent.includes('Terminal'))?.click()`
+      );
+
+    await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+    await until(win, `document.querySelector('.detail-actions .ghost')`, 5_000);
+    await openQuickTerminal();
     await until(win, `document.querySelector('.detail-terminal')`, 10_000);
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, 1_500));
     await writeFile(
       process.env['BATON_SHOT_QUICK_TERMINAL'],
       (await win.webContents.capturePage()).toPNG()
     );
     console.log(`shot: ${process.env['BATON_SHOT_QUICK_TERMINAL']}`);
+    console.log('resizeCallsAfterSettling:', await read(win, `window.__resizeCalls`));
 
-    const openedCount = (await read(win, `window.baton.sessions()`) as { id: string }[]).length;
-
-    // A different pull request — the quick terminal belongs to the first one.
+    // A quick terminal is filed under its ticket/PR the same way a run's
+    // session is: navigating to a different one and back should find the
+    // *same* session still there, not gone — that's the whole point of
+    // docking it by subject rather than by "whatever is currently open".
+    const sessionsBefore = await read(win, `window.baton.sessions()`) as { id: string }[];
     await read(win, `document.querySelectorAll('.rows .row')[1]?.click()`);
-    await new Promise((r) => setTimeout(r, 400));
-    const afterNavCount = (await read(win, `window.baton.sessions()`) as { id: string }[]).length;
-
+    await new Promise((r) => setTimeout(r, 300));
+    const hiddenOnOtherPull = !(await read(win, `document.querySelector('.detail-terminal')`));
+    await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+    await new Promise((r) => setTimeout(r, 300));
+    const reappeared = await read(win, `Boolean(document.querySelector('.detail-terminal'))`);
+    const sessionsAfter = await read(win, `window.baton.sessions()`) as { id: string }[];
     console.log(
-      'quickTerminalClosedOnNavigate:',
-      JSON.stringify({ openedCount, afterNavCount, closed: afterNavCount < openedCount })
+      'quickTerminalPersists:',
+      JSON.stringify({
+        hiddenOnOtherPull, reappeared,
+        sameSession: sessionsBefore.length === 1 && sessionsAfter.length === 1 &&
+          sessionsBefore[0].id === sessionsAfter[0].id
+      })
     );
+
+    // Real keystrokes, through the debugger protocol — typing into an xterm
+    // instance is keyboard input, not a value a script can set, so this is
+    // the only way a regression here would actually get caught.
+    await read(win, `document.querySelector('.term')?.click()`);
+    await new Promise((r) => setTimeout(r, 150));
+    let attached = false;
+    try {
+      win.webContents.debugger.attach('1.3');
+      attached = true;
+    } catch { /* already attached elsewhere in this run */ }
+    if (attached) {
+      await win.webContents.debugger.sendCommand('Input.insertText', { text: 'echo BATON_TYPED_OK' });
+      win.webContents.debugger.detach();
+    }
+    await new Promise((r) => setTimeout(r, 600));
+    const typedVisible = await read(
+      win,
+      `document.querySelector('.term')?.textContent?.includes('BATON_TYPED_OK') ?? false`
+    );
+    console.log('quickTerminalKeystrokeVisible:', JSON.stringify({ attached, typedVisible }));
   }
 
   // --- Moving the inline terminal to each of its four docks -----------------
@@ -1353,6 +1404,30 @@ export async function smokeUi(
         (await win.webContents.capturePage()).toPNG()
       );
       console.log(`shot: ${process.env['BATON_SHOT_NEW_SESSION_OPENED']}`);
+      // Left open for as long as the docked-terminal check leaves its own
+      // open, so a warning-count comparison between the two is fair.
+      await new Promise((r) => setTimeout(r, 4_000));
+      console.log('sessionsTabTerminalDwellDone');
+
+      // Control: does the same keystroke dispatch work against a terminal
+      // that is not docked in a ticket/PR pane?
+      await read(win, `document.querySelector('.term')?.click()`);
+      await new Promise((r) => setTimeout(r, 150));
+      let ctrlAttached = false;
+      try {
+        win.webContents.debugger.attach('1.3');
+        ctrlAttached = true;
+      } catch { /* already attached */ }
+      if (ctrlAttached) {
+        await win.webContents.debugger.sendCommand('Input.insertText', { text: 'echo hi' });
+        win.webContents.debugger.detach();
+      }
+      await new Promise((r) => setTimeout(r, 400));
+      const ctrlTypedText = await read(
+        win,
+        `Array.from(document.querySelectorAll('.term .xterm-rows > div')).map(d => d.textContent).join('\\n')`
+      );
+      console.log('typedIntoSessionsTabTerminal:', JSON.stringify({ ctrlAttached, ctrlTypedText }));
     }
   }
 

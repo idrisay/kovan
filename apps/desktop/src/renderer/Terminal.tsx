@@ -64,6 +64,19 @@ export function Terminal({ sessionId }: { sessionId: string }) {
 
     const sync = () => {
       try {
+        // Only when the char grid actually changes. A container nested in
+        // flex layout — the docked panel in a pull request or ticket pane,
+        // not this component's fault but its neighbourhood — can report a
+        // sub-pixel-different box on nearly every frame without the whole
+        // number of cols/rows ever moving; resizing on every one of those
+        // sent a real SIGWINCH to the shell each time; many prompts redraw
+        // their entire line on any SIGWINCH, whether or not the size
+        // actually changed, and that redraw storm is what shows as flicker
+        // and swallows a keystroke typed in between two of them.
+        const proposed = fit.proposeDimensions();
+        if (!proposed || (proposed.cols === term.cols && proposed.rows === term.rows)) {
+          return;
+        }
         fit.fit();
         void window.baton.sessionResize(sessionId, term.cols, term.rows);
       } catch {

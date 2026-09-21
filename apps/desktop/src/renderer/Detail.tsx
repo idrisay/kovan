@@ -335,9 +335,7 @@ function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () 
             </button>
           </div>
         </div>
-        <div className="term">
-          <Terminal sessionId={session.id} />
-        </div>
+        <Terminal sessionId={session.id} />
       </div>
       {!handleFirst && handle}
     </div>
@@ -345,40 +343,23 @@ function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () 
 }
 
 /**
- * A terminal that belongs to *looking at* this ticket or pull request, not to
- * a run started from it — no prompt, no history, no report. It is scoped to
- * whichever one is open: switching to another closes it, because every
- * session here is filed under the ticket/PR it was opened for, and a scratch
- * terminal left running under the one you just navigated away from is a
- * session you will not think to go looking for in Sessions.
+ * A terminal that belongs to this ticket or pull request, not to a run
+ * started from it — no prompt, no history, no report, just a shell in the
+ * subject's own folder. Filed under the subject the same way a run's session
+ * is, so it docks back inline the same way too: navigate away and back and
+ * it is still there, exactly like a run's session, until you close it
+ * yourself.
  */
 function useQuickTerminal(
-  identity: string,
   cwdHint: string | undefined,
   subject: string,
   onOpenSession: (id: string) => void
 ): () => void {
-  const sessionId = useRef<string>();
-
-  const open = useCallback(() => {
+  return useCallback(() => {
     void window.baton.defaultCwd(cwdHint).then((cwd) =>
       window.baton.openTerminal(cwd, subject, `Terminal — ${subject}`)
-    ).then((session) => {
-      sessionId.current = session.id;
-      onOpenSession(session.id);
-    });
+    ).then((session) => onOpenSession(session.id));
   }, [cwdHint, subject, onOpenSession]);
-
-  useEffect(() => {
-    return () => {
-      if (sessionId.current) {
-        void window.baton.sessionClose(sessionId.current);
-        sessionId.current = undefined;
-      }
-    };
-  }, [identity]);
-
-  return open;
 }
 
 export function PullPane({
@@ -428,9 +409,7 @@ export function PullPane({
     setShowTerminal(true);
   }, [inlineSession?.id]);
 
-  const openQuickTerminal = useQuickTerminal(
-    `${pull.repo}#${pull.number}`, pull.repo, subject, onOpenSession
-  );
+  const openQuickTerminal = useQuickTerminal(pull.repo, subject, onOpenSession);
 
   const unresolved = detail?.threads.filter((t) => !t.isResolved) ?? [];
   // Whether the left column has anything in it. A PR with no description and
@@ -632,7 +611,7 @@ export function TicketPane({
     setShowTerminal(true);
   }, [inlineSession?.id]);
 
-  const openQuickTerminal = useQuickTerminal(issue.key, undefined, issue.key, onOpenSession);
+  const openQuickTerminal = useQuickTerminal(undefined, issue.key, onOpenSession);
 
   return (
     <div className="detail-shell">

@@ -901,7 +901,7 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   padding: 7px 12px; border-bottom: 1px solid var(--hair); flex: none;
   font-family: var(--mono); font-size: 10.5px; color: var(--dim);
 }
-.term { flex: 1; min-height: 0; padding: 8px 10px; }
+.term { flex: 1; min-width: 0; min-height: 0; overflow: hidden; padding: 8px 10px; }
 
 @media (max-width: 1000px) {
   :root { --queue-default: 260px; }
