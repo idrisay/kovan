@@ -476,6 +476,106 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
     }
   }
 
+  // --- Dragging the sidebar wider -------------------------------------------
+  // Through the debugger protocol, not webContents.sendInputEvent. Measured
+  // both ways here: sendInputEvent's moves arrive with pointerType '' and
+  // never retarget to an element holding pointer capture, so the handle would
+  // look broken when it is not. Input.dispatchMouseEvent produces a proper
+  // mouse pointer (id 1, pointerType 'mouse') and capture works, which is
+  // what a real drag does.
+  {
+    const handle = (await read(
+      win,
+      `(() => {
+         const r = document.querySelector('.resizer')?.getBoundingClientRect();
+         return r ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null;
+       })()`
+    )) as { x: number; y: number } | null;
+
+    const widthOf = async () =>
+      (await read(win, `document.querySelector('.queue').getBoundingClientRect().width`)) as number;
+    const custom = () =>
+      read(win, `document.documentElement.style.getPropertyValue('--queue-w') || null`);
+
+    const startWidth = await widthOf();
+    let attached = false;
+    try {
+      win.webContents.debugger.attach('1.3');
+      attached = true;
+    } catch (error) {
+      summary['resize'] = { skipped: `debugger: ${(error as Error).message}` };
+    }
+
+    if (handle && attached) {
+      const mouse = (type: string, x: number, y: number, buttons: number) =>
+        win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+          type, x, y, button: 'left', buttons, clickCount: 1, pointerType: 'mouse'
+        });
+
+      const drag = async (
+        from: { x: number; y: number }, toX: number, hold?: () => Promise<void>
+      ) => {
+        await mouse('mousePressed', from.x, from.y, 1);
+        // Several moves, not one jump: a handler that only works on the first
+        // move, or that accumulates its delta instead of tracking the cursor,
+        // passes a single-step drag and fails a real one.
+        for (const x of [from.x + (toX - from.x) / 2, toX]) {
+          await mouse('mouseMoved', Math.round(x), from.y, 1);
+        }
+        await new Promise((r) => setTimeout(r, 80));
+        if (hold) await hold();                    // still held, for a shot
+        await mouse('mouseReleased', toX, from.y, 0);
+        await new Promise((r) => setTimeout(r, 80));
+      };
+
+      await drag(handle, handle.x + 140, async () => {
+        summary['resizeDragging'] = await read(
+          win,
+          `Boolean(document.querySelector('.resizer.dragging')) &&
+           document.body.classList.contains('resizing')`
+        );
+        if (process.env['BATON_SHOT_RESIZE']) {
+          await writeFile(
+            process.env['BATON_SHOT_RESIZE'],
+            (await win.webContents.capturePage()).toPNG()
+          );
+          console.log(`shot: ${process.env['BATON_SHOT_RESIZE']}`);
+        }
+      });
+      const widened = await widthOf();
+      const stored = await read(win, `localStorage.getItem('baton.sidebar-width')`);
+
+      // The handle travelled with the edge, so aim the next drag from there.
+      const moved = { x: handle.x + 140, y: handle.y };
+      await drag(moved, moved.x - 600);            // well past the floor
+      const clamped = await widthOf();
+
+      await read(
+        win,
+        `document.querySelector('.resizer')
+           .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`
+      );
+      await new Promise((r) => setTimeout(r, 80));
+
+      summary['resize'] = {
+        startWidth,
+        widened,
+        grewByExactly140: widened - startWidth === 140,
+        clamped,
+        stoppedAtFloor: clamped === 220,
+        stored,
+        // Double-click drops the override, so the stylesheet default is back.
+        afterReset: await widthOf(),
+        overrideCleared: (await custom()) === null,
+        forgotten: (await read(win, `localStorage.getItem('baton.sidebar-width')`)) === null
+      };
+    } else if (attached) {
+      summary['resize'] = { skipped: 'no .resizer in the DOM' };
+    }
+
+    if (attached) win.webContents.debugger.detach();
+  }
+
   // --- The workspace menu, and removing a folder ----------------------------
   // Last, because removing a folder mutates the workspace everything above
   // was driving.

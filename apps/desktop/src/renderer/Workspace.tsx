@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Editor, formatBytes, statusFor } from './Editor';
 import { Diff } from './Diff';
+import { Resizer } from './Resizer';
 import {
   AddFolderIcon, ChangesIcon, ChevronIcon, CloseIcon, CollapseIcon, FileIcon,
   FolderIcon, MoreIcon, RefreshIcon, TerminalIcon
@@ -411,6 +412,7 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
           )}
         </div>
       </aside>
+      <Resizer />
 
       <main className="pane editor-pane">
         {tabs.length === 0 ? (

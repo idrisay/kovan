@@ -7,6 +7,7 @@ import { RunSheet } from './RunSheet';
 import { Terminal } from './Terminal';
 import { GroupHead, PullRow } from './rows';
 import { WorkspaceView } from './Workspace';
+import { Resizer } from './Resizer';
 import {
   PullRequestIcon, ReviewIcon, TicketIcon, TerminalIcon, WorkspaceIcon,
   RefreshIcon, SettingsIcon, SearchIcon, SortIcon
@@ -269,6 +270,7 @@ export function App() {
                   )}
                 </div>
               </aside>
+              <Resizer />
 
               <main className="pane">
                 {selected.pull ? (
@@ -349,6 +351,7 @@ function Sessions({
           )}
         </div>
       </aside>
+      <Resizer />
       <main className="pane term-pane">
         {current ? (
           <>

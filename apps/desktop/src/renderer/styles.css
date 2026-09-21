@@ -26,6 +26,9 @@
 @import '@fontsource/space-grotesk/600.css';
 
 :root {
+  /* The sidebar's resting width. The splitter overrides it with --queue-w. */
+  --queue-default: 310px;
+
   /* Surfaces, in elevation order. */
   --rail: #0d0e11;
   --sidebar: #131418;
@@ -225,7 +228,13 @@ button { font: inherit; cursor: pointer; }
 /* --- Queue sidebar ------------------------------------------------------ */
 
 .queue {
-  width: 310px; flex: none;
+  /* The drag handle overrides this by setting --queue-w on :root. Until it
+     does, the stylesheet still owns the default, including the narrow one
+     below — which is why the media query moves --queue-default rather than
+     width, or it would fight a width the user chose deliberately. */
+  width: var(--queue-w, var(--queue-default));
+  max-width: 60vw;                        /* never let it eat the whole window */
+  flex: none;
   background: var(--sidebar);
   border-right: 1px solid var(--hair);
   display: flex; flex-direction: column; min-height: 0;
@@ -508,8 +517,38 @@ button { font: inherit; cursor: pointer; }
 .term { flex: 1; min-height: 0; padding: 8px 10px; }
 
 @media (max-width: 1000px) {
-  .queue { width: 260px; }
+  :root { --queue-default: 260px; }
 }
+
+/* --- The splitter ----------------------------------------------------------
+ *
+ * 8px of grab area over a 1px seam: the sidebar keeps its own border, and the
+ * handle straddles it with negative margins so it costs the layout nothing
+ * and the border does not double up. Clay marks it on hover and during the
+ * drag, the same way clay marks every other live thing in this app.
+ */
+
+.resizer {
+  flex: none; position: relative; z-index: 6;
+  width: 8px; margin: 0 -4px;
+  cursor: col-resize;
+  background: none; border: 0; padding: 0;
+  touch-action: none;                     /* or a trackpad pans instead of dragging */
+}
+.resizer::after {
+  content: ''; position: absolute; inset: 0 3px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+.resizer:hover::after,
+.resizer:focus-visible::after,
+.resizer.dragging::after { background: var(--clay); }
+.resizer:focus-visible { outline: none; }
+
+/* While dragging, the cursor belongs to the whole window: the pointer leaves
+   the 8px strip on the first move, and without this it would flicker back to
+   a text caret over the list it is passing. */
+body.resizing, body.resizing * { cursor: col-resize !important; user-select: none; }
 
 /* --- Workspace -------------------------------------------------------------
  *
