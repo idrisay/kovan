@@ -9,6 +9,7 @@
  */
 
 import {
+  dedupeRepos,
   isBlocked,
   sortPulls,
   type JiraIssue,
@@ -17,6 +18,7 @@ import {
   type RepoRef
 } from '@baton/core';
 import { Credentials, GitHubClient, HttpClient, JiraClient } from '@baton/providers';
+import { findClones } from '@baton/git';
 import { EventEmitter } from '@baton/host';
 import type { DesktopHost } from './host';
 
@@ -166,7 +168,7 @@ export class Poller {
         this.host.config.get('github.baseUrl', 'https://api.github.com'),
         token
       );
-      const more = await client.mergedPulls(this.scopedRepos(), limit);
+      const more = await client.mergedPulls(await this.scopedRepos(), limit);
       const next: Snapshot = {
         ...this.snapshot,
         merged: byMergedAt(more.pulls),
@@ -224,7 +226,7 @@ export class Poller {
         token
       );
       const queues = await client.pullQueues(
-        this.scopedRepos(),
+        await this.scopedRepos(),
         this.host.config.get('github.limit', 50),
         signal
       );
@@ -285,15 +287,38 @@ export class Poller {
    * cloned yet. The other two modes come from the Swift app's workspaces
    * design — see devhub-mac/README.md, "there is no workspace *by default*".
    */
-  private scopedRepos(): RepoRef[] | undefined {
-    // `undefined` is unscoped — the whole account — and is both the default
-    // and the right answer for a standalone app: you want the pull request
-    // from the repo you have not cloned yet. Returning `[]` here would mean
-    // "scoped to no repositories" and silently show an empty queue.
-    //
-    // Folder and workspace scoping need the clone index from `@baton/git`,
-    // which lands with the explorer.
-    return undefined;
+  /**
+   * The repos to scope the queues to, from the active workspace's clones —
+   * or `undefined` for the whole account.
+   *
+   * `undefined`, not `[]`: a workspace with no GitHub-backed clone yet (a
+   * brand new folder, one not pushed anywhere) would otherwise scope the
+   * queue to nothing and read as "no pull requests" instead of "nothing to
+   * scope by yet". The account-wide queue is also what a user with no
+   * workspace at all has always seen, so nothing changes for them.
+   */
+  private async scopedRepos(): Promise<RepoRef[] | undefined> {
+    const workspaces = this.host.config.get<{ id: string; folders: string[] }[]>('workspaces', []);
+    if (workspaces.length === 0) {
+      return undefined;
+    }
+    const activeId = this.host.config.get<string | undefined>('workspace.active', undefined);
+    const workspace = workspaces.find((w) => w.id === activeId) ?? workspaces[0];
+    if (!workspace || workspace.folders.length === 0) {
+      return undefined;
+    }
+
+    const clones = await findClones(workspace.folders);
+    const repos = dedupeRepos(
+      clones
+        .map((clone) => clone.slug)
+        .filter((slug): slug is string => Boolean(slug))
+        .map((slug) => {
+          const [owner, name] = slug.split('/');
+          return { owner, name };
+        })
+    );
+    return repos.length > 0 ? repos : undefined;
   }
 }
 

@@ -31,9 +31,12 @@ export function Prose({ text }: { text: string }) {
     return DOMPurify.sanitize(raw, {
       ALLOWED_TAGS,
       ALLOWED_ATTR: ['href', 'title', 'alt', 'src', 'type', 'checked', 'disabled'],
-      // Only these schemes may appear in an href or src; `javascript:` and
-      // `data:` are what this excludes.
-      ALLOWED_URI_REGEXP: /^(?:https?|mailto):/i
+      // Only these schemes may appear in an href or src; `javascript:` and any
+      // other `data:` payload are what this excludes. The base64 image form is
+      // let through because a Jira attachment arrives inlined that way — see
+      // `JiraClient.attachmentDataUrl` — never as a fetchable https URL.
+      ALLOWED_URI_REGEXP:
+        /^(?:https?|mailto):|^data:image\/(?:png|jpe?g|gif|webp);base64,/i
     });
   }, [text]);
 

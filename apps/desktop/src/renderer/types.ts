@@ -1,5 +1,5 @@
 import type { JiraIssue, ProviderId, PullSummary } from '@baton/core';
-import type { PullDetail } from '@baton/providers';
+import type { PullDetail, Reviewer } from '@baton/providers';
 import type { AgentRun, Runner, RunKind } from '@baton/agent';
 import type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus, RunTarget
@@ -8,7 +8,7 @@ import type {
   Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
 } from '../main/workspace';
 
-export type { PullDetail, AgentRun, Runner, RunKind, RunTarget, JiraIssue, PullSummary };
+export type { PullDetail, Reviewer, AgentRun, Runner, RunKind, RunTarget, JiraIssue, PullSummary };
 export type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus,
   Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
@@ -58,6 +58,7 @@ export interface BatonApi {
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
 
   pullDetail(repo: string, number: number): Promise<PullDetail>;
+  ticketDetail(key: string): Promise<JiraIssue>;
   /** Widens the merged window to `limit` and returns the republished snapshot. */
   loadMoreMerged(limit: number): Promise<Snapshot>;
 

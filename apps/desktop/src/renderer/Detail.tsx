@@ -2,7 +2,44 @@ import { useEffect, useState } from 'react';
 import { formatAge, isMerged } from '@baton/core';
 import { States } from './rows';
 import { Prose } from './Prose';
-import type { AgentRun, JiraIssue, PullDetail, PullSummary, RunKind } from './types';
+import type { AgentRun, JiraIssue, PullDetail, PullSummary, Reviewer, RunKind } from './types';
+
+/** What a reviewer's last action reads as, and who it puts the ball with. */
+const TURN: Record<Reviewer['turn'], { status: string; label: string; tone: 'waiting' | 'fail' | 'pass' }> = {
+  pending: { status: 'Asked · no answer yet', label: 'Their turn', tone: 'waiting' },
+  changes_requested: { status: 'Asked for changes', label: 'Your turn', tone: 'fail' },
+  approved: { status: 'Approved', label: 'Approved', tone: 'pass' }
+};
+
+function Reviewers({ reviewers }: { reviewers: Reviewer[] }) {
+  if (reviewers.length === 0) {
+    return null;
+  }
+  return (
+    <section>
+      <h3>Reviewers</h3>
+      <ul className="reviewers">
+        {reviewers.map((reviewer) => {
+          const turn = TURN[reviewer.turn];
+          const age = reviewer.submittedAt ? formatAge(reviewer.submittedAt) : undefined;
+          return (
+            <li key={reviewer.login}>
+              <span className="reviewer-avatar">{reviewer.login.slice(0, 2).toUpperCase()}</span>
+              <span className="reviewer-who">
+                <span className="reviewer-name">{reviewer.login}</span>
+                <span className="reviewer-status">{turn.status}{age ? ` · ${age} ago` : ''}</span>
+              </span>
+              <span className="state reviewer-turn">
+                <span className={`dot ${turn.tone}`} />
+                {turn.label}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 function RunButtons({
   kinds,
@@ -104,7 +141,9 @@ export function PullPane({
   // no open threads should not leave a blank half: the rail spans instead.
   // Decided here rather than with :empty, which would rest on React never
   // emitting a stray whitespace node between the conditionals.
-  const hasReading = Boolean(error || !detail || detail.body || unresolved.length > 0);
+  const hasReading = Boolean(
+    error || !detail || detail.body || unresolved.length > 0 || detail.comments.length > 0
+  );
 
   return (
     <div className="detail">
@@ -172,9 +211,26 @@ export function PullPane({
               ))}
             </section>
           )}
+
+          {detail && detail.comments.length > 0 && (
+            <section>
+              <h3>Conversation</h3>
+              {detail.comments.map((c, i) => (
+                <div key={i} className="comment">
+                  <div className="comment-head">
+                    <strong>{c.author}</strong>
+                    <span className="when">{formatAge(c.createdAt)}</span>
+                  </div>
+                  <Prose text={c.body} />
+                </div>
+              ))}
+            </section>
+          )}
         </div>
 
         <aside className="detail-side">
+          {detail && <Reviewers reviewers={detail.reviewers} />}
+
           {detail && detail.checks.length > 0 && (
             <section>
               <h3>Checks</h3>
@@ -231,6 +287,25 @@ export function TicketPane({
   issue: JiraIssue;
   onRun: (kind: RunKind, issue: JiraIssue) => void;
 }) {
+  // The list `issue` renders immediately — summary, status, subtasks are
+  // already in hand. Only the description and comments are re-fetched, the
+  // same split as `PullPane`/`pullDetail`: that round trip is what resolves
+  // inline screenshots to real images instead of `search()`'s cheap
+  // plain-text notes, and it is only worth paying for the ticket somebody
+  // actually opened.
+  const [detail, setDetail] = useState<JiraIssue>();
+
+  useEffect(() => {
+    setDetail(undefined);
+    window.baton.ticketDetail(issue.key).then(setDetail).catch(() => {
+      // The list version still has real (if attachment-free) text, so a
+      // failed refetch is not worth surfacing as an error banner.
+    });
+  }, [issue.key]);
+
+  const description = detail?.description ?? issue.description;
+  const comments = detail?.comments ?? issue.comments;
+
   return (
     <div className="detail">
       <header className="detail-head">
@@ -261,13 +336,13 @@ export function TicketPane({
         <div className="detail-main">
           <section>
             <h3>Description</h3>
-            <Prose text={issue.description} />
+            <Prose text={description} />
           </section>
 
-          {issue.comments.length > 0 && (
+          {comments.length > 0 && (
             <section>
               <h3>Comments</h3>
-              {issue.comments.map((c, i) => (
+              {comments.map((c, i) => (
                 <div key={i} className="comment">
                   <div className="comment-head">
                     <strong>{c.author}</strong>

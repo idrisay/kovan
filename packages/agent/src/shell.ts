@@ -19,6 +19,34 @@ export type CommandKind = 'command' | 'function' | 'alias' | 'builtin' | 'none';
 
 const MARKER = '__baton_env_marker__';
 
+/**
+ * Strips the environment a running Claude Code session leaves on its own
+ * process — `CLAUDE_CONFIG_DIR` chief among them, plus the `CLAUDE_CODE_*`
+ * session/messaging identifiers and `CLAUDECODE`/`AI_AGENT`.
+ *
+ * When Baton itself is launched from inside a Claude Code session — a normal
+ * thing to do while developing it — that session's environment is what
+ * `execFile` inherits here, `CLAUDE_CONFIG_DIR` included. Left in, every
+ * "Claude Code" run this app starts would silently open under whichever
+ * profile (`claude-personal`, `claude-admin`, …) happened to launch Baton,
+ * rather than the account you actually picked in Settings. Worse,
+ * `CLAUDE_CODE_CHILD_SESSION` and the messaging socket/token would make the
+ * new agent think it is a child of the session that launched Baton, not an
+ * independent run.
+ */
+export function withoutInheritedClaudeSession(
+  env: Record<string, string>
+): Record<string, string> {
+  const clean: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (key === 'CLAUDECODE' || key === 'AI_AGENT' || key.startsWith('CLAUDE_')) {
+      continue;
+    }
+    clean[key] = value;
+  }
+  return clean;
+}
+
 /** The user's real login shell, not whatever spawned this process. */
 export function loginShell(): string {
   try {
@@ -84,9 +112,11 @@ export class ShellEnvironment {
           }
         }
       }
-      this.env = Object.keys(parsed).length > 0 ? parsed : { ...process.env } as Record<string, string>;
+      this.env = withoutInheritedClaudeSession(
+        Object.keys(parsed).length > 0 ? parsed : ({ ...process.env } as Record<string, string>)
+      );
     } catch {
-      this.env = { ...process.env } as Record<string, string>;
+      this.env = withoutInheritedClaudeSession({ ...process.env } as Record<string, string>);
     }
     return this.env;
   }

@@ -1,6 +1,19 @@
 import type { CancelSignal } from '@baton/host';
-import { adfToMarkdown, markdownToAdf, type JiraIssue, type JiraTransition } from '@baton/core';
+import {
+  JIRA_MEDIA_PATTERN,
+  adfToMarkdown,
+  markdownToAdf,
+  type JiraIssue,
+  type JiraTransition
+} from '@baton/core';
 import { HttpError, type HttpClient } from '../http';
+
+interface RawAttachment {
+  id: string;
+  filename: string;
+  content: string;
+  mimeType?: string;
+}
 
 interface RawIssue {
   key: string;
@@ -14,11 +27,19 @@ interface RawIssue {
     updated?: string;
     subtasks?: { key: string; fields: { summary: string; status?: { name: string } } }[];
     comment?: { comments: { author?: { displayName: string }; body?: unknown; created: string }[] };
+    attachment?: RawAttachment[];
   };
 }
 
 const FIELDS =
-  'summary,description,status,issuetype,priority,assignee,updated,subtasks,comment';
+  'summary,description,status,issuetype,priority,assignee,updated,subtasks,comment,attachment';
+
+/**
+ * Screenshots run a few hundred KB; past this an inline image would cost more
+ * than a description picture is worth, so it is left as the plain-text note
+ * instead of pulled in.
+ */
+const MAX_INLINE_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 
 const URL_PATTERN = /https?:\/\/[^\s<>()[\]"']+/g;
 
@@ -43,12 +64,20 @@ export class JiraClient {
     return `${this.baseUrl}/browse/${key}`;
   }
 
+  /**
+   * The single issue somebody opened, with its inline screenshots resolved to
+   * real images rather than `search()`'s plain-text notes.
+   *
+   * Resolving them costs one authenticated fetch per distinct image, which is
+   * fine for the one ticket somebody is reading and would not be for the up
+   * to 100 that `search()` returns on every poll.
+   */
   async getIssue(key: string, signal?: CancelSignal): Promise<JiraIssue> {
     const raw = await this.http.json<RawIssue>(this.api(`/issue/${encodeURIComponent(key)}?fields=${FIELDS}`), {
       headers: this.headers,
       signal
     });
-    return this.normalise(raw);
+    return this.withInlineAttachments(this.normalise(raw), raw, signal);
   }
 
   async search(jql: string, limit = 30, signal?: CancelSignal): Promise<JiraIssue[]> {
@@ -161,5 +190,89 @@ export class JiraClient {
       comments,
       links
     };
+  }
+
+  /**
+   * Swaps the issue's `jira-media:` placeholders for real inline images.
+   *
+   * The only thread back from an ADF media node to a classic attachment is
+   * its filename — matched here against `fields.attachment`, which is the
+   * one call that names both a filename and a byte-serving URL.
+   */
+  private async withInlineAttachments(
+    issue: JiraIssue,
+    raw: RawIssue,
+    signal?: CancelSignal
+  ): Promise<JiraIssue> {
+    const byFilename = new Map(
+      (raw.fields.attachment ?? [])
+        .filter((a) => a.filename && a.content)
+        .map((a) => [a.filename, a] as const)
+    );
+    // Not an early exit for an empty map: a description can still hold
+    // `jira-media:` tokens with nothing in `fields.attachment` to match them
+    // against, and those still have to come back down to the plain-text note
+    // — left as the token, they would reach `Prose` as an `<img>` with a
+    // scheme DOMPurify does not allow and simply vanish.
+    const [description, comments] = await Promise.all([
+      this.resolveAttachments(issue.description, byFilename, signal),
+      Promise.all(
+        issue.comments.map(async (c) => ({
+          ...c,
+          body: await this.resolveAttachments(c.body, byFilename, signal)
+        }))
+      )
+    ]);
+    return { ...issue, description, comments };
+  }
+
+  private async resolveAttachments(
+    markdown: string,
+    byFilename: Map<string, RawAttachment>,
+    signal?: CancelSignal
+  ): Promise<string> {
+    const filenames = [...new Set(
+      [...markdown.matchAll(JIRA_MEDIA_PATTERN)].map(([, , encoded]) => decodeURIComponent(encoded))
+    )];
+    if (filenames.length === 0) {
+      return markdown;
+    }
+
+    const dataUrls = new Map<string, string>();
+    await Promise.all(
+      filenames.map(async (filename) => {
+        const attachment = byFilename.get(filename);
+        if (!attachment) return;
+        try {
+          const dataUrl = await this.attachmentDataUrl(attachment, signal);
+          if (dataUrl) dataUrls.set(filename, dataUrl);
+        } catch {
+          // Left unresolved — the replace below falls back to the note.
+        }
+      })
+    );
+
+    return markdown.replace(JIRA_MEDIA_PATTERN, (_whole, alt: string, encoded: string) => {
+      const dataUrl = dataUrls.get(decodeURIComponent(encoded));
+      return dataUrl ? `![${alt}](${dataUrl})` : `_(attachment: ${alt || 'file'})_`;
+    });
+  }
+
+  private async attachmentDataUrl(
+    attachment: RawAttachment,
+    signal?: CancelSignal
+  ): Promise<string | undefined> {
+    if (attachment.mimeType && !attachment.mimeType.startsWith('image/')) {
+      return undefined;
+    }
+    const { bytes, contentType } = await this.http.binary(attachment.content, {
+      headers: this.headers,
+      signal
+    });
+    const mime = attachment.mimeType || contentType;
+    if (!mime.startsWith('image/') || bytes.byteLength === 0 || bytes.byteLength > MAX_INLINE_ATTACHMENT_BYTES) {
+      return undefined;
+    }
+    return `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`;
   }
 }

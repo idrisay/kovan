@@ -186,8 +186,18 @@ const TICKET = {
       created: new Date(Date.now() - 90_000_000).toISOString(),
       body: 'Re-tested on iPad landscape. The scrollbar is there now, but **Mark Reviewed** still cannot be tapped.'
     }
-  ]
+  ],
+  links: []
 };
+
+/**
+ * The same ticket `getIssue` would return, attachments already resolved.
+ * Served instead of the network only when `BATON_USER_DATA` is also set —
+ * the same guard `detailFixture` uses — so it can never reach a real profile.
+ */
+export function ticketFixture(_key: string) {
+  return TICKET;
+}
 
 /**
  * A pull request detail rich enough to judge the layout by: a long body with a
@@ -279,6 +289,27 @@ export function detailFixture(repo: string, number: number) {
             body: 'It can, but the grid template is built at render time and the floor is needed before layout. I left a comment pointing at the two places to keep in step.'
           }
         ]
+      }
+    ],
+    comments: [
+      {
+        author: 'pm',
+        createdAt: new Date(Date.now() - 10_800_000).toISOString(),
+        body: 'QA re-tested this on the staging tablet rig — flagged as the last blocker before the sprint review.'
+      }
+    ],
+    reviewers: [
+      { login: 'carol-dev', turn: 'pending' as const },
+      { login: 'bob-dev', turn: 'pending' as const },
+      {
+        login: 'alice-dev',
+        turn: 'changes_requested' as const,
+        submittedAt: new Date(Date.now() - 86_400_000).toISOString()
+      },
+      {
+        login: 'erin-dev',
+        turn: 'approved' as const,
+        submittedAt: new Date(Date.now() - 172_800_000).toISOString()
       }
     ]
   };

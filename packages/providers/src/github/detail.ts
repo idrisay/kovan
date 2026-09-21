@@ -35,6 +35,16 @@ export interface CheckRun {
   url?: string;
 }
 
+/** Whose turn it is because of what this reviewer last did. */
+export type ReviewerTurn = 'pending' | 'changes_requested' | 'approved';
+
+export interface Reviewer {
+  login: string;
+  turn: ReviewerTurn;
+  /** When they last submitted a review. Absent for a request nobody has answered. */
+  submittedAt?: string;
+}
+
 export interface PullDetail {
   number: number;
   repo: string;
@@ -53,6 +63,13 @@ export interface PullDetail {
   comments: ReviewComment[];
   checks: CheckRun[];
   files: { path: string; additions: number; deletions: number; status: string }[];
+  /**
+   * One row per reviewer, most in need of attention first: still-open
+   * requests, then whoever answered most recently. A reviewer who only left
+   * comments — never approved or asked for changes — has no opinion recorded
+   * here, so they don't appear.
+   */
+  reviewers: Reviewer[];
 }
 
 const DETAIL_QUERY = `
@@ -75,6 +92,12 @@ query BatonPullDetail($owner: String!, $name: String!, $number: Int!) {
       }
       files(first: 100) {
         nodes { path additions deletions changeType }
+      }
+      reviewRequests(first: 30) {
+        nodes { requestedReviewer { ... on User { login } } }
+      }
+      latestOpinionatedReviews(first: 30) {
+        nodes { author { login } state submittedAt }
       }
       commits(last: 1) {
         nodes {
@@ -201,6 +224,28 @@ export async function fetchPullDetail(
   const checkNodes =
     pull['commits']?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.nodes ?? [];
 
+  const answered: Reviewer[] = (pull['latestOpinionatedReviews']?.nodes ?? [])
+    .filter(Boolean)
+    .map((review: any) => ({
+      login: review.author?.login ?? 'unknown',
+      turn: review.state === 'CHANGES_REQUESTED' ? 'changes_requested' : 'approved',
+      submittedAt: review.submittedAt ?? undefined
+    }))
+    // Most recently answered first, so a fresh "changes requested" isn't
+    // buried under an approval from days earlier.
+    .sort((a: Reviewer, b: Reviewer) => (b.submittedAt ?? '').localeCompare(a.submittedAt ?? ''));
+
+  const fold = (login: string) => login.toLowerCase();
+  const answeredLogins = new Set(answered.map((r) => fold(r.login)));
+  const pending: Reviewer[] = (pull['reviewRequests']?.nodes ?? [])
+    .filter(Boolean)
+    .map((req: any) => req.requestedReviewer?.login as string | undefined)
+    .filter((login: string | undefined): login is string => Boolean(login))
+    // A team re-requested after answering still shows up as a pending
+    // request; the review they already gave is the one that counts.
+    .filter((login: string) => !answeredLogins.has(fold(login)))
+    .map((login: string) => ({ login, turn: 'pending' as const }));
+
   return {
     number: pull['number'],
     repo,
@@ -223,6 +268,7 @@ export async function fetchPullDetail(
       additions: f.additions ?? 0,
       deletions: f.deletions ?? 0,
       status: String(f.changeType ?? '').toLowerCase()
-    }))
+    })),
+    reviewers: [...pending, ...answered]
   };
 }

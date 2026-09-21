@@ -107,9 +107,13 @@ export class HttpClient {
     return this.execute<T>(url, options);
   }
 
-  async buffer(url: string, options: RequestOptions = {}): Promise<Uint8Array> {
+  /** The raw bytes of a non-JSON response — an image, mostly — and how the server described them. */
+  async binary(url: string, options: RequestOptions = {}): Promise<{ bytes: Uint8Array; contentType: string }> {
     const response = await this.send(url, options);
-    return new Uint8Array(await response.arrayBuffer());
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      contentType: response.headers.get('content-type') ?? ''
+    };
   }
 
   private async execute<T>(url: string, options: RequestOptions): Promise<T> {

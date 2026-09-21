@@ -55,6 +55,34 @@ function applyMarks(text: string, marks: AdfNode['marks']): string {
   return `${lead}${out}${trail}`;
 }
 
+/**
+ * Placeholder markdown image for an inline attachment, pointing at the
+ * *filename* rather than the media node's own id.
+ *
+ * ADF identifies an inline image by a Media Platform id, which has no
+ * relationship to the classic `/rest/api/3/attachment` id the REST API
+ * actually serves bytes from — the only thing the two share is the filename.
+ * `adfToMarkdown` stays free of the network, so it leaves this token for
+ * `JiraClient` to resolve against the issue's attachment list, once, only for
+ * the ticket somebody actually opened.
+ */
+export function jiraMediaToken(filename: string): string {
+  return `![${filename.replace(/[[\]]/g, '')}](jira-media:${encodeURIComponent(filename)})`;
+}
+
+/** Matches what `jiraMediaToken` writes: `alt`, then the encoded filename. */
+export const JIRA_MEDIA_PATTERN = /!\[([^\]]*)\]\(jira-media:([^)]+)\)/g;
+
+function renderMedia(node: AdfNode): string {
+  const alt = node.attrs?.alt;
+  // Only a real filename can be correlated back to an attachment later; an id
+  // with nothing else to go on stays the plain-text note it always was.
+  if (typeof alt === 'string' && alt.trim()) {
+    return jiraMediaToken(alt.trim());
+  }
+  return `_(attachment: ${String(node.attrs?.id ?? 'file')})_`;
+}
+
 function children(node: AdfNode, separator = ''): string {
   return (node.content ?? []).map((child) => render(child)).join(separator);
 }
@@ -121,7 +149,7 @@ function render(node: AdfNode): string {
     case 'mediaGroup':
       return children(node, '\n');
     case 'media':
-      return `_(attachment: ${String(node.attrs?.alt ?? node.attrs?.id ?? 'file')})_`;
+      return renderMedia(node);
     case 'mention':
       return `@${String(node.attrs?.text ?? 'someone').replace(/^@/, '')}`;
     case 'emoji':

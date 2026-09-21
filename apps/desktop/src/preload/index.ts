@@ -27,6 +27,7 @@ const api = {
   // Detail
   pullDetail: (repo: string, number: number) =>
     ipcRenderer.invoke('baton:pull-detail', repo, number),
+  ticketDetail: (key: string) => ipcRenderer.invoke('baton:ticket-detail', key),
 
   // Agents
   runners: () => ipcRenderer.invoke('baton:runners'),

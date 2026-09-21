@@ -19,9 +19,9 @@ import { createHost } from './host';
 import { Poller, type Snapshot } from './poller';
 import { BatonTray } from './tray';
 import { Activity } from './notify';
-import { CREDENTIAL_FIELDS, HttpClient, fetchPullDetail } from '@baton/providers';
+import { CREDENTIAL_FIELDS, HttpClient, JiraClient, fetchPullDetail } from '@baton/providers';
 import { adoptImportedTokens } from './adopt';
-import { smokePty, smokeUi, type SmokeMode, detailFixture, fixtureSnapshot } from './smoke';
+import { smokePty, smokeUi, type SmokeMode, detailFixture, fixtureSnapshot, ticketFixture } from './smoke';
 import { Sessions } from './sessions';
 import { Agents } from './agents';
 import { Workspaces } from './workspace';
@@ -210,6 +210,19 @@ app.whenReady().then(async () => {
       repo,
       number
     );
+  });
+
+  ipcMain.handle('baton:ticket-detail', async (_event, key: string) => {
+    if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+      return ticketFixture(key);
+    }
+    const token = await host.secrets.get('jira');
+    const site = host.config.get('jira.baseUrl', '');
+    const email = host.config.get('jira.email', '');
+    if (!token || !site || !email) {
+      throw new Error('Jira is not connected');
+    }
+    return new JiraClient(detailHttp, site, email, token).getIssue(key);
   });
 
   // --- Agents ---------------------------------------------------------------
