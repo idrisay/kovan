@@ -165,6 +165,7 @@ const TICKET = {
   statusCategory: 'indeterminate' as const,
   issueType: 'Bug',
   priority: 'High',
+  assignee: 'alice-dev',
   updated: new Date(Date.now() - 172_800_000).toISOString(),
   description: [
     'Tables wider than their container are silently cut off on tablet and',
@@ -173,7 +174,11 @@ const TICKET = {
     '',
     'Second round of QA after the August fix. See the linked PR for the',
     'root cause — a block-level wrapper that can never be wider than its',
-    'own scroll container.'
+    'own scroll container.',
+    '',
+    '- [x] Reproduced on tablet and mobile',
+    '- [x] Root cause identified',
+    '- [ ] Fix verified on production'
   ].join('\n'),
   subtasks: [
     { key: 'ACME-2401', summary: 'Persistent scrollbar styling', status: 'Done', url: 'https://example.invalid/browse/ACME-2401' },
@@ -768,11 +773,25 @@ export async function smokeUi(
   };
 
   if (process.env['BATON_SHOT_TICKET']) {
+    // Same reason every other shot in this file waits: capturePage() can grab
+    // a frame from just before the click's re-render finishes compositing.
+    await new Promise((r) => setTimeout(r, 200));
     await writeFile(
       process.env['BATON_SHOT_TICKET'],
       (await win.webContents.capturePage()).toPNG()
     );
     console.log(`shot: ${process.env['BATON_SHOT_TICKET']}`);
+  }
+
+  if (process.env['BATON_SHOT_TICKET_FILTER']) {
+    await read(win, `document.querySelector('[aria-label="Filter tickets"]')?.click()`);
+    await until(win, `document.querySelector('.filter-menu')`, 5_000);
+    await new Promise((r) => setTimeout(r, 150));
+    await writeFile(
+      process.env['BATON_SHOT_TICKET_FILTER'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_TICKET_FILTER']}`);
   }
 
   return result;

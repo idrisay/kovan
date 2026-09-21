@@ -10,7 +10,7 @@ import { WorkspaceView } from './Workspace';
 import { Resizer } from './Resizer';
 import {
   PullRequestIcon, ReviewIcon, TicketIcon, TerminalIcon, WorkspaceIcon,
-  RefreshIcon, SettingsIcon, SearchIcon, SortIcon
+  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon
 } from './icons';
 
 type ViewId = 'pulls' | 'review' | 'tickets' | 'workspace' | 'sessions';
@@ -78,6 +78,109 @@ interface Group {
 
 const countBlocked = (pulls: readonly PullSummary[]) => pulls.filter(isBlocked).length;
 
+/** The ticket fields a facet filter narrows down. */
+type TicketFacetKey = 'status' | 'issueType' | 'priority' | 'assignee';
+
+type TicketFilters = Record<TicketFacetKey, Set<string>>;
+
+function emptyTicketFilters(): TicketFilters {
+  return { status: new Set(), issueType: new Set(), priority: new Set(), assignee: new Set() };
+}
+
+const TICKET_FACETS: { key: TicketFacetKey; label: string }[] = [
+  { key: 'status', label: 'Status' },
+  { key: 'issueType', label: 'Type' },
+  { key: 'priority', label: 'Priority' },
+  { key: 'assignee', label: 'Assignee' }
+];
+
+/**
+ * The values a ticket filter can narrow the tickets list down to, per facet
+ * — every distinct status, type, priority and assignee actually present, so
+ * the menu never offers a choice that would just empty the list.
+ */
+function ticketFacetValues(tickets: readonly JiraIssue[]): Record<TicketFacetKey, string[]> {
+  const uniq = (values: (string | undefined)[]) =>
+    [...new Set(values.filter((v): v is string => Boolean(v)))].sort();
+  return {
+    status: uniq(tickets.map((t) => t.status)),
+    issueType: uniq(tickets.map((t) => t.issueType)),
+    priority: uniq(tickets.map((t) => t.priority)),
+    assignee: uniq(tickets.map((t) => t.assignee))
+  };
+}
+
+/**
+ * The funnel button next to Sort. A ticket matches only when every facet
+ * with a selection includes it — an empty selection on a facet means "don't
+ * care", not "match nothing", which is why an unopened menu leaves the list
+ * exactly as the text filter left it.
+ */
+function TicketFilterMenu({
+  values, active, onToggle, onClear
+}: {
+  values: Record<TicketFacetKey, string[]>;
+  active: TicketFilters;
+  onToggle: (facet: TicketFacetKey, value: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const count = TICKET_FACETS.reduce((n, f) => n + active[f.key].size, 0);
+
+  // Any click outside closes the menu, same as the workspace overflow menu.
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = () => setOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [open]);
+
+  return (
+    <div className="filter-menu-host">
+      <button
+        type="button"
+        className={count > 0 ? 'icon-button active' : 'icon-button'}
+        aria-label="Filter tickets" aria-expanded={open}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+      >
+        <FilterIcon />
+        {count > 0 && <span className="filter-count">{count}</span>}
+      </button>
+      {open && (
+        <div className="menu filter-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+          {TICKET_FACETS.map((facet) => {
+            const options = values[facet.key];
+            if (options.length === 0) return null;
+            return (
+              <div key={facet.key} className="filter-group">
+                <p className="menu-head">{facet.label}</p>
+                {options.map((value) => (
+                  <label key={value} className="filter-option">
+                    <input
+                      type="checkbox"
+                      checked={active[facet.key].has(value)}
+                      onChange={() => onToggle(facet.key, value)}
+                    />
+                    {value}
+                  </label>
+                ))}
+              </div>
+            );
+          })}
+          {count > 0 && (
+            <>
+              <div className="menu-rule" />
+              <button type="button" role="menuitem" className="menu-warn" onClick={onClear}>
+                Clear filters
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY);
   const [view, setView] = useState<ViewId>('pulls');
@@ -88,6 +191,18 @@ export function App() {
   const [runSheet, setRunSheet] = useState<({ kind: RunKind } & Selection) | undefined>();
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsed);
+  const [ticketFilters, setTicketFilters] = useState<TicketFilters>(emptyTicketFilters);
+
+  const toggleTicketFilter = useCallback((facet: TicketFacetKey, value: string) => {
+    setTicketFilters((current) => {
+      const next = { ...current, [facet]: new Set(current[facet]) };
+      if (!next[facet].delete(value)) {
+        next[facet].add(value);
+      }
+      return next;
+    });
+  }, []);
+  const clearTicketFilters = useCallback(() => setTicketFilters(emptyTicketFilters()), []);
 
   const toggleGroup = useCallback((id: string) => {
     setCollapsed((current) => {
@@ -187,13 +302,21 @@ export function App() {
     void window.baton.loadMoreMerged(snapshot.merged.length + MERGED_STEP).then(accept);
   }, [snapshot.merged.length, accept]);
 
+  const ticketFacets = useMemo(() => ticketFacetValues(snapshot.tickets), [snapshot.tickets]);
+  const ticketFilterCount = TICKET_FACETS.reduce((n, f) => n + ticketFilters[f.key].size, 0);
+
   const tickets = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return q
-      ? snapshot.tickets.filter((t) =>
-          t.summary.toLowerCase().includes(q) || t.key.toLowerCase().includes(q))
-      : snapshot.tickets;
-  }, [snapshot.tickets, filter]);
+    return snapshot.tickets.filter((t) => {
+      if (q && !t.summary.toLowerCase().includes(q) && !t.key.toLowerCase().includes(q)) {
+        return false;
+      }
+      return TICKET_FACETS.every(({ key }) => {
+        const selected = ticketFilters[key];
+        return selected.size === 0 || selected.has(t[key] ?? '');
+      });
+    });
+  }, [snapshot.tickets, filter, ticketFilters]);
 
   const onStarted = (sessionId: string) => {
     setRunSheet(undefined);
@@ -281,6 +404,14 @@ export function App() {
                 <div className="queue-head">
                   <div className="queue-title-row">
                     <h1>{current.label}</h1>
+                    {view === 'tickets' && (
+                      <TicketFilterMenu
+                        values={ticketFacets}
+                        active={ticketFilters}
+                        onToggle={toggleTicketFilter}
+                        onClear={clearTicketFilters}
+                      />
+                    )}
                     <button type="button" className="icon-button" aria-label="Sort">
                       <SortIcon />
                     </button>
@@ -298,7 +429,11 @@ export function App() {
 
                 <div className="queue-list">
                   {view === 'tickets' ? (
-                    tickets.length === 0 ? <p className="quiet">No tickets.</p> : (
+                    tickets.length === 0 ? (
+                      <p className="quiet">
+                        {filter || ticketFilterCount > 0 ? 'No tickets match.' : 'No tickets.'}
+                      </p>
+                    ) : (
                       <ul className="rows">
                         {tickets.map((issue) => (
                           <li key={issue.key}>

@@ -100,6 +100,14 @@ export function SearchIcon({ size = 13 }: Props) {
   );
 }
 
+export function FilterIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={1.8} aria-hidden="true">
+      <path d="M4 5.5h16" /><path d="M7.5 12h9" /><path d="M10.5 18.5h3" />
+    </svg>
+  );
+}
+
 export function SortIcon({ size = 14 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={1.8} aria-hidden="true">

@@ -36,7 +36,13 @@ export function Prose({ text }: { text: string }) {
       // let through because a Jira attachment arrives inlined that way — see
       // `JiraClient.attachmentDataUrl` — never as a fetchable https URL.
       ALLOWED_URI_REGEXP:
-        /^(?:https?|mailto):|^data:image\/(?:png|jpe?g|gif|webp);base64,/i
+        /^(?:https?|mailto):|^data:image\/(?:png|jpe?g|gif|webp);base64,/i,
+      // DOMPurify runs that same URI regexp over every attribute value that
+      // isn't on this list, not just href/src — so without it, `type` on a
+      // task-list checkbox (a non-URI value like "checkbox") fails the check
+      // and gets silently dropped, leaving a bare `<input>` that renders as a
+      // plain text box instead of a checkbox.
+      ADD_URI_SAFE_ATTR: ['type']
     });
   }, [text]);
 

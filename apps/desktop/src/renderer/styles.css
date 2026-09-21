@@ -264,6 +264,25 @@ button { font: inherit; cursor: pointer; }
   background: transparent; border: 0; border-radius: 6px; color: var(--dim);
 }
 .icon-button:hover { color: var(--secondary); background: rgba(255, 255, 255, 0.05); }
+.icon-button.active { color: rgb(217, 119, 87); background: rgba(217, 119, 87, 0.12); }
+
+/* --- The ticket filter menu --- */
+.filter-menu-host { position: relative; display: flex; }
+.filter-count {
+  position: absolute; top: -3px; right: -3px; min-width: 13px; height: 13px;
+  padding: 0 3px; border-radius: 7px; background: rgb(217, 119, 87); color: #1a1310;
+  font-family: var(--mono); font-size: 9px; font-weight: 600;
+  display: grid; place-items: center;
+}
+.filter-menu { left: 0; right: auto; min-width: 190px; max-height: 60vh; overflow-y: auto; }
+.filter-group + .filter-group { margin-top: 4px; }
+.filter-option {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 5px 9px; border-radius: 6px; color: var(--body); font-size: 12px;
+  cursor: default;
+}
+.filter-option:hover { background: rgba(255, 255, 255, 0.06); color: var(--title); }
+.filter-option input { accent-color: rgb(217, 119, 87); }
 
 .search {
   display: flex; align-items: center; gap: 7px; margin-top: 9px;
@@ -522,7 +541,29 @@ button { font: inherit; cursor: pointer; }
   border: 1px solid var(--hair); padding: 5px 9px; text-align: left;
 }
 .prose th { background: rgba(255, 255, 255, 0.04); color: var(--secondary); font-weight: 600; }
-.prose input[type='checkbox'] { margin-right: 6px; }
+/*
+ * Jira/GitHub task-list checkboxes come through as a plain, disabled native
+ * `<input>` — nothing here styles that, so a dark page under Chromium's
+ * default disabled-checkbox skin renders as a flat grey box with no visible
+ * tick either way. Drawn by hand instead, so checked actually looks checked.
+ */
+.prose li:has(input[type='checkbox']) { list-style: none; }
+.prose input[type='checkbox'] {
+  appearance: none; -webkit-appearance: none; flex: none;
+  width: 14px; height: 14px; margin: 0 7px -2px 0;
+  border: 1.5px solid var(--hair-strong); border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  position: relative; cursor: default;
+}
+.prose input[type='checkbox']:checked {
+  background: rgb(217, 119, 87); border-color: rgb(217, 119, 87);
+}
+.prose input[type='checkbox']:checked::after {
+  content: ''; position: absolute; left: 4px; top: 1px;
+  width: 4px; height: 7px;
+  border: solid #1a1310; border-width: 0 1.6px 1.6px 0;
+  transform: rotate(40deg);
+}
 
 .thread { border-left: 2px solid rgba(208, 160, 90, 0.5); padding-left: 13px; margin-bottom: 18px; }
 .thread-file { font-family: var(--mono); font-size: 11px; color: var(--clay); margin-bottom: 7px; }
