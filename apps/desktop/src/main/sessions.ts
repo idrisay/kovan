@@ -141,10 +141,35 @@ export class Sessions {
     });
 
     if (options.line) {
-      // A beat for the shell to finish sourcing its profile. Typing into it
-      // mid-rc gets the line echoed into a half-initialised prompt and, with
-      // some frameworks, swallowed entirely.
-      setTimeout(() => pty.write(`${options.line}\r`), 250);
+      // Waits for the shell's own startup output to go quiet, rather than a
+      // fixed beat. A fixed delay was typed into the shell mid-rc on anything
+      // slower to start than the guess — nvm, asdf, oh-my-zsh, a themed
+      // prompt computing git status asynchronously — and depending on the
+      // framework that line was echoed into a half-initialised prompt,
+      // swallowed entirely, or left sitting typed but never submitted: the
+      // exact "it does not run the process" this replaces.
+      const line = options.line;
+      let sent = false;
+      let idle: NodeJS.Timeout;
+      const settle = () => {
+        clearTimeout(idle);
+        idle = setTimeout(send, 250);
+      };
+      const send = () => {
+        if (sent) return;
+        sent = true;
+        clearTimeout(idle);
+        clearTimeout(ceiling);
+        quiet.dispose();
+        pty.write(`${line}\r`);
+      };
+      // Nothing printed yet by a shell that shows its prompt without a word
+      // of startup chatter — 600ms is that case's own settle, not a guess at
+      // profile load time.
+      idle = setTimeout(send, 600);
+      // Whatever the profile does, it does not get forever.
+      const ceiling = setTimeout(send, 4_000);
+      const quiet = pty.onData(settle);
     }
 
     this.changed.fire(this.list());
