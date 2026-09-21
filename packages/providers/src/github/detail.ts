@@ -18,6 +18,12 @@ export interface ReviewComment {
   path?: string;
   line?: number;
   url: string;
+  /**
+   * Set only when this is a review's own written comment (the text that
+   * came with an approve/request-changes/comment), not a plain issue
+   * comment — lets the conversation badge it the way GitHub does.
+   */
+  reviewState?: 'approved' | 'changes_requested' | 'commented';
 }
 
 export interface ReviewThread {
@@ -98,6 +104,9 @@ query BatonPullDetail($owner: String!, $name: String!, $number: Int!) {
       }
       latestOpinionatedReviews(first: 30) {
         nodes { author { login } state submittedAt }
+      }
+      reviews(first: 50) {
+        nodes { author { login } state body submittedAt createdAt url }
       }
       commits(last: 1) {
         nodes {
@@ -235,6 +244,22 @@ export async function fetchPullDetail(
     // buried under an approval from days earlier.
     .sort((a: Reviewer, b: Reviewer) => (b.submittedAt ?? '').localeCompare(a.submittedAt ?? ''));
 
+  // What a reviewer actually wrote, not just the state it left them in — an
+  // approve or request-changes with no comment attached is already covered
+  // by the reviewer roster, so only the ones with something to say join the
+  // conversation.
+  const reviewComments: ReviewComment[] = (pull['reviews']?.nodes ?? [])
+    .filter(Boolean)
+    .filter((r: any) => typeof r.body === 'string' && r.body.trim().length > 0)
+    .map((r: any) => ({
+      author: r.author?.login ?? 'unknown',
+      body: r.body,
+      createdAt: r.submittedAt ?? r.createdAt ?? '',
+      url: r.url ?? '',
+      reviewState:
+        r.state === 'APPROVED' ? 'approved' : r.state === 'CHANGES_REQUESTED' ? 'changes_requested' : 'commented'
+    }));
+
   const fold = (login: string) => login.toLowerCase();
   const answeredLogins = new Set(answered.map((r) => fold(r.login)));
   const pending: Reviewer[] = (pull['reviewRequests']?.nodes ?? [])
@@ -259,9 +284,15 @@ export async function fetchPullDetail(
     deletions: pull['deletions'] ?? 0,
     changedFiles: pull['changedFiles'] ?? 0,
     threads,
-    comments: (pull['comments']?.nodes ?? [])
-      .map(comment)
-      .filter((c: ReviewComment | undefined): c is ReviewComment => Boolean(c)),
+    // Issue comments and written reviews are two different GitHub objects
+    // but one timeline to a reader, so they're merged here in the order
+    // they actually happened.
+    comments: [
+      ...(pull['comments']?.nodes ?? [])
+        .map(comment)
+        .filter((c: ReviewComment | undefined): c is ReviewComment => Boolean(c)),
+      ...reviewComments
+    ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     checks: checkNodes.map(checkFrom).filter(Boolean) as CheckRun[],
     files: (pull['files']?.nodes ?? []).filter(Boolean).map((f: any) => ({
       path: f.path,

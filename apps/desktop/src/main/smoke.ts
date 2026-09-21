@@ -296,6 +296,12 @@ export function detailFixture(repo: string, number: number) {
         author: 'pm',
         createdAt: new Date(Date.now() - 10_800_000).toISOString(),
         body: 'QA re-tested this on the staging tablet rig — flagged as the last blocker before the sprint review.'
+      },
+      {
+        author: 'alice-dev',
+        createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+        body: 'Left one inline note on the width floor — otherwise happy with the approach.',
+        reviewState: 'changes_requested' as const
       }
     ],
     reviewers: [

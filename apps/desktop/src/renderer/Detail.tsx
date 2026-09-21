@@ -2,13 +2,20 @@ import { useEffect, useState } from 'react';
 import { formatAge, isMerged } from '@baton/core';
 import { States } from './rows';
 import { Prose } from './Prose';
-import type { AgentRun, JiraIssue, PullDetail, PullSummary, Reviewer, RunKind } from './types';
+import type { AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, Reviewer, RunKind } from './types';
 
 /** What a reviewer's last action reads as, and who it puts the ball with. */
 const TURN: Record<Reviewer['turn'], { status: string; label: string; tone: 'waiting' | 'fail' | 'pass' }> = {
   pending: { status: 'Asked · no answer yet', label: 'Their turn', tone: 'waiting' },
   changes_requested: { status: 'Asked for changes', label: 'Your turn', tone: 'fail' },
   approved: { status: 'Approved', label: 'Approved', tone: 'pass' }
+};
+
+/** How a written review reads inline in the conversation, alongside plain comments. */
+const REVIEW_STATE: Record<NonNullable<ReviewComment['reviewState']>, { label: string; tone: 'waiting' | 'fail' | 'pass' }> = {
+  approved: { label: 'Approved', tone: 'pass' },
+  changes_requested: { label: 'Requested changes', tone: 'fail' },
+  commented: { label: 'Reviewed', tone: 'waiting' }
 };
 
 function Reviewers({ reviewers }: { reviewers: Reviewer[] }) {
@@ -215,15 +222,24 @@ export function PullPane({
           {detail && detail.comments.length > 0 && (
             <section>
               <h3>Conversation</h3>
-              {detail.comments.map((c, i) => (
-                <div key={i} className="comment">
-                  <div className="comment-head">
-                    <strong>{c.author}</strong>
-                    <span className="when">{formatAge(c.createdAt)}</span>
+              {detail.comments.map((c, i) => {
+                const review = c.reviewState ? REVIEW_STATE[c.reviewState] : undefined;
+                return (
+                  <div key={i} className="comment">
+                    <div className="comment-head">
+                      <strong>{c.author}</strong>
+                      {review && (
+                        <span className="state">
+                          <span className={`dot ${review.tone}`} />
+                          {review.label}
+                        </span>
+                      )}
+                      <span className="when">{formatAge(c.createdAt)}</span>
+                    </div>
+                    <Prose text={c.body} />
                   </div>
-                  <Prose text={c.body} />
-                </div>
-              ))}
+                );
+              })}
             </section>
           )}
         </div>
