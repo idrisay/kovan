@@ -32,6 +32,7 @@ const api = {
 
   // Agents
   runners: () => ipcRenderer.invoke('baton:runners'),
+  knownModels: () => ipcRenderer.invoke('baton:known-models'),
   runTargets: (force?: boolean) => ipcRenderer.invoke('baton:run-targets', force),
   buildPrompt: (kind: string, subject: unknown) =>
     ipcRenderer.invoke('baton:build-prompt', kind, subject),

@@ -807,11 +807,12 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .provider label span, .run-controls label span, .prompt-label span {
   color: var(--muted); font-size: 11.5px;
 }
-.provider input, .run-controls select, .prompt-label textarea {
+.provider input, .run-controls select, .run-controls input, .prompt-label textarea {
   background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 8px;
   padding: 7px 10px; color: var(--prose); font: inherit; font-size: 12.5px;
+  width: 100%;
 }
-.provider input:focus, .run-controls select:focus, .prompt-label textarea:focus {
+.provider input:focus, .run-controls select:focus, .run-controls input:focus, .prompt-label textarea:focus {
   outline: none; border-color: rgba(217, 119, 87, 0.5);
 }
 .run-controls { display: flex; gap: 12px; }

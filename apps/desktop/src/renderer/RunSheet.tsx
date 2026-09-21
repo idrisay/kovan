@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { JiraIssue, PullSummary, RunKind, Runner, RunTarget, StartResult } from './types';
 
+const LAST_MODEL_KEY = 'runner.lastModel';
+
 const KIND_LABEL: Record<RunKind, string> = {
   implement: 'Work on this in an agent',
   review: 'Review in an agent',
@@ -29,15 +31,18 @@ export function RunSheet({
   onStarted: (sessionId: string) => void;
 }) {
   const [runners, setRunners] = useState<Runner[]>([]);
+  const [knownModels, setKnownModels] = useState<Record<string, string[]>>({});
   const [targets, setTargets] = useState<RunTarget[]>([]);
   const [runnerId, setRunnerId] = useState('');
   const [cwd, setCwd] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [model, setModel] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const subject = { pull, issue };
   const subjectId = issue ? issue.key : pull ? `${pull.repo}#${pull.number}` : '';
+  const runner = runners.find((r) => r.id === runnerId);
 
   useEffect(() => {
     void window.baton.runners().then((list) => {
@@ -45,6 +50,7 @@ export function RunSheet({
       // The default agent if one is set and still installed, else the first.
       setRunnerId((current) => current || list[0]?.id || '');
     });
+    void window.baton.knownModels().then(setKnownModels);
     void window.baton.runTargets().then(setTargets);
     void window.baton.buildPrompt(kind, subject).then(setPrompt);
     void window.baton.defaultCwd(pull?.repo).then((dir) => setCwd((c) => c || dir || ''));
@@ -53,15 +59,30 @@ export function RunSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, subjectId]);
 
+  // Whichever model this agent was last run with, anywhere — not per ticket,
+  // per agent: switching the Agent dropdown re-reads this for the newly
+  // picked one, which is what "remember it for next time" has to mean when
+  // there is no single "next time" to attach it to.
+  useEffect(() => {
+    if (!runnerId) return;
+    void window.baton.settings().then((settings) => {
+      const remembered = (settings[LAST_MODEL_KEY] as Record<string, string> | undefined)?.[runnerId];
+      setModel(remembered ?? '');
+    });
+  }, [runnerId]);
+
   async function start() {
     setBusy(true);
     setError('');
     try {
       const result: StartResult = await window.baton.startAgent(
-        { kind, subjectId, runnerId, cwd, prompt },
+        { kind, subjectId, runnerId, cwd, prompt, model: model || undefined },
         subject
       );
       if (result.ok) {
+        const settings = await window.baton.settings();
+        const remembered = (settings[LAST_MODEL_KEY] as Record<string, string> | undefined) ?? {};
+        void window.baton.setSetting(LAST_MODEL_KEY, { ...remembered, [runnerId]: model });
         onStarted(result.sessionId);
       } else {
         setError(result.error);
@@ -107,6 +128,23 @@ export function RunSheet({
               ))}
             </select>
           </label>
+          {runner?.modelFlag && (
+            <label>
+              <span>Model</span>
+              <input
+                list="run-model-options"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder={`Default${runner.model ? ` (${runner.model})` : ''}`}
+                spellCheck={false}
+              />
+              <datalist id="run-model-options">
+                {(knownModels[runnerId] ?? []).map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            </label>
+          )}
         </div>
 
         <label className="prompt-label">

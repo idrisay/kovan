@@ -107,6 +107,18 @@ export const BUILT_IN: Runner[] = [
 ];
 
 /**
+ * Model names a runner is known to accept via its own `modelFlag` — a
+ * starting list, not a live query. `modelsArgs` exists for a runner that can
+ * actually be asked (OpenCode's own `models` subcommand); neither Claude Code
+ * nor Codex offers one, so this is what stands in for it. A runner not listed
+ * here still takes a model — the run sheet's own field for it is free text —
+ * this only supplies the suggestions.
+ */
+export const KNOWN_MODELS: Record<string, string[]> = {
+  claude: ['opus', 'sonnet', 'haiku']
+};
+
+/**
  * Agent commands worth looking for. Nothing here is required; it is a starting
  * list so the common case is one click rather than seven forms.
  */

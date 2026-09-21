@@ -397,10 +397,28 @@ export async function smokePty(
   setTimeout(() => sessions.write(session.id, 'echo BATON_PTY_OK-$((6*7))\r'), 600);
   await new Promise((r) => setTimeout(r, 4000));
 
+  // A second session, this time through the `line` path itself — the one
+  // that used to type a command in on a fixed 250ms beat regardless of how
+  // long the shell's own profile took to load, and could leave it sitting
+  // typed but never submitted. `sessions.write()` above bypasses that path
+  // entirely, so it could not have caught a regression there.
+  const lineSession = await sessions.open({
+    cwd: app.getPath('home'),
+    title: 'smoke-line',
+    runnerName: 'Shell',
+    line: 'echo BATON_LINE_OK-$((3*4))'
+  });
+  let seenFromLine = '';
+  sessions.onOutput(({ id, data }) => {
+    if (id === lineSession.id) seenFromLine += data;
+  });
+  await new Promise((r) => setTimeout(r, 4500));
+
   const prompt = agents.buildPrompt('unblock', { pull: FIXTURE });
   return {
     ptyOpened: Boolean(session.id),
     sawEcho: seen.includes('BATON_PTY_OK-42'),
+    lineWasRun: seenFromLine.includes('BATON_LINE_OK-12'),
     running: sessions.list()[0]?.running,
     bufferBytes: sessions.buffer(session.id).length,
     runnersFound: runners.length,
@@ -549,6 +567,87 @@ export async function smokeUi(
       (await win.webContents.capturePage()).toPNG()
     );
     console.log(`shot: ${process.env['BATON_SHOT_RUN_BUTTONS']}`);
+  }
+
+  // --- The run sheet's model field, and remembering the last one picked -----
+  if (process.env['BATON_SHOT_RUN_MODEL']) {
+    await read(win, `document.querySelector('.rows .row')?.click()`);
+    await until(win, `document.querySelector('.detail-actions .primary')`, 5_000);
+    await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
+    await until(win, `document.querySelector('.run-controls select')?.value`, 5_000);
+    await new Promise((r) => setTimeout(r, 150));
+
+    const modelField = () =>
+      read(
+        win,
+        `(() => { const i = document.querySelector('.run-controls input[list]');
+          return i ? { value: i.value, placeholder: i.placeholder } : null; })()`
+      );
+    const options = await read(
+      win,
+      `Array.from(document.querySelectorAll('#run-model-options option')).map(o => o.value)`
+    );
+    const before = await modelField();
+
+    await writeFile(
+      process.env['BATON_SHOT_RUN_MODEL'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_RUN_MODEL']}`);
+
+    // Pick a model and cancel — a run sheet closed without running must not
+    // remember anything, only one actually started does.
+    await read(
+      win,
+      `(() => { const i = document.querySelector('.run-controls input[list]');
+        if (!i) return;
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(i, 'opus');
+        i.dispatchEvent(new Event('input', { bubbles: true }));
+       })()`
+    );
+    const afterTyping = await modelField();
+    await read(win, `document.querySelector('.sheet-head .ghost')?.click()`);
+    await new Promise((r) => setTimeout(r, 100));
+    const forgottenAfterCancel = (
+      await read(win, `window.baton.settings()`) as { 'runner.lastModel'?: Record<string, string> }
+    )['runner.lastModel']?.['claude'];
+
+    console.log(
+      'runModel:',
+      JSON.stringify({ options, before, afterTyping, forgottenAfterCancel })
+    );
+
+    // Now actually run with an explicit model, and check it stuck.
+    await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
+    await until(win, `document.querySelector('.run-controls select')?.value`, 5_000);
+    await read(
+      win,
+      `(() => { const i = document.querySelector('.run-controls input[list]');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(i, 'haiku');
+        i.dispatchEvent(new Event('input', { bubbles: true }));
+       })()`
+    );
+    await until(win, `document.querySelector('.sheet-foot .primary:not(:disabled)')`, 10_000);
+    await read(win, `document.querySelector('.sheet-foot .primary')?.click()`);
+    await until(win, `document.querySelector('.detail-terminal')`, 10_000);
+    await new Promise((r) => setTimeout(r, 300));
+    const rememberedAfterRun = (
+      await read(win, `window.baton.settings()`) as { 'runner.lastModel'?: Record<string, string> }
+    )['runner.lastModel']?.['claude'];
+
+    // Reopening the sheet for the same agent should come back prefilled.
+    await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
+    await until(win, `document.querySelector('.run-controls select')?.value`, 5_000);
+    await new Promise((r) => setTimeout(r, 150));
+    const prefilled = await modelField();
+    await read(win, `document.querySelector('.sheet-head .ghost')?.click()`);
+
+    console.log(
+      'runModelRemembered:',
+      JSON.stringify({ rememberedAfterRun, prefilled })
+    );
   }
 
   // --- The bottom status bar -------------------------------------------------

@@ -73,11 +73,16 @@ export interface BatonApi {
   loadMoreMerged(limit: number): Promise<Snapshot>;
 
   runners(): Promise<Runner[]>;
+  /** Suggested models per runner id — a starting list, not a live query;
+   *  see the note on `KNOWN_MODELS` in `@baton/agent`. */
+  knownModels(): Promise<Record<string, string[]>>;
   runTargets(force?: boolean): Promise<RunTarget[]>;
   buildPrompt(kind: RunKind, subject: { pull?: PullSummary; issue?: JiraIssue }): Promise<string>;
   defaultCwd(repo?: string): Promise<string | undefined>;
   startAgent(
-    request: { kind: RunKind; subjectId: string; runnerId: string; cwd?: string; prompt?: string },
+    request: {
+      kind: RunKind; subjectId: string; runnerId: string; cwd?: string; prompt?: string; model?: string
+    },
     subject: { pull?: PullSummary; issue?: JiraIssue }
   ): Promise<StartResult>;
   runHistory(subject: string): Promise<AgentRun[]>;

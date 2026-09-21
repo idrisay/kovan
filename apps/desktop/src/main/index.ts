@@ -24,6 +24,7 @@ import { adoptImportedTokens } from './adopt';
 import { smokePty, smokeUi, type SmokeMode, detailFixture, fixtureSnapshot, ticketFixture } from './smoke';
 import { Sessions } from './sessions';
 import { Agents } from './agents';
+import { KNOWN_MODELS } from '@baton/agent';
 import { Workspaces } from './workspace';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -248,6 +249,7 @@ app.whenReady().then(async () => {
 
   // --- Agents ---------------------------------------------------------------
   ipcMain.handle('baton:runners', () => agents.runners());
+  ipcMain.handle('baton:known-models', () => KNOWN_MODELS);
   ipcMain.handle('baton:run-targets', (_event, force?: boolean) => agents.targets(force));
   ipcMain.handle('baton:build-prompt', (_event, kind, subject) =>
     agents.buildPrompt(kind, subject)

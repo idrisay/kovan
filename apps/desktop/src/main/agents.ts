@@ -75,6 +75,13 @@ export interface StartRequest {
   cwd?: string;
   /** Lets the user edit the prompt before it is sent. */
   prompt?: string;
+  /**
+   * The model to run with, chosen in the run sheet. Left unset, `runnerFor()`
+   * still picks its own per-kind default (review/verify on Claude default to
+   * haiku) — an explicit choice here always wins over that default, never
+   * the other way around.
+   */
+  model?: string;
 }
 
 export class Agents {
@@ -164,10 +171,13 @@ export class Agents {
    * `runner.models` setting, and left alone for any other runner, since its
    * model names are not Claude's.
    */
-  private runnerFor(runner: Runner, kind: RunKind): Runner {
+  private runnerFor(runner: Runner, kind: RunKind, explicitModel?: string): Runner {
     const overrides = this.host.config.get('runner.models', {} as Record<string, string>);
     const defaults: Record<string, string> = runner.id === 'claude' ? { review: 'haiku', verify: 'haiku' } : {};
-    const model = overrides[kind] ?? defaults[kind];
+    // A model chosen in the run sheet always wins — it is the one thing here
+    // the user actually asked for, where the other two are just fallbacks for
+    // when they did not.
+    const model = explicitModel || overrides[kind] || defaults[kind];
     return model && runner.modelFlag ? { ...runner, model } : runner;
   }
 
@@ -263,7 +273,7 @@ export class Agents {
     };
 
     const result = await this.sessions.run({
-      runner: this.runnerFor(runner, request.kind),
+      runner: this.runnerFor(runner, request.kind, request.model),
       prompt,
       cwd,
       title: `${request.kind} · ${subjectId}`,
