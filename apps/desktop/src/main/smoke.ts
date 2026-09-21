@@ -531,6 +531,26 @@ export async function smokeUi(
     }
   }
 
+  // --- Two run buttons of different weight on the same pull request ---------
+  // A pull request the viewer owns and that has not merged shows both
+  // "Unblock in an agent" (writes code) and "Check it shipped" (only judges)
+  // — the two used to be visually identical. `idrisay`'s own #118 in Open is
+  // exactly that case.
+  if (process.env['BATON_SHOT_RUN_BUTTONS']) {
+    await read(
+      win,
+      `Array.from(document.querySelectorAll('.rows .row .row-num'))
+        .find(e => e.textContent === '118')?.closest('button')?.click()`
+    );
+    await until(win, `document.querySelector('.detail-actions .primary.outline')`, 5_000);
+    await new Promise((r) => setTimeout(r, 150));
+    await writeFile(
+      process.env['BATON_SHOT_RUN_BUTTONS'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_RUN_BUTTONS']}`);
+  }
+
   // --- The "just now" stamp, as a refresh menu -------------------------------
   // `connected` here is the seeded fixture's (github only) — the real poller
   // underneath never saw a token in this profile, so clicking a provider's

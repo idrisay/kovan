@@ -53,6 +53,27 @@ function Reviewers({ reviewers }: { reviewers: Reviewer[] }) {
   );
 }
 
+const RUN_LABEL: Record<RunKind, string> = {
+  implement: 'Work on this in an agent',
+  review: 'Review in an agent',
+  unblock: 'Unblock in an agent',
+  verify: 'Check it shipped'
+};
+
+/**
+ * Which run kinds write, and which only read and judge.
+ *
+ * `Agents.runnerFor()` already draws this line — review and verify default to
+ * a cheaper model because they report back rather than change anything — and
+ * it is exactly the distinction "unblock" and "verify" need a visual line
+ * between: two buttons of the same weight sitting side by side on a merged,
+ * blocked pull request read as the same kind of action, when one of them
+ * starts writing code and the other only checks it.
+ */
+const RUN_WRITES: Record<RunKind, boolean> = {
+  implement: true, unblock: true, review: false, verify: false
+};
+
 function RunButtons({
   kinds,
   onRun
@@ -60,17 +81,15 @@ function RunButtons({
   kinds: RunKind[];
   onRun: (kind: RunKind) => void;
 }) {
-  const LABEL: Record<RunKind, string> = {
-    implement: 'Work on this in an agent',
-    review: 'Review in an agent',
-    unblock: 'Unblock in an agent',
-    verify: 'Check it shipped'
-  };
   return (
     <div className="run-buttons">
       {kinds.map((kind) => (
-        <button key={kind} className="primary" onClick={() => onRun(kind)}>
-          {LABEL[kind]}
+        <button
+          key={kind}
+          className={RUN_WRITES[kind] ? 'primary' : 'primary outline'}
+          onClick={() => onRun(kind)}
+        >
+          {RUN_LABEL[kind]}
         </button>
       ))}
     </div>
