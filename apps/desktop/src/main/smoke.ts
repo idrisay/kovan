@@ -1683,12 +1683,61 @@ export async function smokeUi(
 
   result['layoutWide'] = await layout();
 
+  if (process.env['BATON_SHOT_DETAIL_LIGHT']) {
+    await read(win, `window.baton.setSetting('appearance.theme', 'light')`);
+    await read(win, `document.documentElement.dataset.theme = 'light'`);
+    await new Promise((r) => setTimeout(r, 200));
+    await read(win, `document.querySelector('.detail-scroll').scrollTo(0, 1400)`);
+    await new Promise((r) => setTimeout(r, 150));
+    await writeFile(
+      process.env['BATON_SHOT_DETAIL_LIGHT'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_DETAIL_LIGHT']}`);
+    await read(win, `window.baton.setSetting('appearance.theme', 'dark')`);
+    await read(win, `document.documentElement.dataset.theme = 'dark'`);
+    await new Promise((r) => setTimeout(r, 150));
+  }
+
   if (process.env['BATON_SHOT_DETAIL']) {
     await writeFile(
       process.env['BATON_SHOT_DETAIL'],
       (await win.webContents.capturePage()).toPNG()
     );
     console.log(`shot: ${process.env['BATON_SHOT_DETAIL']}`);
+
+    // Scrolled to the conversation, to see the collapse-by-default state:
+    // only the last card (thread or comment) open, everything above it shut.
+    await read(win, `document.querySelector('.detail-scroll').scrollTo(0, 1400)`);
+    await new Promise((r) => setTimeout(r, 150));
+    await writeFile(
+      `${process.env['BATON_SHOT_DETAIL']}`.replace(/\.png$/, '-timeline.png'),
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_DETAIL']}-timeline.png`);
+
+    const timelineState = await read(
+      win,
+      `Array.from(document.querySelectorAll('.timeline-card')).map(c => ({
+        expanded: c.classList.contains('expanded'),
+        head: c.querySelector('.timeline-card-head')?.textContent?.trim().slice(0, 60)
+      }))`
+    );
+    console.log('timelineState:', JSON.stringify(timelineState, null, 2));
+
+    // Click the first (collapsed) card and confirm it opens.
+    await read(win, `document.querySelectorAll('.timeline-card-head')[0]?.click()`);
+    await new Promise((r) => setTimeout(r, 150));
+    const afterClick = await read(
+      win,
+      `document.querySelectorAll('.timeline-card')[0]?.classList.contains('expanded')`
+    );
+    console.log('firstCardExpandsOnClick:', afterClick);
+    await writeFile(
+      `${process.env['BATON_SHOT_DETAIL']}`.replace(/\.png$/, '-expanded.png'),
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_DETAIL']}-expanded.png`);
   }
 
   // The screen this runs on tops out around 1500 logical pixels, and the

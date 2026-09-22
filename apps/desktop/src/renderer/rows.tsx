@@ -15,7 +15,7 @@ import {
 import { ChevronIcon } from './icons';
 
 /** Which status colour a flag gets. The four are fixed by the design. */
-const TONE: Record<PullFlagId, 'pass' | 'running' | 'fail' | 'waiting' | 'merged' | ''> = {
+export const TONE: Record<PullFlagId, 'pass' | 'running' | 'fail' | 'waiting' | 'merged' | ''> = {
   merged: 'merged',
   conflict: 'fail',
   'changes-requested': 'fail',

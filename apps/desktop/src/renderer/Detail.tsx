@@ -1,15 +1,131 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { formatAge, isMerged } from '@baton/core';
-import { States } from './rows';
+import { formatAge, isMerged, pullFlags } from '@baton/core';
+import { States, TONE } from './rows';
 import { Prose } from './Prose';
 import { RunViewer } from './RunViewer';
 import { Terminal } from './Terminal';
 import { useTerminalFontSize } from './terminalFontSize';
-import { CloseIcon, DockBottomIcon, DockLeftIcon, DockRightIcon, DockTopIcon, HideIcon, TerminalIcon } from './icons';
+import {
+  ChevronIcon, CloseIcon, DockBottomIcon, DockLeftIcon, DockRightIcon, DockTopIcon, HideIcon, TerminalIcon
+} from './icons';
 import type {
-  AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, Reviewer, RunKind, SentryFrame,
+  AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, ReviewThread, Reviewer, RunKind, SentryFrame,
   SentryIssue, SessionInfo
 } from './types';
+
+/** A stand-in for a real photo: initials on a colour picked from the name
+ *  itself, so the same person is always the same colour without anyone
+ *  having to assign one. */
+const AVATAR_TONES = ['#4c74ae', '#6fa97f', '#c4635a', '#d0a05a', '#8b5fa0', '#3f7f7a'];
+
+function avatarTone(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return AVATAR_TONES[hash % AVATAR_TONES.length]!;
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/[\s._-]+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  return parts.length === 1 ? parts[0]!.slice(0, 2).toUpperCase() : (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+}
+
+function Avatar({ name, size = 26 }: { name: string; size?: number }) {
+  return (
+    <span
+      className="avatar"
+      style={{ width: size, height: size, background: avatarTone(name), fontSize: size * 0.4 }}
+      title={name}
+    >
+      {initials(name)}
+    </span>
+  );
+}
+
+/** The single most important fact about a pull request or ticket, read at a
+ *  glance the way GitHub's own Open/Merged/Draft pill is — everything
+ *  `States` already lists in more detail stays right underneath it. */
+function StatusPill({ tone, label }: { tone: string; label: string }) {
+  return (
+    <span className={`status-pill ${tone}`}>
+      <span className={`dot ${tone}`} />
+      {label}
+    </span>
+  );
+}
+
+/**
+ * One entry in a conversation — a review comment, a plain comment, or (for a
+ * pull request) a whole review thread's worth of them collapsed to one card.
+ * Starts collapsed except for whichever card is passed `defaultExpanded`;
+ * the header is the click target either way, so scanning a long conversation
+ * never depends on hitting a tiny chevron.
+ */
+function CommentCard({
+  author, when, body, reviewState, pathLabel, defaultExpanded, extra
+}: {
+  author: string;
+  when: string;
+  body: string;
+  reviewState?: { label: string; tone: 'waiting' | 'fail' | 'pass' };
+  pathLabel?: string;
+  defaultExpanded: boolean;
+  /** Further comments in the same thread, shown under the first once expanded. */
+  extra?: { author: string; when: string; body: string }[];
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  return (
+    <div className="timeline-row">
+      <Avatar name={author} />
+      <div className={expanded ? 'timeline-card expanded' : 'timeline-card'}>
+        <button type="button" className="timeline-card-head" onClick={() => setExpanded((v) => !v)}>
+          <strong>{author}</strong>
+          {reviewState && (
+            <span className={`state timeline-card-review ${reviewState.tone}`}>
+              <span className={`dot ${reviewState.tone}`} />
+              {reviewState.label}
+            </span>
+          )}
+          {pathLabel && <span className="timeline-card-path">{pathLabel}</span>}
+          <span className="when">{when}</span>
+          <ChevronIcon size={11} open={expanded} />
+        </button>
+        {expanded && (
+          <div className="timeline-card-body">
+            <Prose text={body} />
+            {extra?.map((c, i) => (
+              <div key={i} className="timeline-card-reply">
+                <div className="timeline-card-subhead">
+                  <strong>{c.author}</strong>
+                  <span className="when">{c.when}</span>
+                </div>
+                <Prose text={c.body} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** An unresolved review thread as one card — the file/line it is pinned to
+ *  where a plain comment would show a review-state badge, every reply in the
+ *  thread folded in together rather than as separate cards of their own. */
+function ThreadCard({ thread, defaultExpanded }: { thread: ReviewThread; defaultExpanded: boolean }) {
+  const [first, ...rest] = thread.comments;
+  if (!first) return null;
+  return (
+    <CommentCard
+      author={first.author}
+      when={formatAge(first.createdAt) ?? ''}
+      body={first.body}
+      pathLabel={thread.path ? `${thread.path}${thread.line ? `:${thread.line}` : ''}` : undefined}
+      defaultExpanded={defaultExpanded}
+      extra={rest.map((c) => ({ author: c.author, when: formatAge(c.createdAt) ?? '', body: c.body }))}
+    />
+  );
+}
 
 /** What a reviewer's last action reads as, and who it puts the ball with. */
 const TURN: Record<Reviewer['turn'], { status: string; label: string; tone: 'waiting' | 'fail' | 'pass' }> = {
@@ -446,6 +562,11 @@ export function PullPane({
 
   const openQuickTerminal = useQuickTerminal(pull.repo, subject, onOpenSession);
 
+  // The same priority order the queue row's own state chips already use —
+  // `pullFlags` puts the one thing that matters most first, so the header
+  // pill and the first chip in `States` below it never disagree.
+  const primaryFlag = pullFlags(pull)[0]!;
+
   const unresolved = detail?.threads.filter((t) => !t.isResolved) ?? [];
   // Whether the left column has anything in it. A PR with no description and
   // no open threads should not leave a blank half: the rail spans instead.
@@ -460,13 +581,19 @@ export function PullPane({
     <div className="detail-scroll">
     <div className="detail">
       <header className="detail-head">
+        <div className="detail-pill-row">
+          <StatusPill tone={TONE[primaryFlag.id]} label={primaryFlag.label} />
+          <span className="detail-pill-repo">{pull.repo} #{pull.number}</span>
+        </div>
         <h2>{pull.title}</h2>
         <div className="detail-meta">
-          <span>{pull.repo}</span>
-          <span>#{pull.number}</span>
           <span>{pull.author}</span>
           <span>{isMerged(pull) ? `merged ${formatAge(pull.mergedAt!)}` : formatAge(pull.updatedAt)}</span>
-          {detail && <span>{detail.baseRef} ← {detail.headRef}</span>}
+          {detail && (
+            <span>
+              wants to merge into <code>{detail.baseRef}</code> from <code>{detail.headRef}</code>
+            </span>
+          )}
         </div>
         <div className="detail-states">
           <States pull={pull} max={6} />
@@ -505,24 +632,16 @@ export function PullPane({
           {unresolved.length > 0 && (
             <section>
               <h3>{unresolved.length} unresolved</h3>
-              {unresolved.map((thread) => (
-                <div key={thread.id} className="thread">
-                  {thread.path && (
-                    <div className="thread-file">
-                      {thread.path}
-                      {thread.line ? `:${thread.line}` : ''}
-                    </div>
-                  )}
-                  {thread.comments.map((c, i) => (
-                    <div key={i} className="comment">
-                      <div className="comment-head">
-                        <strong>{c.author}</strong>
-                        <span className="when">{formatAge(c.createdAt)}</span>
-                      </div>
-                      <Prose text={c.body} />
-                    </div>
-                  ))}
-                </div>
+              {unresolved.map((thread, i) => (
+                <ThreadCard
+                  key={thread.id}
+                  thread={thread}
+                  // Only ever the very last card in the whole conversation —
+                  // the comments section below, when there is one, always
+                  // has the true last word, so a thread only opens by
+                  // default when nothing follows it.
+                  defaultExpanded={detail!.comments.length === 0 && i === unresolved.length - 1}
+                />
               ))}
             </section>
           )}
@@ -530,24 +649,16 @@ export function PullPane({
           {detail && detail.comments.length > 0 && (
             <section>
               <h3>Conversation</h3>
-              {detail.comments.map((c, i) => {
-                const review = c.reviewState ? REVIEW_STATE[c.reviewState] : undefined;
-                return (
-                  <div key={i} className="comment">
-                    <div className="comment-head">
-                      <strong>{c.author}</strong>
-                      {review && (
-                        <span className="state">
-                          <span className={`dot ${review.tone}`} />
-                          {review.label}
-                        </span>
-                      )}
-                      <span className="when">{formatAge(c.createdAt)}</span>
-                    </div>
-                    <Prose text={c.body} />
-                  </div>
-                );
-              })}
+              {detail.comments.map((c, i) => (
+                <CommentCard
+                  key={i}
+                  author={c.author}
+                  when={formatAge(c.createdAt) ?? ''}
+                  body={c.body}
+                  reviewState={c.reviewState ? REVIEW_STATE[c.reviewState] : undefined}
+                  defaultExpanded={i === detail.comments.length - 1}
+                />
+              ))}
             </section>
           )}
         </div>
@@ -653,20 +764,17 @@ export function TicketPane({
     <div className="detail-scroll">
     <div className="detail">
       <header className="detail-head">
+        <div className="detail-pill-row">
+          <StatusPill tone={issue.statusCategory === 'done' ? 'pass' : 'waiting'} label={issue.status} />
+          <span className="detail-pill-repo">{issue.key}</span>
+        </div>
         <h2>
           {issue.summary}
         </h2>
         <div className="detail-meta">
-          <span className="key">{issue.key}</span>
           <span>{issue.issueType}</span>
           {issue.priority && <span>{issue.priority}</span>}
           <span>{formatAge(issue.updated)}</span>
-        </div>
-        <div className="detail-states">
-          <span className="state">
-            <span className={`dot ${issue.statusCategory === 'done' ? 'pass' : 'waiting'}`} />
-            {issue.status}
-          </span>
         </div>
         <div className="detail-actions">
           <RunButtons kinds={['implement']} onRun={(kind) => onRun(kind, issue)} />
@@ -690,13 +798,13 @@ export function TicketPane({
             <section>
               <h3>Comments</h3>
               {comments.map((c, i) => (
-                <div key={i} className="comment">
-                  <div className="comment-head">
-                    <strong>{c.author}</strong>
-                    <span className="when">{formatAge(c.created)}</span>
-                  </div>
-                  <Prose text={c.body} />
-                </div>
+                <CommentCard
+                  key={i}
+                  author={c.author}
+                  when={formatAge(c.created) ?? ''}
+                  body={c.body}
+                  defaultExpanded={i === comments.length - 1}
+                />
               ))}
             </section>
           )}

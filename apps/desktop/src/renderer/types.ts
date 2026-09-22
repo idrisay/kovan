@@ -1,5 +1,5 @@
 import type { JiraIssue, ProviderId, PullSummary, SentryFrame, SentryIssue } from '@baton/core';
-import type { PullDetail, ReviewComment, Reviewer } from '@baton/providers';
+import type { PullDetail, ReviewComment, ReviewThread, Reviewer } from '@baton/providers';
 import type { AgentRun, RunFile, Runner, RunKind } from '@baton/agent';
 import type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus, RunTarget
@@ -9,7 +9,7 @@ import type {
 } from '../main/workspace';
 
 export type {
-  PullDetail, ReviewComment, Reviewer, AgentRun, RunFile, Runner, RunKind, RunTarget,
+  PullDetail, ReviewComment, ReviewThread, Reviewer, AgentRun, RunFile, Runner, RunKind, RunTarget,
   JiraIssue, PullSummary, SentryIssue, SentryFrame
 };
 export type {

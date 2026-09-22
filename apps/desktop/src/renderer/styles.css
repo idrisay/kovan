@@ -710,11 +710,75 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   transform: rotate(40deg);
 }
 
-.thread { border-left: 2px solid rgba(208, 160, 90, 0.5); padding-left: 13px; margin-bottom: 18px; }
-.thread-file { font-family: var(--mono); font-size: 11px; color: var(--clay); margin-bottom: 7px; }
-.comment { margin-bottom: 13px; }
-.comment-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; font-size: 12px; color: var(--secondary); }
-.comment-head .when { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+.when { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+
+/* --- The status pill, and the conversation timeline underneath it -------
+ *
+ * The pill is one fact — the same one `pullFlags`/`States` already puts
+ * first — read before anything else on the page; the timeline is that same
+ * "read the human part first" idea applied to the conversation: every card
+ * but the most recent starts collapsed, so opening a pull request with forty
+ * comments shows their authors and one line each, not forty paragraphs.
+ */
+.detail-pill-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+.status-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px 3px 8px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06); color: var(--secondary);
+  font-size: 11.5px; font-weight: 600;
+}
+.status-pill.pass { background: rgba(111, 169, 127, 0.16); color: var(--pass); }
+.status-pill.fail { background: rgba(196, 99, 90, 0.16); color: var(--blocked-bright); }
+.status-pill.waiting { background: rgba(124, 160, 212, 0.16); color: var(--waiting); }
+.status-pill.running { background: rgba(208, 160, 90, 0.16); color: var(--running); }
+.status-pill.merged { background: rgba(139, 95, 160, 0.18); color: var(--merged); }
+.detail-pill-repo { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+.detail-meta code {
+  background: rgba(255, 255, 255, 0.06); padding: 1px 6px; border-radius: 5px;
+  font-family: var(--mono); font-size: 10.5px; color: var(--secondary);
+}
+
+.avatar {
+  flex: none; border-radius: 50%; display: grid; place-items: center;
+  color: #fff7f2; font-weight: 600; font-family: var(--sans);
+}
+
+.timeline-row { display: flex; gap: 11px; margin-bottom: 14px; }
+.timeline-card {
+  flex: 1; min-width: 0; border: 1px solid var(--hair-strong); border-radius: 10px;
+  background: rgba(255, 255, 255, 0.015); overflow: hidden;
+}
+.timeline-card-head {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 9px 14px; background: rgba(255, 255, 255, 0.025);
+  border: 0; border-bottom: 1px solid transparent; color: var(--secondary);
+  font: inherit; font-size: 12px; text-align: left;
+}
+.timeline-card.expanded .timeline-card-head { border-bottom-color: var(--hair); }
+.timeline-card-head:hover { color: var(--title); }
+.timeline-card-head strong { color: var(--prose); font-weight: 600; }
+.timeline-card-head .when { flex: 1; text-align: right; }
+.timeline-card-head svg { flex: none; color: var(--dim); }
+.timeline-card-review {
+  font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.timeline-card-review.pass { background: rgba(111, 169, 127, 0.16); color: var(--pass); }
+.timeline-card-review.fail { background: rgba(196, 99, 90, 0.16); color: var(--blocked-bright); }
+.timeline-card-review.waiting { background: rgba(124, 160, 212, 0.16); color: var(--waiting); }
+.timeline-card-path {
+  font-family: var(--mono); font-size: 10.5px; color: var(--clay);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.timeline-card-body { padding: 14px 16px; }
+.timeline-card-reply {
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hair);
+}
+.timeline-card-subhead {
+  display: flex; gap: 8px; align-items: baseline; margin-bottom: 5px;
+  font-size: 11.5px; color: var(--secondary);
+}
+.timeline-card-subhead strong { color: var(--prose); font-weight: 600; }
 
 .reviewers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .reviewers li {
@@ -1566,3 +1630,9 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 :root[data-theme='light'] .diff-add { background: rgba(78, 138, 98, 0.13); }
 :root[data-theme='light'] .diff-del { background: rgba(180, 84, 74, 0.11); }
 :root[data-theme='light'] .status-bar .save { color: #fff7f2; }
+
+:root[data-theme='light'] .status-pill { background: rgba(20, 20, 19, 0.05); }
+:root[data-theme='light'] .timeline-card { background: #fff; border-color: var(--hair-strong); }
+:root[data-theme='light'] .timeline-card-head { background: rgba(20, 20, 19, 0.025); }
+:root[data-theme='light'] .timeline-card-review { background: rgba(20, 20, 19, 0.05); }
+:root[data-theme='light'] .detail-meta code { background: rgba(20, 20, 19, 0.05); }
