@@ -62,7 +62,28 @@ export class SentryClient {
         `?query=${encodeURIComponent(query)}&limit=${limit}&statsPeriod=14d`
     );
     const raw = await this.http.json<RawIssue[]>(url, { headers: this.headers, signal });
-    return (raw ?? []).map((issue) => ({
+    return (raw ?? []).map((issue) => this.mapIssue(issue, project));
+  }
+
+  /**
+   * Every unresolved issue in the organization, across every project the
+   * token can see — not one project's worth. The org-level search endpoint
+   * is what Sentry's own issue stream uses when no project is picked in its
+   * own UI; the project-scoped endpoint above has no such "all of them" mode
+   * of its own, which is why this is a second method rather than `project`
+   * going optional on `listIssues`.
+   */
+  async listAllIssues(query: string, limit = 25, signal?: CancelSignal): Promise<SentryIssue[]> {
+    const url = this.api(
+      `/organizations/${encodeURIComponent(this.organization)}/issues/` +
+        `?query=${encodeURIComponent(query)}&limit=${limit}&statsPeriod=14d`
+    );
+    const raw = await this.http.json<RawIssue[]>(url, { headers: this.headers, signal });
+    return (raw ?? []).map((issue) => this.mapIssue(issue));
+  }
+
+  private mapIssue(issue: RawIssue, fallbackProject = ''): SentryIssue {
+    return {
       id: issue.id,
       shortId: issue.shortId,
       title: issue.title,
@@ -71,10 +92,10 @@ export class SentryClient {
       count: Number(issue.count) || 0,
       userCount: issue.userCount ?? 0,
       permalink: issue.permalink,
-      project: issue.project?.slug ?? project,
+      project: issue.project?.slug ?? fallbackProject,
       firstSeen: issue.firstSeen,
       lastSeen: issue.lastSeen
-    }));
+    };
   }
 
   /** The latest event is where the stack trace lives — the issue itself has none. */

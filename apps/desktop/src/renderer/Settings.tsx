@@ -54,6 +54,26 @@ const JIRA_EXTRA_FIELDS: Field[] = [
 ];
 
 /**
+ * Same reasoning as `JIRA_EXTRA_FIELDS`: not a `CREDENTIAL_FIELDS` entry, so
+ * leaving it blank does not read as "not connected" — here that mattered
+ * enough to be its own bug report. Blank is not a placeholder state on its
+ * way to being filled in; it is the normal way to ask for every project.
+ */
+const SENTRY_EXTRA_FIELDS: Field[] = [
+  {
+    key: 'sentry.project',
+    label: 'Only show one project (optional)',
+    placeholder: 'Leave blank to see every project'
+  }
+];
+
+/** Extra, non-gating fields per provider — see the two arrays above. */
+const EXTRA_FIELDS: Partial<Record<string, Field[]>> = {
+  jira: JIRA_EXTRA_FIELDS,
+  sentry: SENTRY_EXTRA_FIELDS
+};
+
+/**
  * One sectioned settings sheet — appearance, each connected provider, and the
  * dev environment an agent signs into — replacing what used to be a single
  * "Connections" list. Ported in spirit from DevHub's `SettingsView.swift`
@@ -236,15 +256,12 @@ export function Settings({
                   {connected.includes(active as ProviderId) && <span className="badge">connected</span>}
                 </h3>
                 {(fields[active] ?? []).map(field)}
-                {active === 'jira' && JIRA_EXTRA_FIELDS.map(field)}
+                {(EXTRA_FIELDS[active] ?? []).map(field)}
                 <button
                   className="primary"
                   disabled={saving === active}
                   onClick={() =>
-                    void save(
-                      [...(fields[active] ?? []), ...(active === 'jira' ? JIRA_EXTRA_FIELDS : [])],
-                      active
-                    )
+                    void save([...(fields[active] ?? []), ...(EXTRA_FIELDS[active] ?? [])], active)
                   }
                 >
                   {saving === active ? 'Saving…' : `Save ${PROVIDER_LABEL[active] ?? active}`}

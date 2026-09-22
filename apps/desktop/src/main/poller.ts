@@ -367,10 +367,11 @@ export class Poller {
   }
 
   /**
-   * A single project's own unresolved issues, newest-seen first. No
-   * auto-discovery across every project in the organization — `sentry.
-   * project` is a required field (see `CREDENTIAL_FIELDS.sentry`) precisely
-   * because there is nothing useful to fetch without one yet.
+   * Unresolved issues, newest-seen first — every project in the organization
+   * by default, since that is what "see all the project issues on my Sentry
+   * account" means. `sentry.project` (not part of `CREDENTIAL_FIELDS.sentry`
+   * — see the comment on `JIRA_EXTRA_FIELDS`'s sibling in Settings.tsx) narrows
+   * that to one project for anyone who wants it scoped down instead.
    */
   private async loadSentry(
     connected: readonly ProviderId[],
@@ -382,10 +383,10 @@ export class Poller {
     }
     const token = await this.credentials.token('sentry');
     const organization = this.host.config.get('sentry.organization', '');
-    const project = this.host.config.get('sentry.project', '');
-    if (!token || !organization || !project) {
+    if (!token || !organization) {
       return undefined;
     }
+    const project = this.host.config.get('sentry.project', '');
     try {
       const client = new SentryClient(
         this.http,
@@ -393,12 +394,11 @@ export class Poller {
         organization,
         token
       );
-      return await client.listIssues(
-        project,
-        this.host.config.get('sentry.query', 'is:unresolved'),
-        this.host.config.get('sentry.issuesLimit', 25),
-        signal
-      );
+      const query = this.host.config.get('sentry.query', 'is:unresolved');
+      const limit = this.host.config.get('sentry.issuesLimit', 25);
+      return project
+        ? await client.listIssues(project, query, limit, signal)
+        : await client.listAllIssues(query, limit, signal);
     } catch (err) {
       if (!signal.aborted) {
         errors.push({ provider: 'sentry', message: message(err) });

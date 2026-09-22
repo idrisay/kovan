@@ -1396,11 +1396,10 @@ export async function smokeUi(
     console.log(`shot: ${process.env['BATON_SHOT_SENTRY_TICKET']}`);
   }
 
-  // Item 18: saving Settings with a required field left blank (here,
-  // Sentry's project slug — exactly the shape of the bug report) must not
-  // fail silently. It should say what is still missing, and once that field
-  // is filled and saved, actually flip to connected without a manual
-  // refresh — `save()` re-polls itself now.
+  // Item 18: saving Settings with a required field left blank must not fail
+  // silently. It should say what is still missing, and once that field is
+  // filled and saved, actually flip to connected without a manual refresh —
+  // `save()` re-polls itself now.
   await read(win, `document.querySelector('[aria-label="Settings"]')?.click()`);
   await until(win, `document.querySelector('.settings-nav')`, 5_000);
   await read(
@@ -1418,29 +1417,34 @@ export async function smokeUi(
     input.dispatchEvent(new Event('input', { bubbles: true }));
     return true;
   })()`;
-  await read(win, setField('organization slug', 'acme'));
-  await read(win, setField('auth token', 'smoke-test-token'));
-  await read(
+  const clickSaveSentry = () => read(
     win,
     `Array.from(document.querySelectorAll('.provider .primary'))
       .find(b => b.textContent.includes('Save Sentry'))?.click()`
   );
+  // The auth token — a genuinely required field — left blank.
+  await read(win, setField('organization slug', 'acme'));
+  await clickSaveSentry();
   await until(win, `document.querySelector('.settings-note')`, 10_000);
   result['sentrySaveMissingField'] = {
     note: await read(win, `document.querySelector('.settings-note')?.textContent ?? ''`),
     badge: await read(win, `document.querySelector('.provider h3 .badge')?.textContent ?? ''`)
   };
 
-  await read(win, setField('project slug', 'web-app'));
-  await read(
-    win,
-    `Array.from(document.querySelectorAll('.provider .primary'))
-      .find(b => b.textContent.includes('Save Sentry'))?.click()`
-  );
+  // Item 19: the project field is filled in nowhere here — organization and
+  // token are all `CREDENTIAL_FIELDS.sentry` asks for since project stopped
+  // being one of them, so this alone must be enough to connect.
+  await read(win, setField('auth token', 'smoke-test-token'));
+  await clickSaveSentry();
   await until(win, `document.querySelector('.settings-note.ok')`, 10_000);
-  result['sentrySaveConnected'] = {
+  result['sentrySaveConnectedWithoutProject'] = {
     note: await read(win, `document.querySelector('.settings-note')?.textContent ?? ''`),
-    badge: await read(win, `document.querySelector('.provider h3 .badge')?.textContent ?? ''`)
+    badge: await read(win, `document.querySelector('.provider h3 .badge')?.textContent ?? ''`),
+    projectFieldStillOffered: await read(
+      win,
+      `Array.from(document.querySelectorAll('.provider label'))
+        .some(l => l.textContent.includes('Only show one project'))`
+    )
   };
 
   if (process.env['BATON_SHOT_SETTINGS_SAVE']) {

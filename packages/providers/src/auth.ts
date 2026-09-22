@@ -30,7 +30,6 @@ export const CREDENTIAL_FIELDS: Record<ProviderId, CredentialField[]> = {
   ],
   sentry: [
     { key: 'sentry.organization', label: 'Sentry organization slug', placeholder: 'acme' },
-    { key: 'sentry.project', label: 'Sentry project slug', placeholder: 'web-app' },
     { key: 'sentry', label: 'Sentry auth token', secret: true }
   ],
   grafana: [
