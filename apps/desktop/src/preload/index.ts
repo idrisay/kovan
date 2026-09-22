@@ -40,6 +40,7 @@ const api = {
   startAgent: (request: unknown, subject: unknown) =>
     ipcRenderer.invoke('baton:start-agent', request, subject),
   runHistory: (subject: string) => ipcRenderer.invoke('baton:run-history', subject),
+  runFiles: (directory: string) => ipcRenderer.invoke('baton:run-files', directory),
   runText: (file: string) => ipcRenderer.invoke('baton:run-text', file),
   runImage: (file: string) => ipcRenderer.invoke('baton:run-image', file),
 

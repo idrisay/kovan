@@ -1,6 +1,6 @@
 import type { JiraIssue, ProviderId, PullSummary } from '@baton/core';
 import type { PullDetail, ReviewComment, Reviewer } from '@baton/providers';
-import type { AgentRun, Runner, RunKind } from '@baton/agent';
+import type { AgentRun, RunFile, Runner, RunKind } from '@baton/agent';
 import type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus, RunTarget
 } from '@baton/git';
@@ -8,7 +8,7 @@ import type {
   Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
 } from '../main/workspace';
 
-export type { PullDetail, ReviewComment, Reviewer, AgentRun, Runner, RunKind, RunTarget, JiraIssue, PullSummary };
+export type { PullDetail, ReviewComment, Reviewer, AgentRun, RunFile, Runner, RunKind, RunTarget, JiraIssue, PullSummary };
 export type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus,
   Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
@@ -86,6 +86,8 @@ export interface BatonApi {
     subject: { pull?: PullSummary; issue?: JiraIssue }
   ): Promise<StartResult>;
   runHistory(subject: string): Promise<AgentRun[]>;
+  /** Every file a run's own directory actually contains. */
+  runFiles(directory: string): Promise<RunFile[]>;
   /** A run's own report.md or prompt.md — validated server-side to actually belong to a run. */
   runText(file: string): Promise<string>;
   /** A run's own screenshot, as a `data:image/...` URL ready for an `<img src>`. */

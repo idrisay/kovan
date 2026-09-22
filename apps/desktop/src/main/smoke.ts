@@ -1318,7 +1318,18 @@ export async function smokeUi(
       `Array.from(document.querySelectorAll('.runs .link')).find(b => b.textContent.trim() === 'view')?.click()`
     );
     await until(win, `document.querySelector('.run-viewer')`, 5_000);
+    // The file list comes from a real directory read, not a fixed set of
+    // tabs — wait for it rather than a fixed delay, the same reason every
+    // other async render in this file is polled instead of slept past.
+    await until(win, `document.querySelectorAll('.run-file').length > 0`, 5_000);
     await new Promise((r) => setTimeout(r, 200));
+    console.log(
+      'runViewerFiles:',
+      await read(
+        win,
+        `Array.from(document.querySelectorAll('.run-file')).map(b => b.textContent)`
+      )
+    );
     await writeFile(
       process.env['BATON_SHOT_RUN_VIEWER'],
       (await win.webContents.capturePage()).toPNG()
@@ -1326,10 +1337,12 @@ export async function smokeUi(
     console.log(`shot: ${process.env['BATON_SHOT_RUN_VIEWER']}`);
 
     if (process.env['BATON_SHOT_RUN_VIEWER_SHOTS']) {
+      // Whichever file was not the one auto-selected on open — proves
+      // clicking a different one in the list actually switches the preview.
       await read(
         win,
-        `Array.from(document.querySelectorAll('.run-tabs button'))
-          .find(b => b.textContent.includes('Screenshots'))?.click()`
+        `Array.from(document.querySelectorAll('.run-file'))
+          .find(b => !b.classList.contains('active'))?.click()`
       );
       await new Promise((r) => setTimeout(r, 200));
       await writeFile(

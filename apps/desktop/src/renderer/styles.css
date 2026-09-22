@@ -868,22 +868,31 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .sheet.run-viewer { padding: 0; display: flex; flex-direction: column; height: 78vh; max-height: 680px; }
 .run-viewer .sheet-head { padding: 18px 20px 0; margin-bottom: 0; flex: none; }
 .run-viewer .subject { padding: 0 20px; margin: 6px 0 14px; flex: none; }
-.run-tabs { display: flex; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--hair); flex: none; }
-.run-tabs button {
-  background: none; border: 0; padding: 9px 1px; margin-bottom: -1px;
-  color: var(--muted); font-size: 12.5px; font-weight: 500;
-  border-bottom: 2px solid transparent;
+
+/*
+ * A run's directory browsed the same way a workspace repo's files are — a
+ * list on the left, the selected file's own preview on the right — rather
+ * than a fixed report/prompt/screenshots tab strip that goes blind the
+ * moment an agent writes something that strip did not name in advance.
+ */
+.run-viewer-split { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--hair); }
+.run-file-list {
+  flex: none; width: 210px; margin: 0; padding: 8px; list-style: none;
+  overflow-y: auto; border-right: 1px solid var(--hair);
 }
-.run-tabs button:hover { color: var(--title); }
-.run-tabs button.active { color: rgb(217, 119, 87); border-bottom-color: rgb(217, 119, 87); }
-.run-viewer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 20px; }
-.shots-stack { display: flex; flex-direction: column; gap: 18px; }
-.shots-stack figure { margin: 0; }
-.shots-stack img {
+.run-file {
+  display: block; width: 100%; text-align: left; padding: 6px 8px; border-radius: 6px;
+  background: none; border: 0; color: var(--secondary);
+  font-family: var(--mono); font-size: 11px; word-break: break-all;
+}
+.run-file:hover { background: rgba(255, 255, 255, 0.05); color: var(--title); }
+.run-file.active { background: rgba(217, 119, 87, 0.12); color: rgb(217, 119, 87); }
+.run-viewer-body {
+  flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 18px 20px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.run-file-image {
   max-width: 100%; display: block; border-radius: 8px; border: 1px solid var(--hair-strong);
-}
-.shots-stack figcaption {
-  margin-top: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--dim);
 }
 
 .run-controls label { flex: 1; }

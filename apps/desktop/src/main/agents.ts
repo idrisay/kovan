@@ -331,6 +331,14 @@ export class Agents {
     return this.store.list(subject);
   }
 
+  /** Every file a run's directory actually contains, for the in-app viewer. */
+  async runFiles(directory: string) {
+    if (!this.store.owns(directory)) {
+      throw new Error('Not a run directory.');
+    }
+    return this.store.files(directory);
+  }
+
   /** A run's own report.md or prompt.md, read for the in-app viewer. */
   async readRunText(file: string): Promise<string> {
     if (!this.store.owns(file)) {

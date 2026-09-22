@@ -32,6 +32,13 @@ export const RUN_KIND_LABEL: Record<RunKind, string> = {
 
 export type Verdict = 'unknown' | 'shipped' | 'missing' | 'broken';
 
+export interface RunFile {
+  /** Relative to the run directory — stable, and doubles as a React key. */
+  path: string;
+  name: string;
+  size: number;
+}
+
 export interface AgentRun {
   /** The run's directory, which is unique and is also how it is deleted. */
   id: string;
@@ -206,6 +213,42 @@ export class RunStore {
       reportPath: report !== undefined ? reportPath : undefined,
       shots
     };
+  }
+
+  /**
+   * Every file the run directory actually contains — not just the ones
+   * `prompt.md`/`report.md`/`shots` already name. An agent that leaves an
+   * extra note, a plan, a second screenshot folder, whatever it decided the
+   * work needed, should not go invisible just because nothing here expected
+   * it; the directory itself is still the only index there is.
+   */
+  async files(directory: string): Promise<RunFile[]> {
+    const found: RunFile[] = [];
+
+    const walk = async (dir: string, prefix: string): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        // Bookkeeping this store itself wrote to read `list()` back, not
+        // something written *by* the run — showing it as a "file" here would
+        // be showing the index as if it were part of what it indexes.
+        if (prefix === '' && entry.name === 'run.json') continue;
+        const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+          await walk(path.join(dir, entry.name), rel);
+        } else {
+          const size = await stat(path.join(dir, entry.name)).then((s) => s.size).catch(() => 0);
+          found.push({ path: rel, name: entry.name, size });
+        }
+      }
+    };
+
+    await walk(directory, '');
+    return found.sort((a, b) => a.path.localeCompare(b.path));
   }
 }
 

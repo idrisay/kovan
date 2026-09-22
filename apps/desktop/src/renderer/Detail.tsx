@@ -97,6 +97,19 @@ function RunButtons({
 }
 
 /**
+ * A subject's own sessions, as a string that changes exactly when `History`
+ * needs to re-fetch: a run starting, or an agent finishing without anyone
+ * closing its terminal, either one meaning a report or prompt just landed on
+ * disk that `History`'s last fetch could not have known about.
+ */
+function sessionSignature(sessions: SessionInfo[], subject: string): string {
+  return sessions
+    .filter((s) => s.subject === subject)
+    .map((s) => `${s.id}:${s.running}`)
+    .join(',');
+}
+
+/**
  * Every terminal session started from this ticket or pull request — running
  * or already exited, as long as it is still open — so the one place work
  * gets started is also the one place it can be picked back up, instead of
@@ -135,13 +148,17 @@ function LiveSessions({
   );
 }
 
-function History({ subject }: { subject: string }) {
+function History({ subject, refreshOn }: { subject: string; refreshOn?: string }) {
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [viewing, setViewing] = useState<AgentRun>();
 
   useEffect(() => {
     void window.baton.runHistory(subject).then(setRuns);
-  }, [subject]);
+    // `refreshOn` is a signature of this subject's own sessions (id:running
+    // pairs) — a run starting, or an agent finishing without anyone closing
+    // its terminal, changes it, which is exactly when a report or prompt
+    // this list does not know about yet lands on disk.
+  }, [subject, refreshOn]);
 
   if (runs.length === 0) {
     return null;
@@ -561,7 +578,7 @@ export function PullPane({
           )}
 
           <LiveSessions subject={subject} sessions={sessions} onOpen={onOpenSession} />
-          <History subject={subject} />
+          <History subject={subject} refreshOn={sessionSignature(sessions, subject)} />
         </aside>
       </div>
     </div>
@@ -686,7 +703,7 @@ export function TicketPane({
           )}
 
           <LiveSessions subject={issue.key} sessions={sessions} onOpen={onOpenSession} />
-          <History subject={issue.key} />
+          <History subject={issue.key} refreshOn={sessionSignature(sessions, issue.key)} />
         </aside>
       </div>
     </div>
