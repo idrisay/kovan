@@ -200,9 +200,7 @@ const RUN_LABEL: Record<RunKind, string> = {
 /**
  * Which run kinds write, and which only read and judge.
  *
- * `Agents.runnerFor()` already draws this line — review and verify default to
- * a cheaper model because they report back rather than change anything — and
- * it is exactly the distinction "unblock" and "verify" need a visual line
+ * This is exactly the distinction "unblock" and "verify" need a visual line
  * between: two buttons of the same weight sitting side by side on a merged,
  * blocked pull request read as the same kind of action, when one of them
  * starts writing code and the other only checks it.

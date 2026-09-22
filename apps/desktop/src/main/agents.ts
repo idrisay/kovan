@@ -83,9 +83,9 @@ export interface StartRequest {
   prompt?: string;
   /**
    * The model to run with, chosen in the run sheet. Left unset, `runnerFor()`
-   * still picks its own per-kind default (review/verify on Claude default to
-   * haiku) — an explicit choice here always wins over that default, never
-   * the other way around.
+   * falls back to its own default (Sonnet, for the `claude` runner) — an
+   * explicit choice here always wins over that default, never the other way
+   * around.
    */
   model?: string;
 }
@@ -184,19 +184,21 @@ export class Agents {
   /**
    * The runner to actually invoke, with a per-kind model swapped in.
    *
-   * "review" and "verify" mostly read and judge; "implement" and "unblock"
-   * write the code, so they keep whatever model the runner was configured
-   * with. The built-in `claude` runner defaults the first two to a cheaper
-   * model for that reason — overridable (or turned off with `''`) via the
-   * `runner.models` setting, and left alone for any other runner, since its
-   * model names are not Claude's.
+   * Every kind defaults to Sonnet on the built-in `claude` runner — one
+   * consistent, deliberate choice instead of the old two-tier setup, where
+   * "review"/"verify" silently defaulted to Haiku (cheap but noticeably worse
+   * judgment) while "implement"/"unblock" had no default at all and fell back
+   * to whatever the CLI itself defaults to. Opus stays one click away in the
+   * run sheet any time you want it for something hard; it just isn't the
+   * silent default for routine work. A model name is never assumed for any
+   * other runner, since its model names aren't Claude's.
    */
   private runnerFor(runner: Runner, kind: RunKind, explicitModel?: string): Runner {
     const overrides = this.host.config.get('runner.models', {} as Record<string, string>);
-    const defaults: Record<string, string> = runner.id === 'claude' ? { review: 'haiku', verify: 'haiku' } : {};
-    // A model chosen in the run sheet always wins — it is the one thing here
-    // the user actually asked for, where the other two are just fallbacks for
-    // when they did not.
+    const defaults: Record<string, string> =
+      runner.id === 'claude' ? { implement: 'sonnet', review: 'sonnet', unblock: 'sonnet', verify: 'sonnet' } : {};
+    // A model chosen in the run sheet always wins over a settings override,
+    // which in turn always wins over the built-in default.
     const model = explicitModel || overrides[kind] || defaults[kind];
     return model && runner.modelFlag ? { ...runner, model } : runner;
   }

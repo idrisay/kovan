@@ -112,10 +112,12 @@ export const BUILT_IN: Runner[] = [
  * actually be asked (OpenCode's own `models` subcommand); neither Claude Code
  * nor Codex offers one, so this is what stands in for it. A runner not listed
  * here still takes a model — the run sheet's own field for it is free text —
- * this only supplies the suggestions.
+ * this only supplies the suggestions. Haiku left off on purpose: it used to
+ * be this app's own silent default for review/verify runs, which is exactly
+ * the kind of choice a suggestion chip invites back in one click.
  */
 export const KNOWN_MODELS: Record<string, string[]> = {
-  claude: ['opus', 'sonnet', 'haiku']
+  claude: ['opus', 'sonnet']
 };
 
 /**

@@ -710,7 +710,7 @@ export async function smokeUi(
       win,
       `(() => { const i = document.querySelector('.run-controls input[list]');
         const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-        setter.call(i, 'haiku');
+        setter.call(i, 'sonnet');
         i.dispatchEvent(new Event('input', { bubbles: true }));
        })()`
     );
