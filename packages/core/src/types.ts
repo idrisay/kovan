@@ -48,14 +48,33 @@ export interface PathMapping {
 
 export interface SentryIssue {
   id: string;
+  /** The short, human-quotable form — `PROJ-1A2` — Sentry's own UI uses. */
+  shortId: string;
   title: string;
   culprit: string;
+  level: string;
   count: number;
   userCount: number;
-  level: string;
   permalink: string;
+  project: string;
+  firstSeen: string;
   lastSeen: string;
-  frames: { filename: string; lineNo?: number; function?: string }[];
+}
+
+/**
+ * One stack frame. Fetched separately from the issue itself — Sentry's own
+ * API has no stack trace on the issue, only on its latest event — so this is
+ * never part of a `SentryIssue`, only ever the answer to asking for one
+ * issue's own frames.
+ */
+export interface SentryFrame {
+  filename?: string;
+  function?: string;
+  lineNo?: number;
+  colNo?: number;
+  inApp: boolean;
+  /** The real path on disk, when `resolveFrame()` could place it. */
+  resolvedPath?: string;
 }
 
 export interface GrafanaAlert {

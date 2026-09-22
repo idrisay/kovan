@@ -166,12 +166,48 @@ export function fixtureSnapshot(mergedCount: number): Snapshot {
     mergedTotal: MERGED_TOTAL,
     loadingMerged: false,
     tickets: [TICKET, TICKET_LOW, TICKET_HIGHEST],
-    connected: ['github' as const],
+    sentryIssues: [SENTRY_ISSUE],
+    connected: ['github' as const, 'sentry' as const],
     errors: [],
     refreshing: false,
     refreshedAt: { github: Date.now() - 90_000 },
     refreshingProviders: []
   };
+}
+
+/** One issue, rich enough to judge the tab's layout by: a real-looking level,
+ *  counts, and a culprit line. */
+const SENTRY_ISSUE = {
+  id: '99887766',
+  shortId: 'WEB-1A2',
+  title: 'TypeError: Cannot read properties of undefined (reading \'total\')',
+  culprit: 'renderCheckoutSummary(checkout/summary.tsx)',
+  level: 'error',
+  count: 342,
+  userCount: 58,
+  permalink: 'https://example.invalid/organizations/acme/issues/99887766/',
+  project: 'web-app',
+  firstSeen: new Date(Date.now() - 2_592_000_000).toISOString(),
+  lastSeen: new Date(Date.now() - 1_800_000).toISOString()
+};
+
+/**
+ * The latest event's stack trace, outermost first — one dependency frame and
+ * two in-app frames, one of which resolves to a path so the "resolved vs.
+ * raw filename" distinction actually shows on screen.
+ */
+export function sentryFramesFixture(_issueId: string) {
+  return [
+    { filename: 'node_modules/react-dom/cjs/react-dom.production.js', function: 'commitRoot', lineNo: 12, inApp: false },
+    { filename: 'checkout/summary.tsx', function: 'renderCheckoutSummary', lineNo: 41, resolvedPath: '/Users/idrisay/Desktop/coding/ikatia/app/baton/checkout/summary.tsx', inApp: true },
+    { filename: 'checkout/total.ts', function: 'formatTotal', lineNo: 9, inApp: true }
+  ];
+}
+
+/** Filing a ticket from a Sentry issue never actually reaches Jira in a
+ *  throwaway smoke profile — same guard as `ticketFixture`. */
+export function sentryTicketFixture() {
+  return { key: 'ACME-9001', url: 'https://example.invalid/browse/ACME-9001' };
 }
 
 /** A ticket with both halves of the split: prose to read, subtasks to scan. */
@@ -1315,6 +1351,56 @@ export async function smokeUi(
     );
     console.log(`shot: ${process.env['BATON_SHOT_TICKET']}`);
   }
+
+  // The Sentry tab: same detail-pane shape as the ticket pane, plus the two
+  // actions it is for — starting an agent and filing a ticket — and a stack
+  // trace fetched over its own IPC round trip rather than baked into the
+  // list, so waiting for it here is a real check that the round trip works.
+  await read(win, `document.querySelector('.rail-item[aria-label="Sentry errors"]')?.click()`);
+  await until(win, `document.querySelector('.row')`, 10_000);
+  await read(win, `document.querySelector('.row')?.click()`);
+  await until(win, `document.querySelector('.detail-head h2')`, 10_000);
+  await until(win, `document.querySelectorAll('.files.mono li').length > 0`, 5_000);
+  result['sentry'] = {
+    heading: await read(win, `document.querySelector('.detail-head h2')?.textContent ?? ''`),
+    actions: await read(
+      win,
+      `Array.from(document.querySelectorAll('.detail-actions button')).map(b => b.textContent)`
+    ),
+    frameCount: await read(win, `document.querySelectorAll('.files.mono li').length`),
+    resolvedFrame: await read(
+      win,
+      `document.querySelector('.files.mono li .file-path')?.textContent ?? ''`
+    )
+  };
+
+  if (process.env['BATON_SHOT_SENTRY']) {
+    await new Promise((r) => setTimeout(r, 200));
+    await writeFile(process.env['BATON_SHOT_SENTRY'], (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${process.env['BATON_SHOT_SENTRY']}`);
+  }
+
+  if (process.env['BATON_SHOT_SENTRY_TICKET']) {
+    await read(
+      win,
+      `Array.from(document.querySelectorAll('.detail-actions button'))
+        .find(b => b.textContent.includes('Create ticket'))?.click()`
+    );
+    await until(win, `document.querySelector('.quiet.small .link')`, 5_000);
+    await new Promise((r) => setTimeout(r, 200));
+    result['sentryTicket'] = await read(win, `document.querySelector('.quiet.small')?.textContent ?? ''`);
+    await writeFile(
+      process.env['BATON_SHOT_SENTRY_TICKET'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_SENTRY_TICKET']}`);
+  }
+
+  // Back to Tickets, so nothing below assumes Sentry is still the active view.
+  await read(win, `document.querySelector('.rail-item[aria-label="Tickets"]')?.click()`);
+  await until(win, `document.querySelector('.row')`, 10_000);
+  await read(win, `document.querySelector('.row')?.click()`);
+  await until(win, `document.querySelector('.detail-head h2')`, 10_000);
 
   if (process.env['BATON_SHOT_INLINE_TERMINAL']) {
     await read(

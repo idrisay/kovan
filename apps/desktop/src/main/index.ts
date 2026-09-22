@@ -21,7 +21,10 @@ import { BatonTray } from './tray';
 import { Activity } from './notify';
 import { CREDENTIAL_FIELDS, HttpClient, JiraClient, fetchPullDetail } from '@baton/providers';
 import { adoptImportedTokens } from './adopt';
-import { smokePty, smokeUi, type SmokeMode, detailFixture, fixtureSnapshot, ticketFixture } from './smoke';
+import {
+  smokePty, smokeUi, type SmokeMode, detailFixture, fixtureSnapshot, sentryFramesFixture,
+  sentryTicketFixture, ticketFixture
+} from './smoke';
 import { Sessions } from './sessions';
 import { Agents } from './agents';
 import { KNOWN_MODELS } from '@baton/agent';
@@ -265,6 +268,18 @@ app.whenReady().then(async () => {
     return result;
   });
   ipcMain.handle('baton:run-history', (_event, subject: string) => agents.history(subject));
+  ipcMain.handle('baton:sentry-frames', (_event, issueId: string) => {
+    if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+      return sentryFramesFixture(issueId);
+    }
+    return agents.sentryFrames(issueId);
+  });
+  ipcMain.handle('baton:sentry-create-ticket', (_event, issue) => {
+    if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+      return sentryTicketFixture();
+    }
+    return agents.createTicketFromSentry(issue);
+  });
   ipcMain.handle('baton:run-files', (_event, directory: string) => agents.runFiles(directory));
   ipcMain.handle('baton:run-text', (_event, file: string) => agents.readRunText(file));
   ipcMain.handle('baton:run-image', (_event, file: string) => agents.readRunImage(file));

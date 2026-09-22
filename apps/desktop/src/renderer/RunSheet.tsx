@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { JiraIssue, PullSummary, RunKind, Runner, RunTarget, StartResult } from './types';
+import type { JiraIssue, PullSummary, RunKind, Runner, RunTarget, SentryFrame, SentryIssue, StartResult } from './types';
 
 const LAST_MODEL_KEY = 'runner.lastModel';
 
@@ -21,12 +21,14 @@ export function RunSheet({
   kind,
   pull,
   issue,
+  sentry,
   onClose,
   onStarted
 }: {
   kind: RunKind;
   pull?: PullSummary;
   issue?: JiraIssue;
+  sentry?: { issue: SentryIssue; frames: SentryFrame[] };
   onClose: () => void;
   onStarted: (sessionId: string) => void;
 }) {
@@ -40,8 +42,8 @@ export function RunSheet({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const subject = { pull, issue };
-  const subjectId = issue ? issue.key : pull ? `${pull.repo}#${pull.number}` : '';
+  const subject = { pull, issue, sentry };
+  const subjectId = sentry ? sentry.issue.shortId : issue ? issue.key : pull ? `${pull.repo}#${pull.number}` : '';
   const runner = runners.find((r) => r.id === runnerId);
 
   useEffect(() => {
@@ -98,13 +100,15 @@ export function RunSheet({
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet wide" onClick={(e) => e.stopPropagation()}>
         <header className="sheet-head">
-          <h2>{KIND_LABEL[kind]}</h2>
+          <h2>{sentry ? 'Fix in an agent' : KIND_LABEL[kind]}</h2>
           <button className="ghost" onClick={onClose}>
             Cancel
           </button>
         </header>
 
-        <p className="subject">{issue ? `${issue.key} — ${issue.summary}` : pull?.title}</p>
+        <p className="subject">
+          {sentry ? `${sentry.issue.shortId} — ${sentry.issue.title}` : issue ? `${issue.key} — ${issue.summary}` : pull?.title}
+        </p>
 
         <div className="run-controls">
           <label>

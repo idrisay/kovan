@@ -1,4 +1,4 @@
-import type { JiraIssue, ProviderId, PullSummary } from '@baton/core';
+import type { JiraIssue, ProviderId, PullSummary, SentryFrame, SentryIssue } from '@baton/core';
 import type { PullDetail, ReviewComment, Reviewer } from '@baton/providers';
 import type { AgentRun, RunFile, Runner, RunKind } from '@baton/agent';
 import type {
@@ -8,7 +8,10 @@ import type {
   Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
 } from '../main/workspace';
 
-export type { PullDetail, ReviewComment, Reviewer, AgentRun, RunFile, Runner, RunKind, RunTarget, JiraIssue, PullSummary };
+export type {
+  PullDetail, ReviewComment, Reviewer, AgentRun, RunFile, Runner, RunKind, RunTarget,
+  JiraIssue, PullSummary, SentryIssue, SentryFrame
+};
 export type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus,
   Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
@@ -20,9 +23,9 @@ export type WorkspaceStatus = RepoStatus & { changes: number };
 /** 'system' follows the OS; the other two hold regardless of it. */
 export type ThemeChoice = 'system' | 'light' | 'dark';
 
-/** The two providers a "refresh just this one" control has anything to do
- *  for — see the note on `Snapshot['refreshedAt']` in `main/poller.ts`. */
-export type PolledProvider = 'github' | 'jira';
+/** The providers a "refresh just this one" control has anything to do for —
+ *  see the note on `Snapshot['refreshedAt']` in `main/poller.ts`. */
+export type PolledProvider = 'github' | 'jira' | 'sentry';
 
 export interface SessionInfo {
   id: string;
@@ -47,6 +50,7 @@ export interface Snapshot {
   mergedTotal: number;
   loadingMerged: boolean;
   tickets: JiraIssue[];
+  sentryIssues: SentryIssue[];
   connected: ProviderId[];
   errors: { provider: ProviderId; message: string }[];
   refreshing: boolean;
@@ -55,6 +59,13 @@ export interface Snapshot {
 }
 
 export type StartResult = { ok: true; sessionId: string } | { ok: false; error: string };
+
+/** Everything a run can be started against — see `Subject` in `main/agents.ts`. */
+export interface Subject {
+  pull?: PullSummary;
+  issue?: JiraIssue;
+  sentry?: { issue: SentryIssue; frames: SentryFrame[] };
+}
 
 export interface BatonApi {
   snapshot(): Promise<Snapshot>;
@@ -77,15 +88,19 @@ export interface BatonApi {
    *  see the note on `KNOWN_MODELS` in `@baton/agent`. */
   knownModels(): Promise<Record<string, string[]>>;
   runTargets(force?: boolean): Promise<RunTarget[]>;
-  buildPrompt(kind: RunKind, subject: { pull?: PullSummary; issue?: JiraIssue }): Promise<string>;
+  buildPrompt(kind: RunKind, subject: Subject): Promise<string>;
   defaultCwd(repo?: string): Promise<string | undefined>;
   startAgent(
     request: {
       kind: RunKind; subjectId: string; runnerId: string; cwd?: string; prompt?: string; model?: string
     },
-    subject: { pull?: PullSummary; issue?: JiraIssue }
+    subject: Subject
   ): Promise<StartResult>;
   runHistory(subject: string): Promise<AgentRun[]>;
+  /** One Sentry issue's latest stack trace, each frame placed on disk where possible. */
+  sentryFrames(issueId: string): Promise<SentryFrame[]>;
+  /** Files a Jira ticket from a Sentry issue, using the default project set in Settings. */
+  sentryCreateTicket(issue: SentryIssue): Promise<{ key: string; url: string }>;
   /** Every file a run's own directory actually contains. */
   runFiles(directory: string): Promise<RunFile[]>;
   /** A run's own report.md or prompt.md — validated server-side to actually belong to a run. */

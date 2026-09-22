@@ -16,7 +16,7 @@
 
 import type { PullSummary } from './github/pullStatus';
 import { describePull } from './github/pullStatus';
-import type { JiraIssue } from './types';
+import type { JiraIssue, SentryFrame, SentryIssue } from './types';
 
 export const DEFAULTREVIEWTEMPLATE = `Review \${url} using gh.
 
@@ -388,6 +388,79 @@ export function renderIssuePrompt(
     checks: checksBlock(conventions),
     base: conventions.baseBranch,
     untouchable: untouchableClause(conventions),
+    prReviewers: pullRequestReviewerClause(conventions.pullRequestReviewers),
+    attribution: ATTRIBUTIONRULE,
+    report: REPORTRULE
+  });
+}
+
+/**
+ * One line per frame. `resolvedPath` — `pathMapper.resolveFrame()`'s job, not
+ * this module's — wins when there is one; the raw Sentry filename is what is
+ * left when resolution failed, so a frame is never silently dropped for want
+ * of a local file. A line number with no path to attach it to says nothing,
+ * so it is only shown once there is a path.
+ */
+function frameLines(frames: readonly SentryFrame[]): string {
+  if (frames.length === 0) {
+    return '(no stack trace was available for the latest event)';
+  }
+  return frames
+    .map((f, i) => {
+      const tag = f.inApp ? '' : '(dependency) ';
+      const path = f.resolvedPath ?? f.filename ?? '(unknown file)';
+      const line = f.lineNo && (f.resolvedPath ?? f.filename) ? `:${f.lineNo}` : '';
+      const fn = f.function ? ` — ${f.function}` : '';
+      return `${i + 1}. ${tag}${path}${line}${fn}`;
+    })
+    .join('\n');
+}
+
+export const DEFAULTSENTRYTEMPLATE = `Fix the Sentry error \${shortId} — \${title}.
+
+\${permalink}
+
+Level: \${level} · Culprit: \${culprit} · Seen \${count} times, \${userCount} users  affected. First seen \${firstSeen}, last seen \${lastSeen}.
+
+# Stack trace (outermost first, throw site last)
+
+\${frames}
+
+Investigate the actual code at each in-app frame above before assuming the  cause — the culprit line is where it surfaced, not always where it  originates. Read enough of the surrounding code and its callers to  understand why it happens, not just where.
+
+Fix the root cause, not just this one call site, if the same mistake is  repeated elsewhere. Add or update a test that would have caught it, where  the codebase has tests for this kind of code.
+
+Verify locally:
+
+\${checks}
+
+\${reviewers}
+Commit referencing \${shortId} in the commit body or pull request  description — never in code comments or test names, which is  implementation, not provenance. Push the branch and open the pull request  against \${base}.\${prReviewers}
+
+\${attribution}
+
+\${report}`;
+
+export function renderSentryPrompt(
+  issue: SentryIssue,
+  frames: readonly SentryFrame[],
+  options: { template?: string; reviewers?: string[]; conventions?: Conventions } = {}
+): string {
+  const conventions = { ...DEFAULT_CONVENTIONS, ...options.conventions };
+  return substitute(options.template ?? DEFAULTSENTRYTEMPLATE, {
+    shortId: issue.shortId,
+    title: issue.title,
+    culprit: issue.culprit || '(unknown)',
+    level: issue.level,
+    count: String(issue.count),
+    userCount: String(issue.userCount),
+    permalink: issue.permalink,
+    firstSeen: issue.firstSeen || 'unknown',
+    lastSeen: issue.lastSeen || 'unknown',
+    frames: frameLines(frames),
+    reviewers: reviewBlock(options.reviewers ?? []),
+    checks: checksBlock(conventions),
+    base: conventions.baseBranch,
     prReviewers: pullRequestReviewerClause(conventions.pullRequestReviewers),
     attribution: ATTRIBUTIONRULE,
     report: REPORTRULE

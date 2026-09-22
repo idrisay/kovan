@@ -151,6 +151,35 @@ export class JiraClient {
     });
   }
 
+  /**
+   * Files a new ticket. `issueType` defaults to "Bug" — the one caller this
+   * has today is "create a ticket from a Sentry error," and a site without a
+   * type named exactly "Bug" gets a real error back rather than a silently
+   * wrong type, which is the right failure for something that runs once, by
+   * hand, not on every poll.
+   */
+  async createIssue(
+    projectKey: string,
+    summary: string,
+    description: string,
+    issueType = 'Bug'
+  ): Promise<{ key: string; url: string }> {
+    const response = await this.http.json<{ key: string }>(this.api('/issue'), {
+      method: 'POST',
+      headers: this.headers,
+      body: {
+        fields: {
+          project: { key: projectKey },
+          summary,
+          description: markdownToAdf(description),
+          issuetype: { name: issueType }
+        }
+      },
+      mutating: true
+    });
+    return { key: response.key, url: this.browseUrl(response.key) };
+  }
+
   async verify(signal?: CancelSignal): Promise<string> {
     const me = await this.http.json<{ displayName: string }>(this.api('/myself'), {
       headers: this.headers,

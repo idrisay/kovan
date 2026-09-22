@@ -6,7 +6,8 @@ import { RunViewer } from './RunViewer';
 import { Terminal } from './Terminal';
 import { DockBottomIcon, DockLeftIcon, DockRightIcon, DockTopIcon, TerminalIcon } from './icons';
 import type {
-  AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, Reviewer, RunKind, SessionInfo
+  AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, Reviewer, RunKind, SentryFrame,
+  SentryIssue, SessionInfo
 } from './types';
 
 /** What a reviewer's last action reads as, and who it puts the ball with. */
@@ -709,6 +710,162 @@ export function TicketPane({
 
           <LiveSessions subject={issue.key} sessions={sessions} onOpen={onOpenSession} />
           <History subject={issue.key} refreshOn={sessionSignature(sessions, issue.key)} />
+        </aside>
+      </div>
+    </div>
+    </div>
+    {inlineSession && showTerminal && (
+      <InlineTerminal session={inlineSession} onHide={() => setShowTerminal(false)} />
+    )}
+    </div>
+  );
+}
+
+/**
+ * A level worth calling out with the red dot vs. one that reads as routine —
+ * Sentry's own five levels, collapsed to the same pass/waiting/fail vocabulary
+ * every other status dot in this app already uses.
+ */
+export function levelTone(level: string): 'fail' | 'waiting' | 'pass' {
+  if (level === 'fatal' || level === 'error') return 'fail';
+  if (level === 'warning') return 'waiting';
+  return 'pass';
+}
+
+export function SentryPane({
+  issue,
+  sessions,
+  activeSession,
+  onRun,
+  onOpenSession
+}: {
+  issue: SentryIssue;
+  sessions: SessionInfo[];
+  activeSession?: string;
+  onRun: (issue: SentryIssue, frames: SentryFrame[]) => void;
+  onOpenSession: (id: string) => void;
+}) {
+  const [frames, setFrames] = useState<SentryFrame[]>([]);
+  const [loadingFrames, setLoadingFrames] = useState(true);
+  const [ticketBusy, setTicketBusy] = useState(false);
+  const [ticketResult, setTicketResult] = useState<{ key: string; url: string }>();
+  const [ticketError, setTicketError] = useState('');
+
+  useEffect(() => {
+    setFrames([]);
+    setLoadingFrames(true);
+    setTicketResult(undefined);
+    setTicketError('');
+    window.baton
+      .sentryFrames(issue.id)
+      .then(setFrames)
+      // The pane still shows title/culprit/counts without a trace — worth
+      // showing over a blank pane, so a resolution failure only empties the
+      // one section that needed it.
+      .catch(() => setFrames([]))
+      .finally(() => setLoadingFrames(false));
+  }, [issue.id]);
+
+  async function createTicket() {
+    setTicketBusy(true);
+    setTicketError('');
+    try {
+      setTicketResult(await window.baton.sentryCreateTicket(issue));
+    } catch (err) {
+      setTicketError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTicketBusy(false);
+    }
+  }
+
+  const inlineSession = sessions.find((s) => s.id === activeSession && s.subject === issue.shortId);
+  const [showTerminal, setShowTerminal] = useState(true);
+  useEffect(() => {
+    setShowTerminal(true);
+  }, [inlineSession?.id]);
+
+  const openQuickTerminal = useQuickTerminal(undefined, issue.shortId, onOpenSession);
+
+  return (
+    <div className="detail-shell">
+    <div className="detail-scroll">
+    <div className="detail">
+      <header className="detail-head">
+        <h2>{issue.title}</h2>
+        <div className="detail-meta">
+          <span className="key">{issue.shortId}</span>
+          <span>{issue.project}</span>
+          <span>{formatAge(issue.lastSeen)}</span>
+        </div>
+        <div className="detail-states">
+          <span className="state">
+            <span className={`dot ${levelTone(issue.level)}`} />
+            {issue.level} · {issue.count} events · {issue.userCount} users affected
+          </span>
+        </div>
+        <div className="detail-actions">
+          <div className="run-buttons">
+            <button className="primary" disabled={loadingFrames} onClick={() => onRun(issue, frames)}>
+              Fix in an agent
+            </button>
+            <button
+              className="primary outline"
+              disabled={ticketBusy || Boolean(ticketResult)}
+              onClick={() => void createTicket()}
+            >
+              {ticketBusy ? 'Creating…' : ticketResult ? 'Ticket created' : 'Create ticket'}
+            </button>
+          </div>
+          <button className="ghost" onClick={openQuickTerminal}>
+            <TerminalIcon size={13} /> Terminal
+          </button>
+          <button className="ghost" onClick={() => void window.baton.openExternal(issue.permalink)}>
+            Open in Sentry
+          </button>
+        </div>
+        {ticketResult && (
+          <p className="quiet small">
+            Filed as{' '}
+            <button className="link" onClick={() => void window.baton.openExternal(ticketResult.url)}>
+              {ticketResult.key}
+            </button>
+          </p>
+        )}
+        {ticketError && <div className="error boxed">{ticketError}</div>}
+      </header>
+
+      <div className="detail-body">
+        <div className="detail-main">
+          <section>
+            <h3>Culprit</h3>
+            <p>{issue.culprit || '(unknown)'}</p>
+          </section>
+
+          <section>
+            <h3>Stack trace</h3>
+            {loadingFrames ? (
+              <p className="quiet">Loading…</p>
+            ) : frames.length === 0 ? (
+              <p className="quiet">No stack trace was available for the latest event.</p>
+            ) : (
+              <ul className="files mono">
+                {frames.map((f, i) => (
+                  <li key={i} className={f.inApp ? '' : 'quiet'}>
+                    <span className="file-path">
+                      {f.resolvedPath ?? f.filename ?? '(unknown file)'}
+                      {f.lineNo && (f.resolvedPath ?? f.filename) ? `:${f.lineNo}` : ''}
+                    </span>
+                    {f.function && <span className="run-when">{f.function}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+
+        <aside className="detail-side">
+          <LiveSessions subject={issue.shortId} sessions={sessions} onOpen={onOpenSession} />
+          <History subject={issue.shortId} refreshOn={sessionSignature(sessions, issue.shortId)} />
         </aside>
       </div>
     </div>

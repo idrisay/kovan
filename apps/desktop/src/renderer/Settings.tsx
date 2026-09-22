@@ -42,6 +42,18 @@ const BASIC_AUTH_FIELDS: Field[] = [
 ];
 
 /**
+ * Not a `CREDENTIAL_FIELDS` entry: reading and searching Jira tickets — the
+ * connection this app has had since the start — needs none of this, only
+ * "Create ticket" from a Sentry error does. Gating "connected" on a field
+ * only one new feature needs would tell an existing, working Jira connection
+ * it is not connected until it also thinks about which project a bug report
+ * belongs in.
+ */
+const JIRA_EXTRA_FIELDS: Field[] = [
+  { key: 'jira.projectKey', label: 'Default project for new tickets', placeholder: 'PROJ' }
+];
+
+/**
  * One sectioned settings sheet — appearance, each connected provider, and the
  * dev environment an agent signs into — replacing what used to be a single
  * "Connections" list. Ported in spirit from DevHub's `SettingsView.swift`
@@ -199,10 +211,16 @@ export function Settings({
                   {connected.includes(active as ProviderId) && <span className="badge">connected</span>}
                 </h3>
                 {(fields[active] ?? []).map(field)}
+                {active === 'jira' && JIRA_EXTRA_FIELDS.map(field)}
                 <button
                   className="primary"
                   disabled={saving === active}
-                  onClick={() => void save(fields[active] ?? [], active)}
+                  onClick={() =>
+                    void save(
+                      [...(fields[active] ?? []), ...(active === 'jira' ? JIRA_EXTRA_FIELDS : [])],
+                      active
+                    )
+                  }
                 >
                   {saving === active ? 'Saving…' : `Save ${PROVIDER_LABEL[active] ?? active}`}
                 </button>

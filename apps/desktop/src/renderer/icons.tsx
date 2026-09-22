@@ -61,6 +61,16 @@ export function TicketIcon({ size = 19 }: Props) {
   );
 }
 
+export function SentryIcon({ size = 19 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M12 4 21 19H3Z" />
+      <path d="M12 10v4.2" />
+      <circle cx="12" cy="17.2" r="0.15" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function TerminalIcon({ size = 19 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">

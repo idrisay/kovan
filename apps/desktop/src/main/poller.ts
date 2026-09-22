@@ -15,17 +15,18 @@ import {
   type JiraIssue,
   type ProviderId,
   type PullSummary,
-  type RepoRef
+  type RepoRef,
+  type SentryIssue
 } from '@baton/core';
-import { Credentials, GitHubClient, HttpClient, JiraClient } from '@baton/providers';
+import { Credentials, GitHubClient, HttpClient, JiraClient, SentryClient } from '@baton/providers';
 import { findClones } from '@baton/git';
 import { EventEmitter } from '@baton/host';
 import type { DesktopHost } from './host';
 
-/** The two providers the poller itself fetches queues from — the ones a
+/** The three providers the poller itself fetches queues from — the ones a
  *  "refresh just this one" control actually has something to do for.
- *  Sentry/Grafana/Figma are connectable in Settings but never polled here. */
-export type PolledProvider = 'github' | 'jira';
+ *  Grafana/Figma are connectable in Settings but never polled here. */
+export type PolledProvider = 'github' | 'jira' | 'sentry';
 
 export interface Snapshot {
   at: number;
@@ -41,6 +42,7 @@ export interface Snapshot {
   /** True while a "Show more" is in flight, for the footer's own spinner. */
   loadingMerged: boolean;
   tickets: JiraIssue[];
+  sentryIssues: SentryIssue[];
   connected: ProviderId[];
   errors: { provider: ProviderId; message: string }[];
   refreshing: boolean;
@@ -61,6 +63,7 @@ export const EMPTY: Snapshot = {
   mergedTotal: 0,
   loadingMerged: false,
   tickets: [],
+  sentryIssues: [],
   connected: [],
   errors: [],
   refreshing: false,
@@ -127,9 +130,10 @@ export class Poller {
     const errors: Snapshot['errors'] = [];
     const connected = await this.credentials.connected();
 
-    const [github, jira] = await Promise.all([
+    const [github, jira, sentry] = await Promise.all([
       this.loadGitHub(connected, controller.signal, errors),
-      this.loadJira(connected, controller.signal, errors)
+      this.loadJira(connected, controller.signal, errors),
+      this.loadSentry(connected, controller.signal, errors)
     ]);
 
     if (controller.signal.aborted) {
@@ -150,13 +154,15 @@ export class Poller {
       mergedTotal: github?.mergedTotal ?? 0,
       loadingMerged: false,
       tickets: jira ?? [],
+      sentryIssues: sentry ?? [],
       connected,
       errors,
       refreshing: false,
       refreshedAt: {
         ...this.snapshot.refreshedAt,
         ...(connected.includes('github') ? { github: now } : {}),
-        ...(connected.includes('jira') ? { jira: now } : {})
+        ...(connected.includes('jira') ? { jira: now } : {}),
+        ...(connected.includes('sentry') ? { sentry: now } : {})
       },
       refreshingProviders: []
     };
@@ -200,10 +206,15 @@ export class Poller {
           loadingMerged: false
         };
       }
-    } else {
+    } else if (id === 'jira') {
       const jira = await this.loadJira(connected, controller.signal, errors);
       if (jira) {
         patch = { tickets: jira };
+      }
+    } else {
+      const sentry = await this.loadSentry(connected, controller.signal, errors);
+      if (sentry) {
+        patch = { sentryIssues: sentry };
       }
     }
 
@@ -350,6 +361,48 @@ export class Poller {
       if (!signal.aborted) {
         errors.push({ provider: 'jira', message: message(err) });
         this.host.log.error('Jira refresh failed', err);
+      }
+      return undefined;
+    }
+  }
+
+  /**
+   * A single project's own unresolved issues, newest-seen first. No
+   * auto-discovery across every project in the organization — `sentry.
+   * project` is a required field (see `CREDENTIAL_FIELDS.sentry`) precisely
+   * because there is nothing useful to fetch without one yet.
+   */
+  private async loadSentry(
+    connected: readonly ProviderId[],
+    signal: AbortSignal,
+    errors: Snapshot['errors']
+  ): Promise<SentryIssue[] | undefined> {
+    if (!connected.includes('sentry')) {
+      return undefined;
+    }
+    const token = await this.credentials.token('sentry');
+    const organization = this.host.config.get('sentry.organization', '');
+    const project = this.host.config.get('sentry.project', '');
+    if (!token || !organization || !project) {
+      return undefined;
+    }
+    try {
+      const client = new SentryClient(
+        this.http,
+        this.host.config.get('sentry.baseUrl', 'https://sentry.io'),
+        organization,
+        token
+      );
+      return await client.listIssues(
+        project,
+        this.host.config.get('sentry.query', 'is:unresolved'),
+        this.host.config.get('sentry.issuesLimit', 25),
+        signal
+      );
+    } catch (err) {
+      if (!signal.aborted) {
+        errors.push({ provider: 'sentry', message: message(err) });
+        this.host.log.error('Sentry refresh failed', err);
       }
       return undefined;
     }

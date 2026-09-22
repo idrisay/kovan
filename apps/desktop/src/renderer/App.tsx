@@ -1,25 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DEFAULT_PULL_SORT, formatAge, isBlocked, PULL_SORTS, sortPulls, type PullSort } from '@baton/core';
 import type {
-  JiraIssue, PolledProvider, PullSummary, RunKind, RunTarget, SessionInfo, Snapshot, ThemeChoice
+  JiraIssue, PolledProvider, PullSummary, RunKind, RunTarget, SentryFrame, SentryIssue,
+  SessionInfo, Snapshot, ThemeChoice
 } from './types';
 import { Settings } from './Settings';
-import { PullPane, TicketPane } from './Detail';
+import { levelTone, PullPane, SentryPane, TicketPane } from './Detail';
 import { RunSheet } from './RunSheet';
 import { Terminal } from './Terminal';
 import { GroupHead, PullRow } from './rows';
 import { WorkspaceView } from './Workspace';
 import { Resizer } from './Resizer';
 import {
-  PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon,
+  PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon, SentryIcon,
   RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon
 } from './icons';
 
-type ViewId = 'pulls' | 'tickets' | 'workspace' | 'sessions';
+type ViewId = 'pulls' | 'tickets' | 'sentry' | 'workspace' | 'sessions';
 
 const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JSX.Element }[] = [
   { id: 'pulls', label: 'Pull requests', icon: PullRequestIcon },
   { id: 'tickets', label: 'Tickets', icon: TicketIcon },
+  { id: 'sentry', label: 'Sentry errors', icon: SentryIcon },
   { id: 'workspace', label: 'Workspace', icon: WorkspaceIcon },
   { id: 'sessions', label: 'Sessions', icon: TerminalIcon }
 ];
@@ -27,15 +29,16 @@ const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JS
 const EMPTY: Snapshot = {
   at: 0, viewer: '', blocked: [], mine: [], reviewRequested: [],
   merged: [], mergedTotal: 0, loadingMerged: false,
-  tickets: [], connected: [], errors: [], refreshing: false,
+  tickets: [], sentryIssues: [], connected: [], errors: [], refreshing: false,
   refreshedAt: {}, refreshingProviders: []
 };
 
-/** The two providers a per-provider refresh actually has something to do
- *  for, and what the menu calls each one. */
+/** The providers a per-provider refresh actually has something to do for,
+ *  and what the menu calls each one. */
 const REFRESHABLE: { id: PolledProvider; label: string }[] = [
   { id: 'github', label: 'Pull requests' },
-  { id: 'jira', label: 'Jira tickets' }
+  { id: 'jira', label: 'Jira tickets' },
+  { id: 'sentry', label: 'Sentry errors' }
 ];
 
 /** How many more merged pull requests one press of the footer asks for. */
@@ -90,7 +93,7 @@ function storedCollapsed(): Set<string> {
   }
 }
 
-interface Selection { pull?: PullSummary; issue?: JiraIssue }
+interface Selection { pull?: PullSummary; issue?: JiraIssue; sentry?: SentryIssue }
 
 interface Group {
   /** Stable across renames, because the collapsed set is stored on it. */
@@ -584,7 +587,11 @@ export function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [targets, setTargets] = useState<RunTarget[]>([]);
   const [activeSession, setActiveSession] = useState<string>();
-  const [runSheet, setRunSheet] = useState<({ kind: RunKind } & Selection) | undefined>();
+  const [runSheet, setRunSheet] = useState<
+    ({ kind: RunKind } & Pick<Selection, 'pull' | 'issue'> & {
+      sentry?: { issue: SentryIssue; frames: SentryFrame[] };
+    }) | undefined
+  >();
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsed);
   const [pullFilters, setPullFilters] = useState<PullFilters>(emptyPullFilters);
@@ -674,6 +681,7 @@ export function App() {
   const counts = useMemo(() => ({
     pulls: snapshot.blocked.length + snapshot.reviewRequested.length,
     tickets: snapshot.tickets.length,
+    sentry: snapshot.sentryIssues.length,
     workspace: 0,
     sessions: sessions.filter((s) => s.running).length
   }), [snapshot, sessions]);
@@ -796,6 +804,18 @@ export function App() {
     }
     return sorted;
   }, [snapshot.tickets, filter, ticketFilters, ticketSort]);
+
+  /** Newest-first, same as the ticket list's own default — no sort/filter
+   *  menu of its own yet, just the shared search box. */
+  const sentryIssues = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const matching = q
+      ? snapshot.sentryIssues.filter(
+          (i) => i.title.toLowerCase().includes(q) || i.shortId.toLowerCase().includes(q)
+        )
+      : snapshot.sentryIssues;
+    return [...matching].sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+  }, [snapshot.sentryIssues, filter]);
 
   const onStarted = (sessionId: string) => {
     setRunSheet(undefined);
@@ -922,7 +942,35 @@ export function App() {
                 </div>
 
                 <div className="queue-list">
-                  {view === 'tickets' ? (
+                  {view === 'sentry' ? (
+                    sentryIssues.length === 0 ? (
+                      <p className="quiet">{filter ? 'No errors match.' : 'No Sentry errors.'}</p>
+                    ) : (
+                      <ul className="rows">
+                        {sentryIssues.map((issue) => (
+                          <li key={issue.id}>
+                            <button
+                              className={selected.sentry?.id === issue.id ? 'row selected' : 'row'}
+                              onClick={() => setSelected({ sentry: issue })}
+                            >
+                              <span className="row-top">
+                                <span className="row-num">{issue.shortId}</span>
+                                <span className="row-title">{issue.title}</span>
+                              </span>
+                              <span className="row-state">
+                                <span className="state">
+                                  <span className={`dot ${levelTone(issue.level)}`} />
+                                  {issue.culprit || issue.level}
+                                </span>
+                                <span className="spacer" />
+                                <span className="row-age">{formatAge(issue.lastSeen)}</span>
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )
+                  ) : view === 'tickets' ? (
                     tickets.length === 0 ? (
                       <p className="quiet">
                         {filter || ticketFilterCount > 0 ? 'No tickets match.' : 'No tickets.'}
@@ -1042,6 +1090,14 @@ export function App() {
                     onRun={(kind, issue) => setRunSheet({ kind, issue })}
                     onOpenSession={openSession}
                   />
+                ) : selected.sentry ? (
+                  <SentryPane
+                    issue={selected.sentry}
+                    sessions={sessions}
+                    activeSession={activeSession}
+                    onRun={(issue, frames) => setRunSheet({ kind: 'implement', sentry: { issue, frames } })}
+                    onOpenSession={openSession}
+                  />
                 ) : (
                   <p className="quiet centred">
                     Pick a row to see it, and to hand it to an agent.
@@ -1065,7 +1121,7 @@ export function App() {
       )}
       {runSheet && (
         <RunSheet
-          kind={runSheet.kind} pull={runSheet.pull} issue={runSheet.issue}
+          kind={runSheet.kind} pull={runSheet.pull} issue={runSheet.issue} sentry={runSheet.sentry}
           onClose={() => setRunSheet(undefined)} onStarted={onStarted}
         />
       )}

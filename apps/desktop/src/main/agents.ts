@@ -7,6 +7,7 @@
  * that records it (`RunStore`).
  */
 
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import {
@@ -17,13 +18,18 @@ import {
   renderVerifyPrompt,
   renderIssuePrompt,
   renderPullPrompt,
+  renderSentryPrompt,
   ticketKeyInTitle,
   type Conventions,
   type JiraIssue,
-  type PullSummary
+  type PullSummary,
+  type SentryFrame,
+  type SentryIssue
 } from '@baton/core';
+import { isAppFrame, resolveFrame } from '@baton/core/node';
 import { RunStore, available, type RunKind, type Runner } from '@baton/agent';
 import { findClones, runTargets, type RunTarget } from '@baton/git';
+import { HttpClient, JiraClient, SentryClient, type RawSentryFrame } from '@baton/providers';
 import type { DesktopHost } from './host';
 import type { Sessions } from './sessions';
 
@@ -84,8 +90,17 @@ export interface StartRequest {
   model?: string;
 }
 
+/** Everything a run can be started against. Every field is optional because
+ *  each caller only ever has one of them. */
+export interface Subject {
+  pull?: PullSummary;
+  issue?: JiraIssue;
+  sentry?: { issue: SentryIssue; frames: SentryFrame[] };
+}
+
 export class Agents {
   private readonly store: RunStore;
+  private readonly http: HttpClient;
   private cachedTargets?: RunTarget[];
 
   constructor(
@@ -93,6 +108,7 @@ export class Agents {
     private readonly sessions: Sessions
   ) {
     this.store = new RunStore(RunStore.rootFor(host.files.stateDir()));
+    this.http = new HttpClient(host.log);
   }
 
   runners(): Promise<Runner[]> {
@@ -119,13 +135,17 @@ export class Agents {
   }
 
   /** The prompt a given piece of work would be started with. */
-  buildPrompt(
-    kind: RunKind,
-    subject: { pull?: PullSummary; issue?: JiraIssue }
-  ): string {
+  buildPrompt(kind: RunKind, subject: Subject): string {
     const reviewers = this.host.config.get('runner.reviewers', [] as string[]);
     const conventions = this.conventions();
 
+    if (kind === 'implement' && subject.sentry) {
+      return renderSentryPrompt(subject.sentry.issue, subject.sentry.frames, {
+        template: this.host.config.get('prompt.template.sentry', '') || undefined,
+        reviewers,
+        conventions
+      });
+    }
     if (kind === 'implement' && subject.issue) {
       return renderIssuePrompt(subject.issue, {
         template: this.host.config.get('prompt.template.implement', '') || undefined,
@@ -230,7 +250,8 @@ export class Agents {
    * so the second time the same ticket comes round the first time is already
    * there.
    */
-  subjectFor(pull?: PullSummary, issue?: JiraIssue): string {
+  subjectFor(pull?: PullSummary, issue?: JiraIssue, sentry?: SentryIssue): string {
+    if (sentry) return sentry.shortId;
     if (issue) return issue.key;
     if (!pull) return 'unknown';
     return ticketKeyInTitle(pull.title) || `${pull.repo}#${pull.number}`;
@@ -238,7 +259,7 @@ export class Agents {
 
   async start(
     request: StartRequest,
-    subject: { pull?: PullSummary; issue?: JiraIssue }
+    subject: Subject
   ): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }> {
     const runners = await this.runners();
     const runner = runners.find((r) => r.id === request.runnerId);
@@ -255,7 +276,7 @@ export class Agents {
       };
     }
 
-    const subjectId = this.subjectFor(subject.pull, subject.issue);
+    const subjectId = this.subjectFor(subject.pull, subject.issue, subject.sentry?.issue);
     const run = await this.store.begin({
       subject: subjectId,
       pull: subject.pull ? `${subject.pull.repo}#${subject.pull.number}` : '',
@@ -288,11 +309,27 @@ export class Agents {
     return { ok: true, sessionId: result.id };
   }
 
-  private async writeTicketFile(
-    directory: string,
-    subject: { pull?: PullSummary; issue?: JiraIssue }
-  ): Promise<string | undefined> {
+  private async writeTicketFile(directory: string, subject: Subject): Promise<string | undefined> {
     const lines: string[] = [];
+    if (subject.sentry) {
+      const { issue, frames } = subject.sentry;
+      lines.push(`# ${issue.shortId} — ${issue.title}`, '');
+      lines.push(`Level: ${issue.level} · Culprit: ${issue.culprit || '(unknown)'}`);
+      lines.push(`Seen ${issue.count} times, ${issue.userCount} users affected.`);
+      lines.push(`First seen ${issue.firstSeen || 'unknown'}, last seen ${issue.lastSeen || 'unknown'}.`);
+      lines.push(issue.permalink, '', '## Stack trace (outermost first, throw site last)', '');
+      if (frames.length === 0) {
+        lines.push('(no stack trace was available for the latest event)');
+      } else {
+        frames.forEach((f, i) => {
+          const tag = f.inApp ? '' : '(dependency) ';
+          const at = f.resolvedPath ?? f.filename ?? '(unknown file)';
+          const line = f.lineNo && (f.resolvedPath ?? f.filename) ? `:${f.lineNo}` : '';
+          const fn = f.function ? ` — ${f.function}` : '';
+          lines.push(`${i + 1}. ${tag}${at}${line}${fn}`);
+        });
+      }
+    }
     if (subject.issue) {
       lines.push(`# ${subject.issue.key} — ${subject.issue.summary}`, '');
       lines.push(`Status: ${subject.issue.status} · Type: ${subject.issue.issueType}`);
@@ -313,7 +350,7 @@ export class Agents {
       return undefined;
     }
 
-    const history = await this.store.list(this.subjectFor(subject.pull, subject.issue));
+    const history = await this.store.list(this.subjectFor(subject.pull, subject.issue, subject.sentry?.issue));
     if (history.length > 0) {
       lines.push('', '## Earlier runs', '');
       for (const run of history.slice(0, 10)) {
@@ -356,5 +393,68 @@ export class Agents {
     const ext = path.extname(file).slice(1).toLowerCase();
     const mime = ext === 'jpg' ? 'jpeg' : ext || 'png';
     return `data:image/${mime};base64,${bytes.toString('base64')}`;
+  }
+
+  private async sentryClient(): Promise<SentryClient> {
+    const token = await this.host.secrets.get('sentry');
+    const organization = this.host.config.get('sentry.organization', '');
+    if (!token || !organization) {
+      throw new Error('Sentry is not connected.');
+    }
+    return new SentryClient(this.http, this.host.config.get('sentry.baseUrl', 'https://sentry.io'), organization, token);
+  }
+
+  /**
+   * One issue's latest stack trace, each frame placed on disk where possible.
+   * `repoRoot` is the first watched folder — the same fallback `defaultCwd()`
+   * uses, since a Sentry issue carries no repository hint of its own to match
+   * a clone against.
+   */
+  async sentryFrames(issueId: string): Promise<SentryFrame[]> {
+    const client = await this.sentryClient();
+    const raw = await client.getLatestFrames(issueId);
+    const repoRoot = await this.defaultCwd();
+    return raw.map((f: RawSentryFrame) => {
+      const resolvedPath =
+        repoRoot && f.filename
+          ? resolveFrame(f.filename, { repoRoot, mappings: [] })
+          : undefined;
+      return {
+        filename: f.filename,
+        function: f.function,
+        lineNo: f.lineNo,
+        colNo: f.colNo,
+        inApp: isAppFrame(f),
+        resolvedPath: resolvedPath && existsSync(resolvedPath) ? resolvedPath : undefined
+      };
+    });
+  }
+
+  /**
+   * Files a Jira ticket from a Sentry issue — the other action the tab
+   * offers besides starting an agent. Needs a default project, which is not
+   * part of `CREDENTIAL_FIELDS.jira` (only "create ticket" needs it, so an
+   * already-working Jira connection with no project set stays "connected").
+   */
+  async createTicketFromSentry(issue: SentryIssue): Promise<{ key: string; url: string }> {
+    const projectKey = this.host.config.get('jira.projectKey', '');
+    if (!projectKey) {
+      throw new Error('No default Jira project set. Add one in Settings → Jira.');
+    }
+    const token = await this.host.secrets.get('jira');
+    const site = this.host.config.get('jira.baseUrl', '');
+    const email = this.host.config.get('jira.email', '');
+    if (!token || !site || !email) {
+      throw new Error('Jira is not connected.');
+    }
+    const description =
+      `${issue.permalink}\n\n` +
+      `Level: ${issue.level} · Culprit: ${issue.culprit || '(unknown)'}\n` +
+      `Seen ${issue.count} times, ${issue.userCount} users affected.`;
+    return new JiraClient(this.http, site, email, token).createIssue(
+      projectKey,
+      `[Sentry] ${issue.title}`,
+      description
+    );
   }
 }
