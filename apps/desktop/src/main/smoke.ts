@@ -22,7 +22,8 @@
 
 import { app, type BrowserWindow } from 'electron';
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import * as path from 'node:path';
 import type { Agents } from './agents';
 import type { Poller, Snapshot } from './poller';
 import type { Sessions } from './sessions';
@@ -1350,17 +1351,20 @@ export async function smokeUi(
       `Array.from(document.querySelectorAll('.runs .link')).find(b => b.textContent.trim() === 'view')?.click()`
     );
     await until(win, `document.querySelector('.run-viewer')`, 5_000);
-    // The file list comes from a real directory read, not a fixed set of
-    // tabs — wait for it rather than a fixed delay, the same reason every
-    // other async render in this file is polled instead of slept past.
-    await until(win, `document.querySelectorAll('.run-file').length > 0`, 5_000);
+    // The gallery's contents come from a real directory read, not a fixed
+    // set of tabs — wait for it rather than a fixed delay, the same reason
+    // every other async render in this file is polled instead of slept past.
+    await until(win, `document.querySelectorAll('.run-doc, .run-shot').length > 0`, 5_000);
     await new Promise((r) => setTimeout(r, 200));
     console.log(
-      'runViewerFiles:',
-      await read(
-        win,
-        `Array.from(document.querySelectorAll('.run-file')).map(b => b.textContent)`
-      )
+      'runViewerGallery:',
+      JSON.stringify({
+        docs: await read(
+          win,
+          `Array.from(document.querySelectorAll('.run-doc-name')).map(b => b.textContent)`
+        ),
+        shots: await read(win, `document.querySelectorAll('.run-shot').length`)
+      })
     );
     await writeFile(
       process.env['BATON_SHOT_RUN_VIEWER'],
@@ -1369,19 +1373,71 @@ export async function smokeUi(
     console.log(`shot: ${process.env['BATON_SHOT_RUN_VIEWER']}`);
 
     if (process.env['BATON_SHOT_RUN_VIEWER_SHOTS']) {
-      // Whichever file was not the one auto-selected on open — proves
-      // clicking a different one in the list actually switches the preview.
-      await read(
-        win,
-        `Array.from(document.querySelectorAll('.run-file'))
-          .find(b => !b.classList.contains('active'))?.click()`
-      );
+      // Opening a document takes over the view; "back" has to return to
+      // exactly the gallery that was there before.
+      await read(win, `document.querySelector('.run-doc')?.click()`);
+      await until(win, `document.querySelector('.run-viewer-doc')`, 5_000);
       await new Promise((r) => setTimeout(r, 200));
       await writeFile(
         process.env['BATON_SHOT_RUN_VIEWER_SHOTS'],
         (await win.webContents.capturePage()).toPNG()
       );
       console.log(`shot: ${process.env['BATON_SHOT_RUN_VIEWER_SHOTS']}`);
+
+      await read(win, `document.querySelector('.run-viewer-back')?.click()`);
+      await new Promise((r) => setTimeout(r, 150));
+      console.log(
+        'runViewerBackToGallery:',
+        JSON.stringify({ galleryVisible: await read(win, `Boolean(document.querySelector('.run-viewer-gallery'))`) })
+      );
+    }
+
+    // The screenshot grid and lightbox, which the fixture run itself never
+    // produces (nothing here calls a real agent that takes screenshots) —
+    // proven instead by placing one real PNG straight into the run's own
+    // shots/ folder, the exact way `RunStore.env()` tells a run to.
+    if (process.env['BATON_SHOT_RUN_VIEWER_LIGHTBOX']) {
+      await read(win, `document.querySelector('.run-viewer .ghost')?.click()`);
+      await new Promise((r) => setTimeout(r, 100));
+      const runs = (await read(win, `window.baton.runHistory('ACME-2393')`)) as { directory: string }[];
+      const directory = runs[0]?.directory;
+      if (directory) {
+        const shotsDir = path.join(directory, 'shots');
+        await mkdir(shotsDir, { recursive: true });
+        // A minimal but real 1x1 PNG, not a text file wearing the extension —
+        // this has to survive an actual decode by an <img> tag.
+        const onePixelPng = Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+          'base64'
+        );
+        await writeFile(path.join(shotsDir, '01-example.png'), onePixelPng);
+
+        await read(
+          win,
+          `Array.from(document.querySelectorAll('.runs .link')).find(b => b.textContent.trim() === 'view')?.click()`
+        );
+        await until(win, `document.querySelectorAll('.run-shot').length > 0`, 5_000);
+        await new Promise((r) => setTimeout(r, 200));
+        await read(win, `document.querySelector('.run-shot')?.click()`);
+        await until(win, `document.querySelector('.lightbox-backdrop img')`, 5_000);
+        await new Promise((r) => setTimeout(r, 150));
+        await writeFile(
+          process.env['BATON_SHOT_RUN_VIEWER_LIGHTBOX'],
+          (await win.webContents.capturePage()).toPNG()
+        );
+        console.log(`shot: ${process.env['BATON_SHOT_RUN_VIEWER_LIGHTBOX']}`);
+        console.log(
+          'runViewerLightbox:',
+          JSON.stringify({
+            shotCount: await read(win, `document.querySelectorAll('.run-shot').length`),
+            lightboxSrcIsDataUrl: await read(
+              win, `document.querySelector('.lightbox-backdrop img')?.src.startsWith('data:image/')`
+            )
+          })
+        );
+      } else {
+        console.log('runViewerLightbox: skipped, no run directory found');
+      }
     }
 
     await read(win, `document.querySelector('.run-viewer .ghost')?.click()`);

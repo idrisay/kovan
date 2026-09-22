@@ -867,36 +867,77 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   color: var(--dim); font-size: 11px; line-height: 1.55; margin: 2px 0 13px;
 }
 
-/* --- The run viewer: a run's report, prompt and screenshots in-app ------ */
-.sheet.run-viewer { padding: 0; display: flex; flex-direction: column; height: 78vh; max-height: 680px; }
-.run-viewer .sheet-head { padding: 18px 20px 0; margin-bottom: 0; flex: none; }
-.run-viewer .subject { padding: 0 20px; margin: 6px 0 14px; flex: none; }
-
 /*
- * A run's directory browsed the same way a workspace repo's files are — a
- * list on the left, the selected file's own preview on the right — rather
- * than a fixed report/prompt/screenshots tab strip that goes blind the
- * moment an agent writes something that strip did not name in advance.
+ * The run viewer: a run's directory as a gallery, not a fixed
+ * report/prompt/screenshots tab strip that goes blind the moment an agent
+ * writes something that strip did not name in advance. Every screenshot is a
+ * real thumbnail, visible at once; every document is listed with a taste of
+ * what it says. Sized close to the window rather than the ~480px default
+ * sheet — a grid of thumbnails needs the room a form does not.
  */
-.run-viewer-split { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--hair); }
-.run-file-list {
-  flex: none; width: 210px; margin: 0; padding: 8px; list-style: none;
-  overflow-y: auto; border-right: 1px solid var(--hair);
+.sheet.run-viewer {
+  padding: 0; display: flex; flex-direction: column;
+  width: 92vw; max-width: 1100px; height: 88vh; max-height: 820px;
 }
-.run-file {
-  display: block; width: 100%; text-align: left; padding: 6px 8px; border-radius: 6px;
-  background: none; border: 0; color: var(--secondary);
-  font-family: var(--mono); font-size: 11px; word-break: break-all;
+.run-viewer .sheet-head { padding: 18px 24px 0; margin-bottom: 0; flex: none; }
+.run-viewer .subject { padding: 0 24px; margin: 6px 0 14px; flex: none; }
+
+.run-viewer-gallery {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 4px 24px 24px;
+  border-top: 1px solid var(--hair);
 }
-.run-file:hover { background: rgba(255, 255, 255, 0.05); color: var(--title); }
-.run-file.active { background: rgba(217, 119, 87, 0.12); color: rgb(217, 119, 87); }
-.run-viewer-body {
-  flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 18px 20px;
-  display: flex; flex-direction: column; gap: 12px;
+.run-viewer-gallery section { padding-top: 18px; }
+.run-viewer-gallery h3 {
+  margin: 0 0 12px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted);
 }
-.run-file-image {
-  max-width: 100%; display: block; border-radius: 8px; border: 1px solid var(--hair-strong);
+
+.run-shots-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px;
 }
+.run-shot {
+  background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 8px;
+  padding: 0; overflow: hidden; aspect-ratio: 4 / 3; display: block;
+}
+.run-shot:hover { border-color: rgb(217, 119, 87); }
+.run-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.run-doc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.run-doc {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  border-radius: 8px; padding: 8px 10px;
+}
+.run-doc:hover { background: rgba(255, 255, 255, 0.05); }
+.run-doc-name { display: block; font-family: var(--mono); font-size: 12px; color: var(--title); }
+.run-doc-snippet {
+  display: block; margin-top: 2px; font-size: 12px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* The takeover view for one document — same page, no popup-within-a-popup. */
+.run-viewer-doc {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 4px 24px 24px;
+  display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--hair);
+}
+.run-viewer-back { align-self: flex-start; }
+.run-viewer-doc h3 {
+  margin: 0; font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--muted);
+}
+
+/* A screenshot enlarged over everything, including the viewer sheet itself. */
+.lightbox-backdrop {
+  position: fixed; inset: 0; background: rgba(6, 7, 9, 0.85); z-index: 20;
+  display: flex; align-items: center; justify-content: center; padding: 48px;
+}
+.lightbox-backdrop img { max-width: 100%; max-height: 100%; border-radius: 8px; display: block; }
+.lightbox-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 44px; height: 44px; border-radius: 50%; border: 0;
+  background: rgba(255, 255, 255, 0.08); color: var(--title); font-size: 22px; line-height: 1;
+}
+.lightbox-nav:hover { background: rgba(255, 255, 255, 0.16); }
+.lightbox-nav.prev { left: 16px; }
+.lightbox-nav.next { right: 16px; }
 
 .run-controls label { flex: 1; }
 .prompt-label textarea {
