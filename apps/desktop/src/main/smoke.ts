@@ -894,6 +894,38 @@ export async function smokeUi(
       widthAfterDrag = ((await state()) as { rect: { width: number } } | null)?.rect.width;
     }
 
+    // A drag far enough that the old fixed 720px ceiling would have caught
+    // it — the max is now a share of the shell's own box, not a constant, so
+    // this should land near 80% of the pane's width instead of stopping at 720.
+    let widthAfterBigDrag: unknown = 'not attempted';
+    if (handle && attached) {
+      let attached2 = false;
+      try {
+        win.webContents.debugger.attach('1.3');
+        attached2 = true;
+      } catch { /* nothing to attach to a second time in the same run */ }
+      if (attached2) {
+        const mouse = (type: string, x: number, y: number, buttons: number) =>
+          win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+            type, x, y, button: 'left', buttons, clickCount: 1, pointerType: 'mouse'
+          });
+        const moved = { x: handle.x - 120, y: handle.y };
+        await mouse('mousePressed', moved.x, moved.y, 1);
+        for (const x of [moved.x - 300, moved.x - 900]) {
+          await mouse('mouseMoved', x, moved.y, 1);
+        }
+        await new Promise((r) => setTimeout(r, 80));
+        await mouse('mouseReleased', moved.x - 900, moved.y, 0);
+        await new Promise((r) => setTimeout(r, 80));
+        win.webContents.debugger.detach();
+        const afterBig = (await state()) as { rect: { width: number } } | null;
+        const shellWidth = await read(
+          win, `document.querySelector('.detail-shell')?.getBoundingClientRect().width`
+        );
+        widthAfterBigDrag = { width: afterBig?.rect.width, shellWidth };
+      }
+    }
+
     await clickDock('bottom');
     await new Promise((r) => setTimeout(r, 150));
     await clickDock('top');
@@ -910,7 +942,7 @@ export async function smokeUi(
       'terminalDock:',
       JSON.stringify({
         dockedBottom, dockedRight, dockedTop, dockedLeft,
-        widthBeforeDrag: dockedRight?.rect.width, widthAfterDrag,
+        widthBeforeDrag: dockedRight?.rect.width, widthAfterDrag, widthAfterBigDrag,
         storedDock: await read(win, `localStorage.getItem('baton.terminal-dock')`),
         storedWidth: await read(win, `localStorage.getItem('baton.terminal-width')`)
       })
@@ -1761,7 +1793,7 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
     )) as { x: number; y: number } | null;
 
     const widthOf = async () =>
-      (await read(win, `document.querySelector('.queue').getBoundingClientRect().width`)) as number;
+      (await read(win, `document.querySelector('.queue')?.getBoundingClientRect().width ?? null`)) as number;
     const custom = () =>
       read(win, `document.documentElement.style.getPropertyValue('--queue-w') || null`);
 
@@ -1813,9 +1845,27 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
       const widened = await widthOf();
       const stored = await read(win, `localStorage.getItem('baton.sidebar-width')`);
 
-      // The handle travelled with the edge, so aim the next drag from there.
-      const moved = { x: handle.x + 140, y: handle.y };
-      await drag(moved, moved.x - 600);            // well past the floor
+      // The handle travelled with the edge, so aim the next drag from there —
+      // exactly 140px along only holds because that drag landed short of
+      // either bound; re-querying is what a real drag chain always does.
+      const handleNow = () =>
+        read(
+          win,
+          `(() => { const r = document.querySelector('.resizer')?.getBoundingClientRect();
+             return r ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null; })()`
+        ) as Promise<{ x: number; y: number } | null>;
+
+      const moved = (await handleNow()) ?? { x: handle.x + 140, y: handle.y };
+
+      // Far enough that the old fixed 620px ceiling would have caught it —
+      // the max is now 70% of the window, not a constant.
+      await drag(moved, moved.x + 2000);
+      const atCeiling = await widthOf();
+      const innerWidth = (await read(win, `window.innerWidth`)) as number;
+      const ceiling = { atCeiling, expected: Math.round(innerWidth * 0.7) };
+
+      const afterCeiling = (await handleNow()) ?? { x: moved.x + 2000, y: moved.y };
+      await drag(afterCeiling, afterCeiling.x - 2400); // well past the floor
       const clamped = await widthOf();
 
       await read(
@@ -1829,6 +1879,7 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
         startWidth,
         widened,
         grewByExactly140: widened - startWidth === 140,
+        ceiling,
         clamped,
         stoppedAtFloor: clamped === 220,
         stored,

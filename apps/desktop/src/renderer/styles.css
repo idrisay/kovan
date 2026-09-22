@@ -297,7 +297,10 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
      below — which is why the media query moves --queue-default rather than
      width, or it would fight a width the user chose deliberately. */
   width: var(--queue-w, var(--queue-default));
-  max-width: 60vw;                        /* never let it eat the whole window */
+  /* A backstop for whatever sets --queue-w without going through the
+     resizer's own clamp() — kept in step with its 70% ratio so the two
+     ceilings never quietly disagree with each other. */
+  max-width: 70vw;
   flex: none;
   background: var(--sidebar);
   border-right: 1px solid var(--hair);

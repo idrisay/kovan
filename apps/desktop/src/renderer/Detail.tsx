@@ -203,7 +203,11 @@ const DOCK_KEY = 'baton.terminal-dock';
 const HEIGHT_KEY = 'baton.terminal-height';
 const WIDTH_KEY = 'baton.terminal-width';
 const MIN_SIZE = 140;
-const MAX_SIZE = 720;
+// A fraction of the shell's own box, not a fixed pixel ceiling — the panel
+// lives inside a ticket/PR pane whose size already scales with the window,
+// so capping it as a share of that box scales the same way rather than
+// falling short on anything bigger than the screen this number was picked on.
+const MAX_RATIO = 0.8;
 const DEFAULT_HEIGHT = 320;
 const DEFAULT_WIDTH = 420;
 
@@ -229,7 +233,8 @@ function storedSize(key: string, fallback: number): number {
   }
 }
 
-const clampSize = (px: number) => Math.min(MAX_SIZE, Math.max(MIN_SIZE, Math.round(px)));
+const clampSize = (px: number, bound: number) =>
+  Math.min(Math.round(bound * MAX_RATIO), Math.max(MIN_SIZE, Math.round(px)));
 
 const DOCK_OPTIONS: { id: DockPosition; label: string; Icon: (p: { size?: number }) => JSX.Element }[] = [
   { id: 'top', label: 'Dock top', Icon: DockTopIcon },
@@ -283,10 +288,10 @@ function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () 
     const shell = panel.current?.parentElement?.getBoundingClientRect();
     if (!shell) return;
     const pos = (vertical ? event.clientX : event.clientY) - grab.current;
-    if (dock === 'bottom') setHeight(clampSize(shell.bottom - pos));
-    else if (dock === 'top') setHeight(clampSize(pos - shell.top));
-    else if (dock === 'left') setWidth(clampSize(pos - shell.left));
-    else setWidth(clampSize(shell.right - pos));
+    if (dock === 'bottom') setHeight(clampSize(shell.bottom - pos, shell.height));
+    else if (dock === 'top') setHeight(clampSize(pos - shell.top, shell.height));
+    else if (dock === 'left') setWidth(clampSize(pos - shell.left, shell.width));
+    else setWidth(clampSize(shell.right - pos, shell.width));
   }
 
   function up(event: React.PointerEvent<HTMLDivElement>) {

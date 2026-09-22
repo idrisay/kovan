@@ -17,9 +17,14 @@ import { useRef } from 'react';
 
 const KEY = 'baton.sidebar-width';
 const MIN = 220;
-const MAX = 620;
+// A fraction of the window, not a fixed number of pixels — a constant picked
+// against one laptop screen is already short of what an external monitor
+// actually has room for. Read live rather than cached, since the window can
+// be resized while the sidebar is not being dragged at all.
+const MAX_RATIO = 0.7;
+const maxWidth = () => Math.round(window.innerWidth * MAX_RATIO);
 
-const clamp = (px: number) => Math.min(MAX, Math.max(MIN, Math.round(px)));
+const clamp = (px: number) => Math.min(maxWidth(), Math.max(MIN, Math.round(px)));
 
 function apply(px: number) {
   document.documentElement.style.setProperty('--queue-w', `${px}px`);
