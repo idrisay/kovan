@@ -339,7 +339,15 @@ export class Agents {
       lines.push(await externalizeImages(subject.issue.description || '(no description)', directory));
       if (subject.issue.comments.length > 0) {
         lines.push('', '## Comments', '');
-        for (const c of subject.issue.comments) {
+        // Same cap as "Earlier runs" below: the last N, not the whole
+        // history — a long-running ticket's early back-and-forth stops being
+        // relevant, but every run against it used to pay to read it again.
+        const recent = subject.issue.comments.slice(-10);
+        const omitted = subject.issue.comments.length - recent.length;
+        if (omitted > 0) {
+          lines.push(`_(${omitted} earlier comment${omitted === 1 ? '' : 's'} omitted)_`, '');
+        }
+        for (const c of recent) {
           lines.push(`**${c.author}** (${c.created})`, '', await externalizeImages(c.body, directory), '');
         }
       }
