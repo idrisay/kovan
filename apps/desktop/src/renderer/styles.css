@@ -596,6 +596,17 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   display: flex; flex-wrap: wrap; gap: 8px;
 }
 .detail-states { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 11.5px; color: var(--meta); }
+/* The ticket a pull request names, or the open pull requests that name a
+   ticket — item 32's two-way link, styled like the subject-open icon it
+   reuses rather than another row of plain text. */
+.detail-related { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+.detail-related-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(217, 119, 87, 0.08); border: 1px solid rgba(217, 119, 87, 0.22);
+  border-radius: 7px; padding: 4px 10px; color: var(--clay);
+  font-family: var(--mono); font-size: 11px;
+}
+.detail-related-link:hover { background: rgba(217, 119, 87, 0.14); color: var(--clay-bright); }
 /* One row: the agent runs, then the escape hatch out to the web. */
 .detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 .run-buttons { display: contents; }

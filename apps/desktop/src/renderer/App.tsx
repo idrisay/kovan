@@ -1130,16 +1130,20 @@ export function App() {
                     viewer={snapshot.viewer}
                     sessions={sessions}
                     activeSession={activeSession}
+                    snapshot={snapshot}
                     onRun={(kind, pull) => setRunSheet({ kind, pull })}
                     onOpenSession={openSession}
+                    onOpenSubject={openSubject}
                   />
                 ) : selected.issue ? (
                   <TicketPane
                     issue={selected.issue}
                     sessions={sessions}
                     activeSession={activeSession}
+                    snapshot={snapshot}
                     onRun={(kind, issue) => setRunSheet({ kind, issue })}
                     onOpenSession={openSession}
+                    onOpenSubject={openSubject}
                   />
                 ) : selected.sentry ? (
                   <SentryPane

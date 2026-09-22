@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ticketKeyInTitle } from '@baton/core';
 import type { JiraIssue, PullSummary, SentryIssue, SessionInfo, Snapshot } from './types';
 import { EditIcon, OpenLinkIcon } from './icons';
 
@@ -29,6 +30,28 @@ export function findSubject(subject: string, snapshot: Snapshot): Selection | un
   if (issue) return { issue };
   const sentry = snapshot.sentryIssues.find((s) => s.shortId === subject);
   return sentry ? { sentry } : undefined;
+}
+
+/**
+ * The open pull requests that carry this ticket's key in their title — the
+ * other direction of the same link `findSubject` follows from a pull
+ * request back to its ticket. Open only: a ticket that shipped already has
+ * its own "merged" line in whatever pull request closed it, and listing
+ * every merged PR that ever mentioned the key would bury the ones that
+ * actually still need attention. Deduplicated, because a pull request that
+ * is both "blocked on you" and "yours" is one row here, not two.
+ */
+export function findRelatedPulls(ticketKey: string, snapshot: Snapshot): PullSummary[] {
+  const open = [...snapshot.blocked, ...snapshot.mine, ...snapshot.reviewRequested];
+  const seen = new Set<string>();
+  const related: PullSummary[] = [];
+  for (const pull of open) {
+    const id = `${pull.repo}#${pull.number}`;
+    if (seen.has(id) || ticketKeyInTitle(pull.title) !== ticketKey) continue;
+    seen.add(id);
+    related.push(pull);
+  }
+  return related;
 }
 
 /**

@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { formatAge, isMerged, pullFlags } from '@baton/core';
+import { formatAge, isMerged, pullFlags, ticketKeyInTitle } from '@baton/core';
 import { States, TONE } from './rows';
 import { Prose } from './Prose';
 import { RunViewer } from './RunViewer';
 import { Terminal } from './Terminal';
 import { useTerminalFontSize } from './terminalFontSize';
+import { findRelatedPulls, findSubject, type Selection } from './sessionSubject';
 import {
-  ChevronIcon, CloseIcon, DockBottomIcon, DockLeftIcon, DockRightIcon, DockTopIcon, HideIcon, TerminalIcon
+  ChevronIcon, CloseIcon, DockBottomIcon, DockLeftIcon, DockRightIcon, DockTopIcon, HideIcon, OpenLinkIcon,
+  TerminalIcon
 } from './icons';
 import type {
   AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, ReviewThread, Reviewer, RunKind, SentryFrame,
-  SentryIssue, SessionInfo
+  SentryIssue, SessionInfo, Snapshot
 } from './types';
 
 /** A stand-in for a real photo: initials on a colour picked from the name
@@ -51,6 +53,23 @@ function StatusPill({ tone, label }: { tone: string; label: string }) {
       <span className={`dot ${tone}`} />
       {label}
     </span>
+  );
+}
+
+/** The pull request(s) or ticket this one names in its own title, the other
+ *  half of the link `SessionName`'s open-link icon already follows from a
+ *  session back to whatever it was started on. */
+function RelatedLinks({ links }: { links: { label: string; onClick: () => void }[] }) {
+  if (links.length === 0) return null;
+  return (
+    <div className="detail-related">
+      {links.map((link, i) => (
+        <button key={i} type="button" className="detail-related-link" onClick={link.onClick}>
+          <OpenLinkIcon size={11} />
+          {link.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -518,15 +537,19 @@ export function PullPane({
   viewer,
   sessions,
   activeSession,
+  snapshot,
   onRun,
-  onOpenSession
+  onOpenSession,
+  onOpenSubject
 }: {
   pull: PullSummary;
   viewer: string;
   sessions: SessionInfo[];
   activeSession?: string;
+  snapshot: Snapshot;
   onRun: (kind: RunKind, pull: PullSummary) => void;
   onOpenSession: (id: string) => void;
+  onOpenSubject: (match: Selection) => void;
 }) {
   const [detail, setDetail] = useState<PullDetail>();
   const [error, setError] = useState('');
@@ -549,7 +572,11 @@ export function PullPane({
   // The same string `Agents.subjectFor()` computes in main, so a session or a
   // past run started from this pull is found under the ticket it carried,
   // not filed separately under the pull request that happened to open it.
-  const subject = pull.title.match(/[A-Z][A-Z0-9]+-\d+/)?.[0] ?? `${pull.repo}#${pull.number}`;
+  const ticketKey = ticketKeyInTitle(pull.title);
+  const subject = ticketKey || `${pull.repo}#${pull.number}`;
+  // The ticket this PR names, if it is one currently on screen — the other
+  // direction of the link a ticket's own "related PRs" row follows.
+  const relatedTicket = ticketKey ? findSubject(ticketKey, snapshot)?.issue : undefined;
 
   // Only the session App.tsx currently has in mind, and only when it is
   // actually this pull's own — otherwise a run started elsewhere would
@@ -595,6 +622,9 @@ export function PullPane({
             </span>
           )}
         </div>
+        <RelatedLinks
+          links={relatedTicket ? [{ label: relatedTicket.key, onClick: () => onOpenSubject({ issue: relatedTicket }) }] : []}
+        />
         <div className="detail-states">
           <States pull={pull} max={6} />
         </div>
@@ -723,14 +753,18 @@ export function TicketPane({
   issue,
   sessions,
   activeSession,
+  snapshot,
   onRun,
-  onOpenSession
+  onOpenSession,
+  onOpenSubject
 }: {
   issue: JiraIssue;
   sessions: SessionInfo[];
   activeSession?: string;
+  snapshot: Snapshot;
   onRun: (kind: RunKind, issue: JiraIssue) => void;
   onOpenSession: (id: string) => void;
+  onOpenSubject: (match: Selection) => void;
 }) {
   // The list `issue` renders immediately — summary, status, subtasks are
   // already in hand. Only the description and comments are re-fetched, the
@@ -758,6 +792,9 @@ export function TicketPane({
   }, [inlineSession?.id]);
 
   const openQuickTerminal = useQuickTerminal(undefined, issue.key, onOpenSession);
+  // The open pull requests that name this ticket — the other direction of
+  // the link a pull request's own header follows back to its ticket.
+  const relatedPulls = findRelatedPulls(issue.key, snapshot);
 
   return (
     <div className="detail-shell">
@@ -776,6 +813,12 @@ export function TicketPane({
           {issue.priority && <span>{issue.priority}</span>}
           <span>{formatAge(issue.updated)}</span>
         </div>
+        <RelatedLinks
+          links={relatedPulls.map((p) => ({
+            label: `${p.repo} #${p.number}`,
+            onClick: () => onOpenSubject({ pull: p })
+          }))}
+        />
         <div className="detail-actions">
           <RunButtons kinds={['implement']} onRun={(kind) => onRun(kind, issue)} />
           <button className="ghost" onClick={openQuickTerminal}>

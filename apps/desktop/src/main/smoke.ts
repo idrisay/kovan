@@ -53,7 +53,9 @@ const OPEN_PULLS = [
   {
     ...FIXTURE,
     number: 118,
-    title: 'Cache the pricing table between requests',
+    // Carries the same ticket key as `TICKET` below on purpose — item 32's
+    // two-way link needs one real match to exercise against.
+    title: 'Cache the pricing table between requests (ACME-2393)',
     repo: 'acme/web',
     author: 'idrisay',
     mergeable: 'mergeable' as const,
@@ -1738,6 +1740,67 @@ export async function smokeUi(
       (await win.webContents.capturePage()).toPNG()
     );
     console.log(`shot: ${process.env['BATON_SHOT_DETAIL']}-expanded.png`);
+  }
+
+  // --- Item 32: ticket <-> pull request cross-links -------------------------
+  if (process.env['BATON_SHOT_RELATED']) {
+    const prefix = process.env['BATON_SHOT_RELATED'];
+    const shot = async (name: string) => {
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+
+    // The ticket side: ACME-2393 should list the one open pull request
+    // whose title names it, and clicking it should land on that PR.
+    await read(win, `document.querySelector('[aria-label="Tickets"]')?.click()`);
+    await until(win, `document.querySelector('.row')`, 5_000);
+    await read(win, `document.querySelector('.row')?.click()`);
+    await until(win, `document.querySelector('.detail-head h2')`, 15_000);
+    const ticketSide = await read(
+      win,
+      `Array.from(document.querySelectorAll('.detail-related-link')).map(b => b.textContent.trim())`
+    );
+    await shot('ticket-side');
+    await read(win, `document.querySelector('.detail-related-link')?.click()`);
+    await new Promise((r) => setTimeout(r, 500));
+    const jumpedFromTicket = await read(
+      win,
+      `({
+        view: document.querySelector('.rail-item[aria-current="page"]')?.getAttribute('aria-label'),
+        heading: document.querySelector('.detail-head h2')?.textContent ?? ''
+      })`
+    );
+    await shot('jumped-from-ticket');
+
+    // The pull request side, from wherever that jump landed: its own
+    // related link should point back at the ticket, and following it should
+    // return to the exact ticket it came from.
+    const pullSide = await read(
+      win,
+      `Array.from(document.querySelectorAll('.detail-related-link')).map(b => b.textContent.trim())`
+    );
+    await read(win, `document.querySelector('.detail-related-link')?.click()`);
+    await new Promise((r) => setTimeout(r, 500));
+    const jumpedBackToTicket = await read(
+      win,
+      `({
+        view: document.querySelector('.rail-item[aria-current="page"]')?.getAttribute('aria-label'),
+        heading: document.querySelector('.detail-head h2')?.textContent ?? ''
+      })`
+    );
+
+    // A pull request with nothing to relate to (no ticket key in its title)
+    // must show no related-links row at all, not an empty one.
+    await read(win, `document.querySelector('[aria-label="Pull requests"]')?.click()`);
+    await until(win, `document.querySelector('.row')`, 5_000);
+    await read(win, `document.querySelector('.row')?.click()`);
+    await until(win, `document.querySelector('.detail-head h2')`, 15_000);
+    const noRelatedWhenNoMatch = await read(win, `!document.querySelector('.detail-related')`);
+
+    console.log(
+      'relatedLinks:',
+      JSON.stringify({ ticketSide, jumpedFromTicket, pullSide, jumpedBackToTicket, noRelatedWhenNoMatch }, null, 2)
+    );
   }
 
   // The screen this runs on tops out around 1500 logical pixels, and the
