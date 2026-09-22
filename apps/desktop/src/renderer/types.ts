@@ -73,6 +73,7 @@ export interface BatonApi {
   refreshProvider(id: PolledProvider): Promise<Snapshot>;
   openExternal(url: string): Promise<void>;
   credentialFields(): Promise<Record<string, { key: string; label: string; placeholder?: string; secret?: boolean }[]>>;
+  missingFields(id: ProviderId): Promise<string[]>;
   settings(): Promise<Record<string, unknown>>;
   setSetting(key: string, value: unknown): Promise<void>;
   setSecret(key: string, value: string): Promise<Snapshot>;
@@ -119,6 +120,7 @@ export interface BatonApi {
   workspaceRename(id: string, name: string): Promise<Workspace | undefined>;
   workspaceStatus(repo: string): Promise<WorkspaceStatus>;
   workspaceDiff(repo: string, file: string, side: DiffSide, from?: string): Promise<FileDiff>;
+  workspaceRevert(repo: string, changes: FileChange[]): Promise<void>;
   workspaceTree(dir: string): Promise<Entry[]>;
   workspaceRead(file: string): Promise<FileBody>;
   workspaceWrite(file: string, text: string, expected?: FileStamp): Promise<WriteResult>;

@@ -263,3 +263,12 @@ export function DockRightIcon({ size = 14 }: Props) {
     </svg>
   );
 }
+
+export function RevertIcon({ size = 13 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M4 9h9.5a5.5 5.5 0 0 1 0 11H8" />
+      <path d="M8 4.2 4 9l4 4.8" />
+    </svg>
+  );
+}

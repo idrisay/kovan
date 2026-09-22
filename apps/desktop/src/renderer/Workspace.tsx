@@ -24,10 +24,11 @@ import { Diff } from './Diff';
 import { Resizer } from './Resizer';
 import {
   AddFolderIcon, ChangesIcon, ChevronIcon, CloseIcon, CollapseIcon, FileIcon,
-  FolderIcon, MoreIcon, RefreshIcon, TerminalIcon
+  FolderIcon, MoreIcon, RefreshIcon, RevertIcon, TerminalIcon
 } from './icons';
 import type {
-  ChangeKind, DiffSide, Entry, FileBody, FileDiff, Root, Workspace, WorkspaceRepo, WorkspaceStatus
+  ChangeKind, DiffSide, Entry, FileBody, FileChange, FileDiff, Root, Workspace, WorkspaceRepo,
+  WorkspaceStatus
 } from './types';
 
 interface Tab {
@@ -294,6 +295,28 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
     [statuses]
   );
 
+  const [reverting, setReverting] = useState(false);
+
+  /**
+   * Rolls back `changes` in `repoPath` — one row, or every row "Revert all"
+   * passes. Closes any open diff tab pointing at what just got discarded (it
+   * would otherwise try to diff a change that no longer exists) and refetches
+   * just that repo's status, rather than waiting for the next scan.
+   */
+  const revert = useCallback(async (repoPath: string, changesToRevert: FileChange[]) => {
+    setReverting(true);
+    try {
+      await window.baton.workspaceRevert(repoPath, changesToRevert);
+      for (const c of changesToRevert) {
+        close(`diff:${c.side}:${repoPath}/${c.path}`);
+      }
+      const fresh = await window.baton.workspaceStatus(repoPath);
+      setStatuses((s) => ({ ...s, [repoPath]: fresh }));
+    } finally {
+      setReverting(false);
+    }
+  }, [close]);
+
   return (
     <>
       <aside className="queue explorer" aria-label="Explorer">
@@ -389,6 +412,8 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
                             repo={repo} status={statuses[repo.path]}
                             selected={tab?.kind === 'diff' ? `${tab.repo}/${tab.path}` : undefined}
                             onOpen={openDiff}
+                            onRevert={(changes) => revert(repo.path, changes)}
+                            busy={reverting}
                           />
                         )
                       )}
@@ -792,16 +817,43 @@ function Tree({
   );
 }
 
+/**
+ * What a revert button — one row's, or "Revert all" — is about to do,
+ * pending the confirmation it always asks for first. A tracked change goes
+ * back to HEAD; an untracked file has no HEAD version to go back to, so it
+ * goes to the OS Trash instead — different enough consequences that the
+ * confirmation names both counts rather than one blended one.
+ */
+interface PendingRevert {
+  key: string;
+  changes: FileChange[];
+  tracked: number;
+  untracked: number;
+}
+
+function describeRevert(changes: FileChange[]): PendingRevert {
+  return {
+    key: '',
+    changes,
+    tracked: changes.filter((c) => c.side !== 'untracked').length,
+    untracked: changes.filter((c) => c.side === 'untracked').length
+  };
+}
+
 /** Staged / Changes / Untracked, the grouping git itself uses. */
 function ChangeList({
-  repo, status, selected, onOpen
+  repo, status, selected, onOpen, onRevert, busy
 }: {
   repo: WorkspaceRepo;
   status?: WorkspaceStatus;
   selected?: string;
   onOpen: (repo: string, file: string, side: DiffSide, from?: string) => void;
+  onRevert: (changes: FileChange[]) => void;
+  busy: boolean;
 }) {
   const [shut, setShut] = useState<Set<string>>(new Set());
+  const [pending, setPending] = useState<PendingRevert>();
+
   if (!status) return <Skeleton rows={2} inline />;
 
   const groups = [
@@ -818,8 +870,37 @@ function ChangeList({
     );
   }
 
+  // Conflicts are not this button's job — resolving a merge is not the same
+  // operation as discarding an edit, and running `git restore` on one would
+  // just pick a side silently.
+  const revertible = groups.flatMap((g) => g.rows).filter((c) => c.kind !== 'conflicted');
+
+  const confirm = (changes: FileChange[], key: string) =>
+    setPending({ ...describeRevert(changes), key });
+
+  const run = () => {
+    if (!pending) return;
+    onRevert(pending.changes);
+    setPending(undefined);
+  };
+
   return (
     <>
+      {revertible.length > 1 && (
+        <div className="change-list-head">
+          <div className="menu-host">
+            <button
+              className="link small" disabled={busy}
+              onClick={() => confirm(revertible, 'all')}
+            >
+              Revert all ({revertible.length})
+            </button>
+            {pending?.key === 'all' && (
+              <RevertConfirm pending={pending} busy={busy} onCancel={() => setPending(undefined)} onConfirm={run} />
+            )}
+          </div>
+        </div>
+      )}
       {groups.map((group) => {
         const open = !shut.has(group.id);
         return (
@@ -840,8 +921,9 @@ function ChangeList({
               <ul className="rows changes">
                 {group.rows.map((change) => {
                   const id = `${repo.path}/${change.path}`;
+                  const rowKey = `${change.side}:${change.path}`;
                   return (
-                    <li key={`${change.side}:${change.path}`}>
+                    <li key={rowKey} className="change-row">
                       <button
                         className={selected === id ? 'change selected' : 'change'}
                         onClick={() => onOpen(repo.path, change.path, change.side, change.from)}
@@ -851,6 +933,29 @@ function ChangeList({
                         <span className="change-name">{baseOf(change.path)}</span>
                         <span className="change-dir"><bdi>{dirOf(change.path)}</bdi></span>
                       </button>
+                      {change.kind !== 'conflicted' && (
+                        <div className="menu-host">
+                          <button
+                            className="icon-button revert"
+                            aria-label={
+                              change.side === 'untracked'
+                                ? `Move ${change.path} to Trash`
+                                : `Discard changes to ${change.path}`
+                            }
+                            title={change.side === 'untracked' ? 'Move to Trash' : 'Discard this change'}
+                            disabled={busy}
+                            onClick={(e) => { e.stopPropagation(); confirm([change], rowKey); }}
+                          >
+                            <RevertIcon />
+                          </button>
+                          {pending?.key === rowKey && (
+                            <RevertConfirm
+                              pending={pending} busy={busy}
+                              onCancel={() => setPending(undefined)} onConfirm={run}
+                            />
+                          )}
+                        </div>
+                      )}
                     </li>
                   );
                 })}
@@ -860,6 +965,48 @@ function ChangeList({
         );
       })}
     </>
+  );
+}
+
+/**
+ * The confirmation every revert button asks before it touches anything.
+ *
+ * Names exactly what is about to happen rather than a generic "are you
+ * sure?" — a discard and a Trash are different enough consequences (one is
+ * always recoverable from git, the other only from the Trash) that lumping
+ * them into one sentence would hide which is which.
+ */
+function RevertConfirm({
+  pending, busy, onCancel, onConfirm
+}: {
+  pending: PendingRevert;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    document.addEventListener('click', onCancel);
+    return () => document.removeEventListener('click', onCancel);
+  }, [onCancel]);
+
+  const parts: string[] = [];
+  if (pending.tracked > 0) {
+    parts.push(`discard ${pending.tracked} change${pending.tracked === 1 ? '' : 's'} back to the last commit`);
+  }
+  if (pending.untracked > 0) {
+    parts.push(`move ${pending.untracked} untracked file${pending.untracked === 1 ? '' : 's'} to the Trash`);
+  }
+
+  return (
+    <div className="menu confirm" role="menu" onClick={(e) => e.stopPropagation()}>
+      <p>{parts.join(' and ')}?</p>
+      <div className="confirm-actions">
+        <button onClick={onCancel}>Cancel</button>
+        <button className="menu-warn" disabled={busy} onClick={onConfirm}>
+          {busy ? 'Working…' : 'Revert'}
+        </button>
+      </div>
+    </div>
   );
 }
 

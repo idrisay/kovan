@@ -79,6 +79,7 @@ export function Settings({
   const [basicAuth, setBasicAuth] = useState(false);
   const [saving, setSaving] = useState('');
   const [active, setActive] = useState('general');
+  const [saveResult, setSaveResult] = useState<Record<string, { ok: boolean; text: string }>>({});
 
   useEffect(() => {
     void window.baton.credentialFields().then(setFields);
@@ -98,6 +99,7 @@ export function Settings({
 
   async function save(list: Field[], section: string) {
     setSaving(section);
+    setSaveResult((r) => ({ ...r, [section]: undefined as unknown as { ok: boolean; text: string } }));
     try {
       for (const field of list) {
         const value = values[field.key] ?? '';
@@ -110,6 +112,29 @@ export function Settings({
           ? window.baton.setSecret(field.key, value)
           : window.baton.setSetting(field.key, value));
       }
+      // A save that only touched non-secret fields (e.g. fixing a typo'd
+      // project slug) never went through `setSecret`, which is the only
+      // path that already re-polls — so ask for a fresh read here too.
+      // Without it, a provider that just became fully configured would sit
+      // showing "not connected" until the next scheduled poll, which is
+      // exactly what looked like "does not return anything".
+      if (section !== 'general' && section !== 'environment') {
+        await window.baton.refresh();
+        const missing = await window.baton.missingFields(section as ProviderId);
+        setSaveResult((r) => ({
+          ...r,
+          [section]: missing.length === 0
+            ? { ok: true, text: 'Saved — connected.' }
+            : { ok: false, text: `Saved, but still missing: ${missing.join(', ')}.` }
+        }));
+      } else {
+        setSaveResult((r) => ({ ...r, [section]: { ok: true, text: 'Saved.' } }));
+      }
+    } catch (err) {
+      setSaveResult((r) => ({
+        ...r,
+        [section]: { ok: false, text: err instanceof Error ? err.message : 'Save failed.' }
+      }));
     } finally {
       setSaving('');
     }
@@ -224,6 +249,11 @@ export function Settings({
                 >
                   {saving === active ? 'Saving…' : `Save ${PROVIDER_LABEL[active] ?? active}`}
                 </button>
+                {saveResult[active] && (
+                  <p className={saveResult[active].ok ? 'settings-note ok' : 'settings-note error'}>
+                    {saveResult[active].text}
+                  </p>
+                )}
               </section>
             )}
 
@@ -256,6 +286,11 @@ export function Settings({
                 >
                   {saving === 'environment' ? 'Saving…' : 'Save environment'}
                 </button>
+                {saveResult['environment'] && (
+                  <p className={saveResult['environment'].ok ? 'settings-note ok' : 'settings-note error'}>
+                    {saveResult['environment'].text}
+                  </p>
+                )}
               </section>
             )}
           </div>

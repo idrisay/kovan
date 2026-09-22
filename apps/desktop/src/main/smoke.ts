@@ -1396,6 +1396,65 @@ export async function smokeUi(
     console.log(`shot: ${process.env['BATON_SHOT_SENTRY_TICKET']}`);
   }
 
+  // Item 18: saving Settings with a required field left blank (here,
+  // Sentry's project slug — exactly the shape of the bug report) must not
+  // fail silently. It should say what is still missing, and once that field
+  // is filled and saved, actually flip to connected without a manual
+  // refresh — `save()` re-polls itself now.
+  await read(win, `document.querySelector('[aria-label="Settings"]')?.click()`);
+  await until(win, `document.querySelector('.settings-nav')`, 5_000);
+  await read(
+    win,
+    `Array.from(document.querySelectorAll('.settings-nav button'))
+      .find(b => b.textContent.includes('Sentry'))?.click()`
+  );
+  await until(win, `document.querySelector('.provider h3')`, 5_000);
+  const setField = (match: string, value: string) => `(() => {
+    const input = Array.from(document.querySelectorAll('.provider label'))
+      .find(l => l.textContent.includes('${match}'))?.querySelector('input');
+    if (!input) return false;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '${value}');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })()`;
+  await read(win, setField('organization slug', 'acme'));
+  await read(win, setField('auth token', 'smoke-test-token'));
+  await read(
+    win,
+    `Array.from(document.querySelectorAll('.provider .primary'))
+      .find(b => b.textContent.includes('Save Sentry'))?.click()`
+  );
+  await until(win, `document.querySelector('.settings-note')`, 10_000);
+  result['sentrySaveMissingField'] = {
+    note: await read(win, `document.querySelector('.settings-note')?.textContent ?? ''`),
+    badge: await read(win, `document.querySelector('.provider h3 .badge')?.textContent ?? ''`)
+  };
+
+  await read(win, setField('project slug', 'web-app'));
+  await read(
+    win,
+    `Array.from(document.querySelectorAll('.provider .primary'))
+      .find(b => b.textContent.includes('Save Sentry'))?.click()`
+  );
+  await until(win, `document.querySelector('.settings-note.ok')`, 10_000);
+  result['sentrySaveConnected'] = {
+    note: await read(win, `document.querySelector('.settings-note')?.textContent ?? ''`),
+    badge: await read(win, `document.querySelector('.provider h3 .badge')?.textContent ?? ''`)
+  };
+
+  if (process.env['BATON_SHOT_SETTINGS_SAVE']) {
+    await new Promise((r) => setTimeout(r, 200));
+    await writeFile(
+      process.env['BATON_SHOT_SETTINGS_SAVE'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_SETTINGS_SAVE']}`);
+  }
+
+  await read(win, `document.querySelector('.sheet-head .ghost')?.click()`);
+  await until(win, `!document.querySelector('.settings-nav')`, 5_000);
+
   // Back to Tickets, so nothing below assumes Sentry is still the active view.
   await read(win, `document.querySelector('.rail-item[aria-label="Tickets"]')?.click()`);
   await until(win, `document.querySelector('.row')`, 10_000);
@@ -1788,6 +1847,16 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
     rows: await read(win, `document.querySelectorAll('.change').length`)
   };
 
+  // Item 17: rolling a change back, one row at a time and "all of them".
+  // Gated on its own explicit opt-in, separate from `BATON_SMOKE=workspace`
+  // itself — this is the one part of the workspace walk that mutates git
+  // state and deletes an untracked file, and `workspace` mode otherwise runs
+  // against whatever real folders happen to be configured. Set this only
+  // against a disposable repo.
+  if (process.env['BATON_SMOKE_REVERT'] === '1') {
+    summary['revert'] = await driveRevert(win);
+  }
+
   if (await click('.change')) {
     await until(win, `document.querySelector('.hunk') || document.querySelector('.diff .quiet')`, 20_000);
     summary['diff'] = await read(
@@ -2084,4 +2153,68 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
   }
 
   return summary;
+}
+
+/**
+ * Item 17, driven for real against whatever repo `driveWorkspace` already
+ * has the Changes tab open on. Only ever invoked behind `BATON_SMOKE_REVERT`
+ * — see the call site.
+ */
+async function driveRevert(win: BrowserWindow): Promise<Record<string, unknown>> {
+  const read_ = <T>(script: string) => read(win, script) as Promise<T>;
+
+  const rowCount = () => read_<number>(`document.querySelectorAll('.change').length`);
+  const confirmText = () => read_<string>(`document.querySelector('.menu.confirm p')?.textContent ?? ''`);
+
+  const before = await rowCount();
+
+  // One row: open its confirm popover, read what it says, cancel it, and
+  // check cancelling really did nothing before trying the real thing.
+  await read(win, `document.querySelector('.change-row .icon-button.revert')?.click()`);
+  await until(win, `document.querySelector('.menu.confirm')`, 5_000);
+  const oneRowConfirmText = await confirmText();
+  if (process.env['BATON_SHOT_REVERT_CONFIRM']) {
+    await new Promise((r) => setTimeout(r, 150));
+    await writeFile(
+      process.env['BATON_SHOT_REVERT_CONFIRM'],
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log(`shot: ${process.env['BATON_SHOT_REVERT_CONFIRM']}`);
+  }
+  await read(win, `document.querySelector('.confirm-actions button:not(.menu-warn)')?.click()`);
+  await new Promise((r) => setTimeout(r, 100));
+  const afterCancel = {
+    popoverGone: !(await read_<boolean>(`Boolean(document.querySelector('.menu.confirm'))`)),
+    rowCount: await rowCount()
+  };
+
+  // Same row, for real this time.
+  await read(win, `document.querySelector('.change-row .icon-button.revert')?.click()`);
+  await until(win, `document.querySelector('.menu.confirm')`, 5_000);
+  await read(win, `document.querySelector('.confirm-actions button.menu-warn')?.click()`);
+  await until(win, `document.querySelectorAll('.change').length === ${before - 1}`, 10_000);
+  const afterOne = await rowCount();
+
+  // Whatever is left, in one shot via "Revert all".
+  const hadRevertAll = await read_<boolean>(`Boolean(document.querySelector('.change-list-head .link'))`);
+  let allConfirmText = '';
+  let afterAll = afterOne;
+  let clean = false;
+  if (hadRevertAll) {
+    await read(win, `document.querySelector('.change-list-head .link')?.click()`);
+    await until(win, `document.querySelector('.menu.confirm')`, 5_000);
+    allConfirmText = await confirmText();
+    await read(win, `document.querySelector('.confirm-actions button.menu-warn')?.click()`);
+    await until(
+      win,
+      `document.querySelector('.tree-note.clean') || document.querySelectorAll('.change').length === 0`,
+      10_000
+    );
+    afterAll = await rowCount();
+    clean = await read_<boolean>(`Boolean(document.querySelector('.tree-note.clean'))`);
+  }
+
+  return {
+    before, oneRowConfirmText, afterCancel, afterOne, hadRevertAll, allConfirmText, afterAll, clean
+  };
 }

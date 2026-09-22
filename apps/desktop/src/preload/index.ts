@@ -15,6 +15,7 @@ const api = {
   refreshProvider: (id: string) => ipcRenderer.invoke('baton:refresh-provider', id),
   openExternal: (url: string) => ipcRenderer.invoke('baton:open-external', url),
   credentialFields: () => ipcRenderer.invoke('baton:credential-fields'),
+  missingFields: (id: string) => ipcRenderer.invoke('baton:missing-fields', id),
   loadMoreMerged: (limit: number) => ipcRenderer.invoke('baton:merged-more', limit),
   settings: () => ipcRenderer.invoke('baton:settings'),
   setSetting: (key: string, value: unknown) => ipcRenderer.invoke('baton:set-setting', key, value),
@@ -63,6 +64,8 @@ const api = {
   workspaceStatus: (repo: string) => ipcRenderer.invoke('baton:workspace-status', repo),
   workspaceDiff: (repo: string, file: string, side: string, from?: string) =>
     ipcRenderer.invoke('baton:workspace-diff', repo, file, side, from),
+  workspaceRevert: (repo: string, changes: unknown[]) =>
+    ipcRenderer.invoke('baton:workspace-revert', repo, changes),
   workspaceTree: (dir: string) => ipcRenderer.invoke('baton:workspace-tree', dir),
   workspaceRead: (file: string) => ipcRenderer.invoke('baton:workspace-read', file),
   workspaceWrite: (file: string, text: string, expected?: unknown) =>

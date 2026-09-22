@@ -175,3 +175,5 @@ export {
   type DiffSide,
   type FileDiff
 } from './diff';
+
+export { revertTracked, type RevertSide } from './revert';

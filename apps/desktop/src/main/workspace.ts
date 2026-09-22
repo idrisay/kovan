@@ -21,7 +21,7 @@
  * outside a folder the user explicitly picked.
  */
 
-import { dialog, type BrowserWindow } from 'electron';
+import { dialog, shell, type BrowserWindow } from 'electron';
 import { readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -31,6 +31,8 @@ import {
   findClones,
   readDiff,
   readStatus,
+  revertTracked,
+  type ChangeKind,
   type Clone,
   type DiffSide,
   type FileDiff,
@@ -302,6 +304,67 @@ export class Workspaces {
       throw new Error('Invalid path');
     }
     return readDiff(resolved, file, side, from);
+  }
+
+  /**
+   * Rolls back one or more changes — one row's worth, or every row the
+   * "Revert all" button in the Changes list passes.
+   *
+   * An untracked path has no git state to restore, so it is deleted here
+   * directly rather than through git — and deleted to the OS Trash, not
+   * `rm`ed outright, on the same principle Baton uses nowhere else yet but
+   * should: a "roll back" button one misclick away from a change list must
+   * stay recoverable, the way discarding a *tracked* edit already is (its
+   * previous state lives in git whether or not this button existed).
+   */
+  async revert(
+    repo: string,
+    changes: readonly { path: string; from?: string; side: DiffSide; kind: ChangeKind }[]
+  ): Promise<void> {
+    const resolved = await this.inside(repo);
+    const staged: string[] = [];
+    const unstaged: string[] = [];
+    const untracked: string[] = [];
+
+    const guard = (file: string) => {
+      if (path.isAbsolute(file) || file.split('/').includes('..')) {
+        throw new Error('Invalid path');
+      }
+    };
+
+    for (const change of changes) {
+      guard(change.path);
+      if (change.side === 'untracked') {
+        untracked.push(change.path);
+        continue;
+      }
+      const bucket = change.side === 'staged' ? staged : unstaged;
+      bucket.push(change.path);
+      // A rename is a delete of `from` plus an add of `path`, both staged as
+      // one record. Restoring `path` alone leaves `from` gone — reverting a
+      // rename has to give back both sides or it is only half undone.
+      if (change.kind === 'renamed' && change.from) {
+        guard(change.from);
+        bucket.push(change.from);
+      }
+    }
+
+    if (staged.length > 0) {
+      await revertTracked(resolved, staged, 'staged');
+    }
+    if (unstaged.length > 0) {
+      await revertTracked(resolved, unstaged, 'unstaged');
+    }
+    for (const file of untracked) {
+      let real: string;
+      try {
+        real = await this.inside(path.join(resolved, file));
+      } catch {
+        // Already gone — nothing to trash.
+        continue;
+      }
+      await shell.trashItem(real);
+    }
   }
 
   // --- Files -----------------------------------------------------------------

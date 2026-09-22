@@ -92,6 +92,26 @@ export class Credentials {
     return ids.filter((_, i) => flags[i]);
   }
 
+  /**
+   * Which field labels still need a value before `provider` would connect —
+   * the detail `isConnected` throws away. Settings calls this right after a
+   * save that didn't result in "connected", so a save that silently left one
+   * required field blank (e.g. Sentry's project slug) says why instead of
+   * just staying quiet.
+   */
+  async missingFields(provider: ProviderId): Promise<string[]> {
+    const missing: string[] = [];
+    for (const field of CREDENTIAL_FIELDS[provider]) {
+      const present = field.secret
+        ? await this.host.secrets.has(field.key)
+        : Boolean(this.host.config.get(field.key, ''));
+      if (!present) {
+        missing.push(field.label);
+      }
+    }
+    return missing;
+  }
+
   dispose(): void {
     this.changed.dispose();
   }

@@ -17,9 +17,11 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHost } from './host';
 import { Poller, type PolledProvider, type Snapshot } from './poller';
+import type { ProviderId } from '@baton/core';
+import type { ChangeKind } from '@baton/git';
 import { BatonTray } from './tray';
 import { Activity } from './notify';
-import { CREDENTIAL_FIELDS, HttpClient, JiraClient, fetchPullDetail } from '@baton/providers';
+import { CREDENTIAL_FIELDS, Credentials, HttpClient, JiraClient, fetchPullDetail } from '@baton/providers';
 import { adoptImportedTokens } from './adopt';
 import {
   smokePty, smokeUi, type SmokeMode, detailFixture, fixtureSnapshot, sentryFramesFixture,
@@ -62,6 +64,7 @@ const sessions = new Sessions();
 const agents = new Agents(host, sessions);
 const workspaces = new Workspaces(host);
 const detailHttp = new HttpClient(host.log);
+const credentials = new Credentials(host);
 
 let window: BrowserWindow | undefined;
 let tray: BatonTray | undefined;
@@ -190,6 +193,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('baton:refresh-provider', (_event, id: PolledProvider) => poller.refreshProvider(id));
   ipcMain.handle('baton:open-external', (_event, url: string) => shell.openExternal(url));
   ipcMain.handle('baton:credential-fields', () => CREDENTIAL_FIELDS);
+  ipcMain.handle('baton:missing-fields', (_event, id: ProviderId) => credentials.missingFields(id));
   ipcMain.handle('baton:settings', () => host.config.all());
   ipcMain.handle('baton:set-setting', async (_event, key: string, value: unknown) => {
     await host.config.set(key, value);
@@ -314,6 +318,14 @@ app.whenReady().then(async () => {
     'baton:workspace-diff',
     (_event, repo: string, file: string, side: string, from?: string) =>
       workspaces.diff(repo, file, side as 'staged' | 'unstaged' | 'untracked', from)
+  );
+  ipcMain.handle(
+    'baton:workspace-revert',
+    (_event, repo: string, changes: { path: string; from?: string; side: string; kind: string }[]) =>
+      workspaces.revert(
+        repo,
+        changes as { path: string; from?: string; side: 'staged' | 'unstaged' | 'untracked'; kind: ChangeKind }[]
+      )
   );
   ipcMain.handle('baton:workspace-tree', (_event, dir: string) => workspaces.tree(dir));
   ipcMain.handle('baton:workspace-read', (_event, file: string) => workspaces.read(file));
