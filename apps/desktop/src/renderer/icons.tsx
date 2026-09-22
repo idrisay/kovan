@@ -291,3 +291,26 @@ export function EditIcon({ size = 13 }: Props) {
     </svg>
   );
 }
+
+/** An arrow breaking out of a box — "open the thing this refers to",
+ *  standing in for a session's identifier once that stopped being a link
+ *  drawn straight into the row's own text. */
+export function OpenLinkIcon({ size = 13 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M10 6H5.8A1.8 1.8 0 0 0 4 7.8v10.4A1.8 1.8 0 0 0 5.8 20h10.4A1.8 1.8 0 0 0 18 18.2V14" />
+      <path d="M14 4h6v6" />
+      <path d="M20 4 11 13" />
+    </svg>
+  );
+}
+
+/** A chevron folding down — "collapse this back", the docked terminal's own
+ *  un-kill way of getting it out of the way. */
+export function HideIcon({ size = 13 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={2} aria-hidden="true">
+      <path d="M6 9.5 12 15l6-5.5" />
+    </svg>
+  );
+}

@@ -7,14 +7,19 @@ import type {
 import { Settings } from './Settings';
 import { levelTone, PullPane, SentryPane, TicketPane } from './Detail';
 import { RunSheet } from './RunSheet';
-import { Terminal } from './Terminal';
 import { GroupHead, PullRow } from './rows';
 import { WorkspaceView } from './Workspace';
 import { Resizer } from './Resizer';
-import { FontSizeControl, useTerminalFontSize } from './terminalFontSize';
+import { useTerminalFontSize } from './terminalFontSize';
+import { type Selection, SessionName } from './sessionSubject';
+import {
+  activateTab, detachSession, focusSession, moveSession, pruneTree, resizeSplit,
+  type DropZone, type PaneTree
+} from './paneTree';
+import { PaneView, type DragHandlers, type DragState } from './PaneView';
 import {
   PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon, SentryIcon,
-  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon, EditIcon
+  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon
 } from './icons';
 
 type ViewId = 'pulls' | 'tickets' | 'sentry' | 'workspace' | 'sessions';
@@ -92,49 +97,6 @@ function storedCollapsed(): Set<string> {
     // preference must never take the sidebar with it.
     return new Set(FOLDED_BY_DEFAULT);
   }
-}
-
-interface Selection { pull?: PullSummary; issue?: JiraIssue; sentry?: SentryIssue }
-
-/**
- * A session's subject (`acme/acme-frontend#2738`, `ACME-2485`) resolved
- * back to whichever already-loaded pull request, ticket or Sentry issue it
- * names — the same string `Agents.subjectFor()` computed when the run
- * started. Only ever looks in the snapshot already on screen: there is no
- * per-subject fetch for a Sentry issue, and a pull or ticket that has since
- * scrolled out of every loaded window (merged and aged out, resolved) simply
- * has nothing to jump to, which is why this returns `undefined` instead of
- * guessing at one.
- */
-function findSubject(subject: string, snapshot: Snapshot): Selection | undefined {
-  const hash = subject.lastIndexOf('#');
-  if (hash > 0) {
-    const repo = subject.slice(0, hash);
-    const number = Number(subject.slice(hash + 1));
-    if (!Number.isFinite(number)) return undefined;
-    const pull = [
-      ...snapshot.blocked, ...snapshot.mine, ...snapshot.reviewRequested, ...snapshot.merged
-    ].find((p) => p.repo === repo && p.number === number);
-    return pull ? { pull } : undefined;
-  }
-  const issue = snapshot.tickets.find((t) => t.key === subject);
-  if (issue) return { issue };
-  const sentry = snapshot.sentryIssues.find((s) => s.shortId === subject);
-  return sentry ? { sentry } : undefined;
-}
-
-/**
- * A session's title is generated as `${kind} · ${subject}` for an agent run
- * and `Terminal — ${subject}` for a quick one — two different separators, so
- * rather than parse either format this just finds where the subject itself
- * sits inside the title it was built from, and splits there. Holds up even if
- * a title is later renamed to something with no subject in it at all.
- */
-function splitTitle(s: SessionInfo): { prefix: string; subject?: string } {
-  if (!s.subject) return { prefix: s.title };
-  const at = s.title.lastIndexOf(s.subject);
-  if (at === -1) return { prefix: s.title };
-  return { prefix: s.title.slice(0, at), subject: s.subject };
 }
 
 interface Group {
@@ -641,7 +603,7 @@ export function App() {
   const [ticketFilters, setTicketFilters] = useState<TicketFilters>(emptyTicketFilters);
   const [ticketSort, setTicketSort] = useState<TicketSort>('updated');
   const [theme, setThemeState] = useState<ThemeChoice>('system');
-  const [fontSize, bumpFontSize] = useTerminalFontSize();
+  const [fontSize] = useTerminalFontSize();
 
   // Seeded once from disk, then applied — and re-applied live if "System" is
   // the choice and the OS itself changes appearance underneath it.
@@ -987,7 +949,7 @@ export function App() {
               sessions={sessions} active={activeSession} onSelect={setActiveSession}
               targets={targets} onOpen={openTerminal}
               snapshot={snapshot} onOpenSubject={openSubject} onRename={renameSession}
-              fontSize={fontSize} onBumpFontSize={bumpFontSize}
+              fontSize={fontSize}
             />
           ) : view === 'workspace' ? (
             <WorkspaceView onTerminal={openTerminal} />
@@ -1260,83 +1222,8 @@ function NewSessionMenu({
   );
 }
 
-/**
- * A session's name, with the identifier it was started on kept clickable
- * inside it. Shared by the sidebar row and the terminal pane's own header, so
- * renaming and jumping to the ticket work the same in both places.
- */
-function SessionName({
-  session, snapshot, onOpenSubject, editing, onEdit, onRename, className
-}: {
-  session: SessionInfo;
-  snapshot: Snapshot;
-  onOpenSubject: (match: Selection) => void;
-  editing: boolean;
-  onEdit: (editing: boolean) => void;
-  onRename: (id: string, title: string) => void;
-  className: string;
-}) {
-  const [draft, setDraft] = useState(session.title);
-  const { prefix, subject } = splitTitle(session);
-  const match = subject ? findSubject(subject, snapshot) : undefined;
-
-  function commit() {
-    onEdit(false);
-    if (draft.trim() && draft.trim() !== session.title) {
-      onRename(session.id, draft.trim());
-    }
-  }
-
-  if (editing) {
-    return (
-      <input
-        className="rename-input"
-        autoFocus
-        value={draft}
-        onClick={(e) => e.stopPropagation()}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          e.stopPropagation();
-          if (e.key === 'Enter') commit();
-          else if (e.key === 'Escape') { setDraft(session.title); onEdit(false); }
-        }}
-      />
-    );
-  }
-
-  return (
-    <>
-      <span className={className}>
-        {prefix}
-        {subject && (match ? (
-          <button
-            type="button"
-            className="subject-link"
-            title={`Open ${subject}`}
-            onClick={(e) => { e.stopPropagation(); onOpenSubject(match); }}
-          >
-            {subject}
-          </button>
-        ) : (
-          <span>{subject}</span>
-        ))}
-      </span>
-      <button
-        type="button"
-        className="icon-button rename"
-        aria-label="Rename session"
-        title="Rename session"
-        onClick={(e) => { e.stopPropagation(); setDraft(session.title); onEdit(true); }}
-      >
-        <EditIcon />
-      </button>
-    </>
-  );
-}
-
 function SessionRow({
-  session, selected, snapshot, onSelect, onOpenSubject, onRename
+  session, selected, snapshot, onSelect, onOpenSubject, onRename, drag
 }: {
   session: SessionInfo;
   selected: boolean;
@@ -1344,19 +1231,22 @@ function SessionRow({
   onSelect: () => void;
   onOpenSubject: (match: Selection) => void;
   onRename: (id: string, title: string) => void;
+  drag: DragHandlers;
 }) {
   const [editing, setEditing] = useState(false);
 
   // A div, not a button: the name inside it carries a link to the ticket and
   // a rename control of its own, and HTML will not nest those in a button —
-  // the parser closes the outer one and the row falls apart.
+  // the parser closes the outer one and the row falls apart. It is also a
+  // drag source — grabbing the row and dragging it onto a pane is how a
+  // session not currently shown anywhere joins the split view.
   return (
     <li>
       <div
         className={selected ? 'row selected' : 'row'}
         role="button"
         tabIndex={0}
-        onClick={() => { if (!editing) onSelect(); }}
+        {...(editing ? {} : drag.handlers(session.id, onSelect))}
         onKeyDown={(e) => {
           if (editing || (e.key !== 'Enter' && e.key !== ' ')) return;
           e.preventDefault();
@@ -1389,7 +1279,7 @@ function SessionRow({
 
 function Sessions({
   sessions, active, onSelect, targets, onOpen, snapshot, onOpenSubject, onRename,
-  fontSize, onBumpFontSize
+  fontSize
 }: {
   sessions: SessionInfo[];
   active?: string;
@@ -1400,12 +1290,133 @@ function Sessions({
   onOpenSubject: (match: Selection) => void;
   onRename: (id: string, title: string) => void;
   fontSize: number;
-  onBumpFontSize: (step: number) => void;
 }) {
-  const [renamingHead, setRenamingHead] = useState(false);
-  // Only ever what is actually still open. Which session that is — including
-  // "none, you just closed it" — is decided in `App`, not defaulted here.
-  const shown = sessions.find((s) => s.id === active);
+  // The tree and which leaf a plain click lands on live in one state object
+  // on purpose: StrictMode invokes a `useState` updater function twice to
+  // catch exactly the bug this avoids — a setter with a side effect (another
+  // setState, or a call out to `onSelect`) hidden inside it, called once but
+  // silently applied twice. Keeping the pane and its focus together means
+  // every updater below just computes a value and returns it; nothing that
+  // touches other state ever runs from inside one.
+  const [pane, setPane] = useState<{ tree?: PaneTree; focusedLeafId?: string }>({});
+  const [dragState, setDragState] = useState<DragState>();
+  const dragRef = useRef<{ sessionId: string; startX: number; startY: number; dragging: boolean } | null>(null);
+
+  // A session opened or focused from anywhere else in the app (a click here,
+  // a run started from a ticket, the dock in Detail.tsx) is reconciled into
+  // the tree as a plain focus — never a split. Only a drag creates one.
+  useEffect(() => {
+    if (!active) return;
+    setPane((current) => {
+      const { tree, leafId } = focusSession(current.tree, active, current.focusedLeafId);
+      return { tree, focusedLeafId: leafId };
+    });
+  }, [active]);
+
+  // A session that closed — anywhere, including from Detail.tsx's own
+  // terminal or a completed run — cannot go on holding a tab, the same
+  // "not just left stale" fix as item 26's placeholder.
+  useEffect(() => {
+    const live = new Set(sessions.map((s) => s.id));
+    setPane((current) => ({ ...current, tree: pruneTree(current.tree, live) }));
+  }, [sessions]);
+
+  const focusTab = useCallback((leafId: string, sessionId: string) => {
+    setPane((current) => (
+      current.tree ? { tree: activateTab(current.tree, leafId, sessionId), focusedLeafId: leafId } : current
+    ));
+    onSelect(sessionId);
+  }, [onSelect]);
+
+  const detachTab = useCallback((sessionId: string) => {
+    setPane((current) => ({ ...current, tree: current.tree ? detachSession(current.tree, sessionId) : current.tree }));
+  }, []);
+
+  const resize = useCallback((splitId: string, index: number, delta: number) => {
+    setPane((current) => (
+      { ...current, tree: current.tree ? resizeSplit(current.tree, splitId, index, delta) : current.tree }
+    ));
+  }, []);
+
+  /**
+   * Every draggable thing in the tab (a sidebar row, a tab in a pane) spreads
+   * `drag.handlers(sessionId, onClick)` onto itself and gets a real drag for
+   * free — pointer capture on that same element, exactly like `Resizer`'s own
+   * down/move/up/cancel, so it keeps receiving events no matter what the
+   * pointer physically crosses over on the way. A move short of a few pixels
+   * never leaves "click" behind; anything past that does, and stays a drag
+   * even if the pointer doubles back over its own starting point.
+   */
+  const drag = useMemo<DragHandlers>(() => ({
+    state: dragState,
+    handlers: (sessionId: string, onClick: () => void) => ({
+      onPointerDown: (event: React.PointerEvent) => {
+        if (event.button !== 0) return;
+        dragRef.current = { sessionId, startX: event.clientX, startY: event.clientY, dragging: false };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      },
+      onPointerMove: (event: React.PointerEvent) => {
+        const state = dragRef.current;
+        if (!state || state.sessionId !== sessionId || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+        const dx = event.clientX - state.startX;
+        const dy = event.clientY - state.startY;
+        if (!state.dragging && Math.hypot(dx, dy) < 4) return;
+        state.dragging = true;
+
+        const el = document.elementFromPoint(event.clientX, event.clientY);
+        const leafEl = (el?.closest('[data-pane-leaf]') ?? null) as HTMLElement | null;
+        let hover: DragState['hover'];
+        if (leafEl) {
+          const rect = leafEl.getBoundingClientRect();
+          // Which fifth of the pane the pointer sits in: a centred box half
+          // the pane's own size is "move here as a tab", and past that,
+          // whichever edge the pointer leans hardest toward wins — the same
+          // biggest-offset-from-centre rule every split-pane UI uses for this.
+          const dxN = (event.clientX - rect.left) / rect.width - 0.5;
+          const dyN = (event.clientY - rect.top) / rect.height - 0.5;
+          const zone: DropZone = Math.max(Math.abs(dxN), Math.abs(dyN)) < 0.25
+            ? 'center'
+            : Math.abs(dxN) > Math.abs(dyN)
+              ? (dxN < 0 ? 'left' : 'right')
+              : (dyN < 0 ? 'top' : 'bottom');
+          hover = { leafId: leafEl.dataset['paneLeaf']!, zone };
+        }
+        setDragState({ sessionId, x: event.clientX, y: event.clientY, hover });
+      },
+      onPointerUp: (event: React.PointerEvent) => {
+        const state = dragRef.current;
+        dragRef.current = null;
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        if (!state || state.sessionId !== sessionId) return;
+        if (!state.dragging) {
+          onClick();
+          setDragState(undefined);
+          return;
+        }
+        // Read from the closure, not from `setDragState`'s own updater: this
+        // handler is rebuilt by the `useMemo` below every time `dragState`
+        // changes, so it already holds whatever the last `onPointerMove` saw
+        // — no need for the callback form, which is exactly the shape
+        // StrictMode's double-invoke is there to catch a side effect hiding in.
+        const hover = dragState?.hover;
+        if (hover) {
+          setPane((current) => (
+            current.tree
+              ? { tree: moveSession(current.tree, sessionId, hover.leafId, hover.zone), focusedLeafId: hover.leafId }
+              : current
+          ));
+          onSelect(sessionId);
+        }
+        setDragState(undefined);
+      },
+      onPointerCancel: () => {
+        dragRef.current = null;
+        setDragState(undefined);
+      }
+    })
+  }), [dragState, onSelect]);
 
   return (
     <>
@@ -1432,6 +1443,7 @@ function Sessions({
                   onSelect={() => onSelect(s.id)}
                   onOpenSubject={onOpenSubject}
                   onRename={onRename}
+                  drag={drag}
                 />
               ))}
             </ul>
@@ -1440,28 +1452,19 @@ function Sessions({
       </aside>
       <Resizer />
       <main className="pane term-pane">
-        {shown ? (
-          <>
-            <div className="term-head">
-              <div className="term-head-name">
-                <span className="term-head-title-row">
-                  <SessionName
-                    session={shown} snapshot={snapshot} onOpenSubject={onOpenSubject}
-                    editing={renamingHead} onEdit={setRenamingHead} onRename={onRename}
-                    className="term-title"
-                  />
-                </span>
-                <span className="term-cwd">{shown.cwd}</span>
-              </div>
-              <div className="term-head-actions">
-                <FontSizeControl size={fontSize} onBump={onBumpFontSize} />
-                <button className="ghost" onClick={() => void window.baton.sessionClose(shown.id)}>
-                  Close
-                </button>
-              </div>
-            </div>
-            <Terminal sessionId={shown.id} fontSize={fontSize} />
-          </>
+        {pane.tree ? (
+          <PaneView
+            tree={pane.tree}
+            sessions={sessions}
+            snapshot={snapshot}
+            fontSize={fontSize}
+            onOpenSubject={onOpenSubject}
+            onRename={onRename}
+            drag={drag}
+            onFocusTab={focusTab}
+            onDetachTab={detachTab}
+            onResize={resize}
+          />
         ) : (
           <div className="term-empty">
             <p className="quiet">

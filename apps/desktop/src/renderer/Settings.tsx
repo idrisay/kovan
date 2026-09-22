@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ProviderId } from '@baton/core';
 import type { ThemeChoice } from './types';
+import { FontSizeControl, useTerminalFontSize } from './terminalFontSize';
 
 interface Field {
   key: string;
@@ -100,6 +101,7 @@ export function Settings({
   const [saving, setSaving] = useState('');
   const [active, setActive] = useState('general');
   const [saveResult, setSaveResult] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const [fontSize, bumpFontSize] = useTerminalFontSize();
 
   useEffect(() => {
     void window.baton.credentialFields().then(setFields);
@@ -227,6 +229,10 @@ export function Settings({
                       </button>
                     ))}
                   </div>
+                </label>
+                <label>
+                  <span>Terminal font size</span>
+                  <FontSizeControl size={fontSize} onBump={bumpFontSize} />
                 </label>
 
                 <h3>General</h3>

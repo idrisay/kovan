@@ -29,31 +29,51 @@ function write(px: number) {
 const clamp = (px: number) => Math.min(MAX, Math.max(MIN, px));
 
 /**
+ * A step taken anywhere in this window (Settings' own stepper, or another
+ * terminal's, since the control now lives in only one place but several
+ * `useTerminalFontSize()` instances are mounted at once — one per docked
+ * terminal, one for the Sessions tab, one for Settings). A plain window
+ * event, not React state lifted somewhere shared: every instance already
+ * needs to react to the *other* cross-window case, Cmd+=/Cmd+- arriving over
+ * IPC from main, so this reuses that same "apply a step" path instead of
+ * adding a second, different way instances stay in sync.
+ */
+const LOCAL_STEP_EVENT = 'baton:terminal-font-local-step';
+
+/**
  * The current terminal font size, plus a stepper. Cmd+=/Cmd+- (intercepted in
  * main — see the note in `main/index.ts` on `before-input-event`, which is
- * what used to just zoom the whole window) drive the exact same state, so
- * every mounted terminal and every open instance of this control move
- * together regardless of which one you used to change it.
+ * what used to just zoom the whole window) and every mounted copy of this
+ * hook's own stepper all drive the exact same state, so every terminal in
+ * the app and Settings' own control move together regardless of which one
+ * you used to change it.
  */
 export function useTerminalFontSize(): [number, (step: number) => void] {
   const [size, setSize] = useState(read);
 
-  useEffect(() => {
-    return window.baton.onFontSizeStep((step) => {
-      setSize((current) => {
-        const next = clamp(current + step);
-        write(next);
-        return next;
-      });
-    });
-  }, []);
-
-  const bump = useCallback((step: number) => {
+  const applyStep = useCallback((step: number) => {
     setSize((current) => {
       const next = clamp(current + step);
       write(next);
       return next;
     });
+  }, []);
+
+  useEffect(() => {
+    const onLocalStep = (event: Event) => applyStep((event as CustomEvent<number>).detail);
+    window.addEventListener(LOCAL_STEP_EVENT, onLocalStep);
+    const offIpc = window.baton.onFontSizeStep(applyStep);
+    return () => {
+      window.removeEventListener(LOCAL_STEP_EVENT, onLocalStep);
+      offIpc();
+    };
+  }, [applyStep]);
+
+  // Dispatched rather than applied directly: the listener above (registered
+  // by every instance, including this one) is the single place a step is
+  // actually applied, so a click here cannot double-apply on top of it.
+  const bump = useCallback((step: number) => {
+    window.dispatchEvent(new CustomEvent(LOCAL_STEP_EVENT, { detail: step }));
   }, []);
 
   return [size, bump];

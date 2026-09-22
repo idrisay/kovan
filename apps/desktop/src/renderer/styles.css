@@ -985,22 +985,103 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 }
 .term-empty .quiet { max-width: 34ch; line-height: 1.6; }
 
-/* The identifier inside a session's name — the ticket or pull request it was
-   started on — kept clickable where it sits, rather than repeated as a chip. */
-.subject-link {
-  background: none; border: 0; padding: 0; margin: 0;
-  font: inherit; color: inherit; text-decoration: underline;
-  text-decoration-color: transparent; text-underline-offset: 2px;
-}
-.subject-link:hover { color: var(--clay-bright); text-decoration-color: currentColor; }
-.subject-link:focus-visible { color: var(--clay-bright); text-decoration-color: currentColor; }
+/* --- The split view: drag a tab onto a pane's edge to split it, onto its
+   centre to move in beside whatever is already there. See `paneTree.ts` for
+   the tree this renders and `PaneView.tsx` for the drag itself. --------- */
 
-/* Renaming: the pencil stays out of the way until the row is under the
-   pointer, the same as the revert control in the Changes list. */
-.icon-button.rename { flex: none; width: 20px; height: 20px; opacity: 0; }
-.row:hover .icon-button.rename,
-.term-head:hover .icon-button.rename,
-.icon-button.rename:focus-visible { opacity: 1; }
+.pane-root { flex: 1; min-width: 0; min-height: 0; display: flex; position: relative; }
+.pane-split { flex: 1; min-width: 0; min-height: 0; display: flex; }
+.pane-split.row { flex-direction: row; }
+.pane-split.column { flex-direction: column; }
+.pane-split-child {
+  min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+}
+/* A static seam between panes — every child but the first in a split, on
+   whichever edge its divider sits. `>` keeps this to the split's own direct
+   children, so a deeply nested pane never picks up a border meant for a
+   split several levels further out. */
+.pane-split.row > .pane-split-child ~ .pane-split-child { border-left: 1px solid var(--hair); }
+.pane-split.column > .pane-split-child ~ .pane-split-child { border-top: 1px solid var(--hair); }
+.pane-leaf {
+  flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  position: relative;
+}
+
+/* The divider between two panes — the same drag-to-resize idea as the
+   sidebar's own `.resizer` and the docked terminal's `.terminal-resizer`,
+   just one of possibly several in a row instead of exactly one. */
+.pane-divider {
+  flex: none; position: relative; z-index: 6;
+  background: none; border: 0; padding: 0; touch-action: none;
+}
+.pane-divider.vertical { width: 8px; margin: 0 -4px; cursor: col-resize; }
+.pane-divider.horizontal { height: 8px; margin: -4px 0; cursor: row-resize; }
+.pane-divider::after { content: ''; position: absolute; inset: 0 3px; background: transparent; transition: background 120ms ease; }
+.pane-divider.horizontal::after { inset: 3px 0; }
+.pane-divider:hover::after, .pane-divider.dragging::after { background: rgba(217, 119, 87, 0.35); }
+
+/* A pane's own tab strip — only once it actually holds more than one
+   session; a lone tab looks exactly like the old single-pane view. */
+.pane-tabs {
+  display: flex; align-items: stretch; flex: none; overflow-x: auto;
+  background: var(--rail); border-bottom: 1px solid var(--hair);
+}
+.pane-tab {
+  display: flex; align-items: center; gap: 6px; flex: none; max-width: 220px;
+  padding: 6px 8px 6px 10px; cursor: pointer;
+  border-bottom: 2px solid transparent; color: var(--muted);
+}
+.pane-tab:hover { color: var(--secondary); background: rgba(255, 255, 255, 0.03); }
+.pane-tab.active { color: var(--prose); border-bottom-color: var(--clay); background: var(--editor); }
+.pane-tab-title {
+  font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pane-tab-close {
+  flex: none; width: 16px; height: 16px; display: grid; place-items: center;
+  background: none; border: 0; border-radius: 4px; color: var(--dim); opacity: 0;
+}
+.pane-tab:hover .pane-tab-close, .pane-tab-close:focus-visible { opacity: 1; }
+.pane-tab-close:hover { color: var(--blocked-bright); background: rgba(196, 99, 90, 0.14); }
+
+/* The five-zone drop overlay: a centred box is "move here as a tab", the
+   strip beyond it on whichever edge is nearest is "split this way". */
+.pane-drop {
+  position: absolute; inset: 0; z-index: 5; pointer-events: none;
+  background: rgba(217, 119, 87, 0.06);
+}
+.pane-drop-target {
+  position: absolute; background: rgba(217, 119, 87, 0.32);
+  border: 1.5px solid rgba(217, 119, 87, 0.7); border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; color: #fff7f2; letter-spacing: 0.01em;
+}
+.pane-drop.zone-center .pane-drop-target { inset: 14%; }
+.pane-drop.zone-top .pane-drop-target { inset: 4px 4px auto 4px; height: 35%; }
+.pane-drop.zone-bottom .pane-drop-target { inset: auto 4px 4px 4px; height: 35%; }
+.pane-drop.zone-left .pane-drop-target { inset: 4px auto 4px 4px; width: 35%; }
+.pane-drop.zone-right .pane-drop-target { inset: 4px 4px 4px auto; width: 35%; }
+
+/* The floating label that follows the pointer while something is being
+   dragged — never itself a drop target, so it cannot shadow the pane
+   underneath it during `elementFromPoint` hit-testing. */
+.pane-drag-ghost {
+  position: fixed; z-index: 50; pointer-events: none;
+  transform: translate(14px, 14px);
+  padding: 4px 10px; border-radius: 7px;
+  background: var(--card, #22242a); color: var(--title);
+  border: 1px solid var(--hair-strong);
+  font-size: 11.5px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Renaming and "open the ticket/PR this session names": both stay out of
+   the way until the row is under the pointer, the same as the revert
+   control in the Changes list — text stays text, these are the affordances. */
+.icon-button.rename, .icon-button.open-link { flex: none; width: 20px; height: 20px; opacity: 0; }
+.row:hover .icon-button.rename, .row:hover .icon-button.open-link,
+.term-head:hover .icon-button.rename, .term-head:hover .icon-button.open-link,
+.icon-button.rename:focus-visible, .icon-button.open-link:focus-visible { opacity: 1; }
+.icon-button.open-link:hover { color: var(--clay-bright); }
 .rename-input {
   flex: 1; min-width: 0;
   padding: 1px 6px; border-radius: 6px;
@@ -1015,6 +1096,8 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   padding-right: 4px; margin-right: 2px;
   border-right: 1px solid var(--hair);
 }
+/* Standalone in Settings, not sitting beside another term-head button. */
+.settings-body .font-size-control { border-right: 0; padding-right: 0; margin-right: 0; }
 .font-size-control .icon-button { width: 20px; height: 20px; }
 .font-size-control .icon-button:disabled { opacity: 0.35; cursor: default; }
 .font-size-value {

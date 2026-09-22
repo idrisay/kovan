@@ -1063,23 +1063,32 @@ export async function smokeUi(
         headTitle: document.querySelector('.term-title')?.textContent ?? '',
         cwdShown: Boolean(document.querySelector('.term-cwd')?.textContent),
         renameOffered: Boolean(document.querySelector('.row .icon-button.rename')),
-        subjectLinks: document.querySelectorAll('.queue-list .subject-link').length,
-        linkTexts: Array.from(document.querySelectorAll('.queue-list .subject-link')).map(b => b.textContent)
+        openLinkIcons: document.querySelectorAll('.queue-list .icon-button.open-link').length,
+        noInlineTextLinks: !document.querySelector('.queue-list .subject-link'),
+        noInlineStepperInTermHead: !document.querySelector('.term-head .font-size-control'),
+        closeIsIconOnly: (() => {
+          const b = Array.from(document.querySelectorAll('.term-head-actions button'))
+            .find(x => x.getAttribute('aria-label') === 'Close session');
+          return b ? { hasSvg: Boolean(b.querySelector('svg')), text: b.textContent.trim() } : null;
+        })()
       }))()`
     );
 
-    // Item 25: the stepper, and the same state the ⌘+/⌘− accelerator drives.
-    const fontBefore = await read(win, `document.querySelector('.xterm')?.style.fontSize
-      || getComputedStyle(document.querySelector('.xterm-rows')).fontSize`);
-    await read(win, `document.querySelector('[aria-label="Larger text"]')?.click()`);
+    // Item 29: the stepper lives in Settings now, not the terminal header.
+    await read(win, `document.querySelector('[aria-label="Settings"]')?.click()`);
+    await until(win, `document.querySelector('.settings')`, 5_000);
+    const fontBefore = await read(win, `getComputedStyle(document.querySelector('.xterm-rows')).fontSize`);
+    await read(win, `document.querySelector('.settings [aria-label="Larger text"]')?.click()`);
     await new Promise((r) => setTimeout(r, 400));
     const font = {
       before: fontBefore,
       after: await read(win, `getComputedStyle(document.querySelector('.xterm-rows')).fontSize`),
-      shown: await read(win, `document.querySelector('.font-size-value')?.textContent`),
+      shown: await read(win, `document.querySelector('.settings .font-size-value')?.textContent`),
       stored: await read(win, `localStorage.getItem('baton.terminal-font-size')`)
     };
     await shot('font');
+    await read(win, `document.querySelector('.sheet-head .ghost')?.click()`);
+    await new Promise((r) => setTimeout(r, 200));
 
     // ...and the same state from the keyboard. ⌘+ is intercepted in main so
     // it sizes the terminal instead of zooming the whole page, which is what
@@ -1098,8 +1107,8 @@ export async function smokeUi(
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode: '=', modifiers: ['meta'] });
     await new Promise((r) => setTimeout(r, 500));
     const shortcut = {
-      shown: await read(win, `document.querySelector('.font-size-value')?.textContent`),
       rendered: await read(win, `getComputedStyle(document.querySelector('.xterm-rows')).fontSize`),
+      stored: await read(win, `localStorage.getItem('baton.terminal-font-size')`),
       pageZoom: win.webContents.getZoomLevel(),
       stepsSeenByRenderer: await read(win, `window.__steps`)
     };
@@ -1153,13 +1162,26 @@ export async function smokeUi(
       `(() => ({
         rowTitle: document.querySelector('.row-title')?.textContent ?? '',
         headTitle: document.querySelector('.term-title')?.textContent ?? '',
-        subjectStillLinked: Boolean(document.querySelector('.row-title .subject-link'))
+        subjectStillHasOpenIcon: Boolean(document.querySelector('.row-title')?.parentElement?.querySelector('.icon-button.open-link'))
       }))()`
     );
     await shot('renamed');
 
+    // Visual check for item 30: the open-link and rename icons, forced
+    // visible for the screenshot — real `:hover` is OS pointer state, which
+    // a dispatched DOM event cannot fake, so this checks the same opacity a
+    // real hover would set rather than trying to simulate the hover itself.
+    await read(
+      win,
+      `document.querySelectorAll('.row .icon-button.rename, .row .icon-button.open-link')
+        .forEach(b => { b.style.opacity = '1'; })`
+    );
+    await new Promise((r) => setTimeout(r, 100));
+    await shot('hover-icons');
+
     // Item 22: the identifier in the name goes to the thing it names — the
-    // ticket for a ticket, the pull request for a pull request.
+    // ticket for a ticket, the pull request for a pull request. Item 30:
+    // that's an icon now, not a link drawn into the text itself.
     const where = () =>
       read(
         win,
@@ -1169,26 +1191,23 @@ export async function smokeUi(
           key: document.querySelector('.detail-meta .key')?.textContent ?? ''
         }))()`
       );
-    await read(win, `document.querySelectorAll('.queue-list .subject-link')[0]?.click()`);
+    await read(win, `document.querySelectorAll('.queue-list .icon-button.open-link')[0]?.click()`);
     await new Promise((r) => setTimeout(r, 600));
     const jumpedToTicket = await where();
     await shot('jumped');
 
     await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
-    await until(win, `document.querySelector('.queue-list .subject-link')`, 5_000);
-    await read(win, `document.querySelectorAll('.queue-list .subject-link')[1]?.click()`);
+    await until(win, `document.querySelector('.queue-list .icon-button.open-link')`, 5_000);
+    await read(win, `document.querySelectorAll('.queue-list .icon-button.open-link')[1]?.click()`);
     await new Promise((r) => setTimeout(r, 600));
     const jumpedToPull = await where();
 
     // Item 26: closing what you were watching leaves a way forward, not a
     // terminal pointed at a session the main process has already forgotten.
+    // Item 30: "Close" is an icon-only button now.
     await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
-    await until(win, `document.querySelector('.term-head .ghost')`, 5_000);
-    await read(
-      win,
-      `Array.from(document.querySelectorAll('.term-head .ghost'))
-        .find(b => b.textContent.includes('Close'))?.click()`
-    );
+    await until(win, `document.querySelector('.term-head [aria-label="Close session"]')`, 5_000);
+    await read(win, `document.querySelector('.term-head [aria-label="Close session"]')?.click()`);
     await new Promise((r) => setTimeout(r, 700));
     const closed = await read(
       win,
@@ -1210,6 +1229,166 @@ export async function smokeUi(
       'sessionsTab:',
       JSON.stringify({ named, font, shortcut, bell, renamed, jumpedToTicket, jumpedToPull, closed }, null, 2)
     );
+  }
+
+  // --- Item 20: dragging sessions into a split view ------------------------
+  // A real mouse drag through the debugger protocol — dispatched DOM events
+  // cannot grant pointer capture to themselves, which the whole interaction
+  // depends on — from a sidebar row onto the edge of a pane, then a second
+  // drag onto an existing pane's centre to merge as a tab, then a resize and
+  // a detach. Each step is checked against the actual tree it produced, not
+  // just a screenshot.
+  if (process.env['BATON_SHOT_SPLIT']) {
+    const prefix = process.env['BATON_SHOT_SPLIT'];
+    const shot = async (name: string) => {
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+    const cwd = JSON.stringify(process.cwd());
+    await read(win, `window.baton.openTerminal(${cwd}, 'ACME-2393', 'implement · ACME-2393')`);
+    await read(win, `window.baton.openTerminal(${cwd}, 'acme/web#42', 'review · acme/web#42')`);
+    await read(win, `window.baton.openTerminal(${cwd}, 'ACME-1000', 'unblock · ACME-1000')`);
+    await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+    await until(win, `document.querySelectorAll('.queue-list .row').length >= 3`, 5_000);
+    await new Promise((r) => setTimeout(r, 500));
+
+    let attached = false;
+    try { win.webContents.debugger.attach('1.3'); attached = true; } catch { /* already attached */ }
+    const mouse = (type: string, x: number, y: number, buttons: number) =>
+      win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+        type, x, y, button: 'left', buttons, clickCount: 1, pointerType: 'mouse'
+      });
+    const dragTo = async (fromSel: string, toX: number, toY: number, steps = 8) => {
+      const from = (await read(
+        win, `(() => { const r = document.querySelector(${JSON.stringify(fromSel)})?.getBoundingClientRect();
+          return r ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null; })()`
+      )) as { x: number; y: number } | null;
+      if (!from) return false;
+      await mouse('mousePressed', from.x, from.y, 1);
+      for (let i = 1; i <= steps; i += 1) {
+        const x = Math.round(from.x + (toX - from.x) * (i / steps));
+        const y = Math.round(from.y + (toY - from.y) * (i / steps));
+        await mouse('mouseMoved', x, y, 1);
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      await new Promise((r) => setTimeout(r, 100));
+      await mouse('mouseReleased', toX, toY, 0);
+      return true;
+    };
+
+    const paneState = () =>
+      read(
+        win,
+        `(() => ({
+          leaves: document.querySelectorAll('.pane-leaf').length,
+          splits: Array.from(document.querySelectorAll('.pane-split')).map(s => s.classList.contains('row') ? 'row' : 'column'),
+          tabs: Array.from(document.querySelectorAll('.pane-tab-title')).map(t => t.textContent)
+        }))()`
+      );
+
+    const before = attached ? await paneState() : null;
+
+    // Drag the second row onto the right edge of the pane already showing
+    // the first session — should split into two side-by-side panes.
+    const laneRect = (await read(
+      win, `(() => { const r = document.querySelector('.term-pane')?.getBoundingClientRect();
+        return r ? { right: Math.round(r.right - 20), midY: Math.round(r.top + r.height / 2) } : null; })()`
+    )) as { right: number; midY: number } | null;
+    let splitOk = false;
+    if (attached && laneRect) {
+      splitOk = await dragTo('.queue-list li:nth-child(2) .row', laneRect.right, laneRect.midY);
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    const afterSplit = attached ? await paneState() : null;
+    await shot('split');
+
+    // Drag the third session onto the centre of the pane that split created
+    // — should join it as a second tab there, not a third split. Picked by
+    // name (ACME-1000), not by sidebar position: the sidebar always lists
+    // every session regardless of which pane currently shows it, and two
+    // sessions opened close enough together can tie on `startedAt`, which
+    // makes row *position* an unreliable way to name "the untouched one".
+    let mergeOk = false;
+    if (attached) {
+      const rightPane = (await read(
+        win, `(() => { const panes = document.querySelectorAll('.pane-leaf'); const r = panes[panes.length - 1]?.getBoundingClientRect();
+          return r ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null; })()`
+      )) as { x: number; y: number } | null;
+      if (rightPane) {
+        const thirdRow = (await read(
+          win,
+          `(() => {
+            const row = Array.from(document.querySelectorAll('.queue-list .row'))
+              .find(r => r.querySelector('.row-title')?.textContent?.includes('ACME-1000'));
+            const r = row?.getBoundingClientRect();
+            return r ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null;
+          })()`
+        )) as { x: number; y: number } | null;
+        if (thirdRow) {
+          await mouse('mousePressed', thirdRow.x, thirdRow.y, 1);
+          for (let i = 1; i <= 8; i += 1) {
+            const x = Math.round(thirdRow.x + (rightPane.x - thirdRow.x) * (i / 8));
+            const y = Math.round(thirdRow.y + (rightPane.y - thirdRow.y) * (i / 8));
+            await mouse('mouseMoved', x, y, 1);
+            await new Promise((r) => setTimeout(r, 20));
+          }
+          await new Promise((r) => setTimeout(r, 100));
+          await mouse('mouseReleased', rightPane.x, rightPane.y, 0);
+          mergeOk = true;
+        }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    }
+    const afterMerge = attached ? await paneState() : null;
+    await shot('merged');
+
+    // Resize the divider between the two panes.
+    let widthBefore: unknown, widthAfterResize: unknown;
+    if (attached) {
+      widthBefore = await read(win, `document.querySelector('.pane-split-child')?.getBoundingClientRect().width`);
+      const handle = (await read(
+        win, `(() => { const r = document.querySelector('.pane-divider')?.getBoundingClientRect();
+          return r ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null; })()`
+      )) as { x: number; y: number } | null;
+      if (handle) {
+        await mouse('mousePressed', handle.x, handle.y, 1);
+        for (const dx of [40, 90]) {
+          await mouse('mouseMoved', handle.x + dx, handle.y, 1);
+          await new Promise((r) => setTimeout(r, 30));
+        }
+        await mouse('mouseReleased', handle.x + 90, handle.y, 0);
+      }
+      widthAfterResize = await read(win, `document.querySelector('.pane-split-child')?.getBoundingClientRect().width`);
+    }
+    await shot('resized');
+
+    // Detach the merged-in tab: the pane should drop back to one tab (no
+    // strip), and the session itself stays running — still in the sidebar.
+    let detached: unknown;
+    if (attached) {
+      await read(win, `document.querySelector('.pane-tab:not(.active) .pane-tab-close')?.click()`);
+      await new Promise((r) => setTimeout(r, 300));
+      detached = {
+        pane: await paneState(),
+        rowsStillListed: await read(win, `document.querySelectorAll('.queue-list .row').length`)
+      };
+    }
+    await shot('detached');
+
+    if (attached) {
+      try { win.webContents.debugger.detach(); } catch { /* already gone */ }
+    }
+
+    console.log(
+      'splitView:',
+      JSON.stringify({
+        attached, before, splitOk, afterSplit, mergeOk, afterMerge,
+        widthBefore, widthAfterResize, detached
+      }, null, 2)
+    );
+
+    await read(win, `document.querySelector('[aria-label="Pull requests"]')?.click()`);
+    await new Promise((r) => setTimeout(r, 300));
   }
 
   const result: Record<string, unknown> = {
