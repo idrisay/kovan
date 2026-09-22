@@ -32,6 +32,7 @@ import {
   type RunKind
 } from '@baton/agent';
 import { EventEmitter } from '@baton/host';
+import { scanForBell } from './bell';
 
 export interface SessionInfo {
   id: string;
@@ -45,10 +46,20 @@ export interface SessionInfo {
   exitCode?: number;
   /** The run folder, when this session was started from a Run button. */
   runDirectory?: string;
+  /**
+   * Set the moment the pty rings the terminal bell (`\x07`) — the same signal
+   * a CLI agent (Claude Code, Codex, opencode) sends when a turn finishes and
+   * it is sitting idle on your reply, and the same one iTerm/tmux already
+   * color a tab for. Cleared the moment you write back to the session, since
+   * that is the actual "I saw it" signal, not a timer.
+   */
+  attention: boolean;
 }
 
 interface Session extends SessionInfo {
   pty: IPty;
+  /** Carried between chunks: an OSC string can straddle two of them. */
+  inOsc: boolean;
   /**
    * Everything written so far, so a reopened window can redraw a session it
    * was not present for. Capped — an agent that prints a megabyte of diff must
@@ -124,13 +135,23 @@ export class Sessions {
       runDirectory: options.runDirectory,
       startedAt: Date.now(),
       running: true,
+      attention: false,
       pty,
+      inOsc: false,
       buffer: ''
     };
     this.sessions.set(id, session);
 
     pty.onData((data) => {
       session.buffer = (session.buffer + data).slice(-BUFFER_LIMIT);
+      const scan = scanForBell(data, session.inOsc);
+      session.inOsc = scan.inOsc;
+      // Only worth a `changed` broadcast on the transition — the list would
+      // otherwise republish on every single chunk a busy agent prints.
+      if (scan.bell && !session.attention) {
+        session.attention = true;
+        this.changed.fire(this.list());
+      }
       this.output.fire({ id, data });
     });
 
@@ -211,7 +232,26 @@ export class Sessions {
   }
 
   write(id: string, data: string): void {
-    this.sessions.get(id)?.pty.write(data);
+    const session = this.sessions.get(id);
+    if (!session) return;
+    // Typing back is the actual "I saw it" — clearer than a timer, and it is
+    // the one action every one of these CLIs requires before it does anything
+    // else, so it can never miss a real reply.
+    if (session.attention) {
+      session.attention = false;
+      this.changed.fire(this.list());
+    }
+    session.pty.write(data);
+  }
+
+  /** A session's title is just a label once set — renaming never touches
+   *  `subject`, which is what the row's own click-to-navigate goes by. */
+  rename(id: string, title: string): void {
+    const session = this.sessions.get(id);
+    const trimmed = title.trim();
+    if (!session || !trimmed || trimmed === session.title) return;
+    session.title = trimmed;
+    this.changed.fire(this.list());
   }
 
   resize(id: string, cols: number, rows: number): void {
@@ -249,8 +289,9 @@ export class Sessions {
 }
 
 function strip(session: Session): SessionInfo {
-  const { pty, buffer, ...info } = session;
+  const { pty, buffer, inOsc, ...info } = session;
   void pty;
   void buffer;
+  void inOsc;
   return info;
 }

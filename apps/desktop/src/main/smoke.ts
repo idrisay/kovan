@@ -451,11 +451,33 @@ export async function smokePty(
   });
   await new Promise((r) => setTimeout(r, 4500));
 
+  // Item 23: a CLI agent that finishes its turn and sits waiting on you rings
+  // the terminal bell, which is the one signal every one of them shares. Rung
+  // through a real pty here rather than asserted against a fake chunk, since
+  // the whole question is whether it survives the pty at all.
+  sessions.write(session.id, "printf '\\a'\r");
+  await new Promise((r) => setTimeout(r, 1500));
+  const rang = sessions.list().find((s) => s.id === session.id)?.attention;
+  // ...and typing back is what says you saw it.
+  sessions.write(session.id, '\r');
+  await new Promise((r) => setTimeout(r, 500));
+  const afterReply = sessions.list().find((s) => s.id === session.id)?.attention;
+
+  // Item 27: renaming is a label change and nothing else — `subject`, which
+  // the row's click-through to a ticket goes by, must survive it.
+  const subjectBefore = sessions.list().find((s) => s.id === lineSession.id)?.subject;
+  sessions.rename(lineSession.id, 'renamed by smoke');
+  const renamed = sessions.list().find((s) => s.id === lineSession.id);
+
   const prompt = agents.buildPrompt('unblock', { pull: FIXTURE });
   return {
     ptyOpened: Boolean(session.id),
     sawEcho: seen.includes('BATON_PTY_OK-42'),
     lineWasRun: seenFromLine.includes('BATON_LINE_OK-12'),
+    bellSetsAttention: rang === true,
+    replyClearsAttention: afterReply === false,
+    renameSticks: renamed?.title === 'renamed by smoke',
+    renameKeptSubject: renamed?.subject === subjectBefore,
     running: sessions.list()[0]?.running,
     bufferBytes: sessions.buffer(session.id).length,
     runnersFound: runners.length,
@@ -604,6 +626,30 @@ export async function smokeUi(
       (await win.webContents.capturePage()).toPNG()
     );
     console.log(`shot: ${process.env['BATON_SHOT_RUN_BUTTONS']}`);
+
+    // Item 28: the same buttons in light mode, where the outline one used to
+    // inherit the solid button's near-white label and come out empty.
+    await read(win, `window.baton.setSetting('appearance.theme', 'light')`);
+    await read(win, `document.documentElement.dataset.theme = 'light'`);
+    await new Promise((r) => setTimeout(r, 250));
+    const outlineInLight = await read(
+      win,
+      `(() => {
+        const b = document.querySelector('.detail-actions .primary.outline');
+        if (!b) return null;
+        const style = getComputedStyle(b);
+        const pane = getComputedStyle(document.querySelector('.detail'));
+        return { label: b.textContent, color: style.color, background: pane.backgroundColor };
+      })()`
+    );
+    await writeFile(
+      `${process.env['BATON_SHOT_RUN_BUTTONS']}`.replace(/\.png$/, '-light.png'),
+      (await win.webContents.capturePage()).toPNG()
+    );
+    console.log('runButtonsLight:', JSON.stringify(outlineInLight));
+    await read(win, `window.baton.setSetting('appearance.theme', 'dark')`);
+    await read(win, `document.documentElement.dataset.theme = 'dark'`);
+    await new Promise((r) => setTimeout(r, 200));
   }
 
   // --- The run sheet's model field, and remembering the last one picked -----
@@ -983,6 +1029,186 @@ export async function smokeUi(
         storedDock: await read(win, `localStorage.getItem('baton.terminal-dock')`),
         storedWidth: await read(win, `localStorage.getItem('baton.terminal-width')`)
       })
+    );
+  }
+
+  // --- The Sessions tab: items 22-27 ---------------------------------------
+  // One session, driven through every one of them in order: the identifier in
+  // its name is a way back to the ticket (22), its name is on the pane at all
+  // (24), the font size is settable from the UI (25), renaming sticks (27),
+  // and closing it leaves an instruction rather than a dead terminal (26).
+  if (process.env['BATON_SHOT_SESSIONS']) {
+    const prefix = process.env['BATON_SHOT_SESSIONS'];
+    const shot = async (name: string) => {
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+
+    // An explicit cwd, since a smoke run's own user data has no watched
+    // folders to fall back on. Two sessions, on a fixture ticket and a
+    // fixture pull request, so the identifier in each name has something real
+    // to resolve back to — one of each kind the row can jump to.
+    const cwd = JSON.stringify(process.cwd());
+    await read(win, `window.baton.openTerminal(${cwd}, 'acme/web#42', 'review · acme/web#42')`);
+    await read(win, `window.baton.openTerminal(${cwd}, 'ACME-2393', 'implement · ACME-2393')`);
+    await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+    await until(win, `document.querySelector('.term-pane .term')`, 10_000);
+    await new Promise((r) => setTimeout(r, 800));
+    await shot('open');
+
+    const named = await read(
+      win,
+      `(() => ({
+        rowTitle: document.querySelector('.row-title')?.textContent ?? '',
+        headTitle: document.querySelector('.term-title')?.textContent ?? '',
+        cwdShown: Boolean(document.querySelector('.term-cwd')?.textContent),
+        renameOffered: Boolean(document.querySelector('.row .icon-button.rename')),
+        subjectLinks: document.querySelectorAll('.queue-list .subject-link').length,
+        linkTexts: Array.from(document.querySelectorAll('.queue-list .subject-link')).map(b => b.textContent)
+      }))()`
+    );
+
+    // Item 25: the stepper, and the same state the ⌘+/⌘− accelerator drives.
+    const fontBefore = await read(win, `document.querySelector('.xterm')?.style.fontSize
+      || getComputedStyle(document.querySelector('.xterm-rows')).fontSize`);
+    await read(win, `document.querySelector('[aria-label="Larger text"]')?.click()`);
+    await new Promise((r) => setTimeout(r, 400));
+    const font = {
+      before: fontBefore,
+      after: await read(win, `getComputedStyle(document.querySelector('.xterm-rows')).fontSize`),
+      shown: await read(win, `document.querySelector('.font-size-value')?.textContent`),
+      stored: await read(win, `localStorage.getItem('baton.terminal-font-size')`)
+    };
+    await shot('font');
+
+    // ...and the same state from the keyboard. ⌘+ is intercepted in main so
+    // it sizes the terminal instead of zooming the whole page, which is what
+    // Electron's own default menu did with it — so check both halves: the
+    // font moved, and the page zoom did not.
+    await read(
+      win,
+      `(() => { window.__steps = []; window.baton.onFontSizeStep(step => window.__steps.push(step)); })()`
+    );
+    // `sendInputEvent`, not the debugger protocol: CDP injects straight into
+    // the renderer and never passes the browser-side input pipeline, which is
+    // exactly where `before-input-event` — the hook this shortcut hangs on —
+    // sits. Checked, not assumed: through CDP the handler never fired at all.
+    win.webContents.focus();
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: '=', modifiers: ['meta'] });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: '=', modifiers: ['meta'] });
+    await new Promise((r) => setTimeout(r, 500));
+    const shortcut = {
+      shown: await read(win, `document.querySelector('.font-size-value')?.textContent`),
+      rendered: await read(win, `getComputedStyle(document.querySelector('.xterm-rows')).fontSize`),
+      pageZoom: win.webContents.getZoomLevel(),
+      stepsSeenByRenderer: await read(win, `window.__steps`)
+    };
+
+    // Item 23: ring the bell in one session and its row must stop looking like
+    // every other running one. Rung through the real pty, since that is the
+    // path the signal actually travels. `tput bel` rather than `printf`, so
+    // the injected line carries no backslash for two layers of escaping to
+    // argue over — one round of that already produced a raw carriage return
+    // inside a string literal.
+    const openSessions = (await read(win, `window.baton.sessions()`)) as
+      { id: string; subject?: string }[];
+    const ticketSession = openSessions.find((s) => s.subject === 'ACME-2393');
+    await read(
+      win,
+      `window.baton.sessionWrite(${JSON.stringify(ticketSession?.id ?? '')}, 'tput bel' + String.fromCharCode(13))`
+    );
+    await new Promise((r) => setTimeout(r, 2000));
+    const bell = {
+      inMain: await read(
+        win,
+        `window.baton.sessions().then(l => l.map(s => ({ subject: s.subject, attention: s.attention })))`
+      ),
+      rows: await read(
+        win,
+        `(() => Array.from(document.querySelectorAll('.queue-list .row')).map(r => ({
+          title: r.querySelector('.row-title')?.textContent ?? '',
+          dot: r.querySelector('.row-state .dot')?.className ?? '',
+          label: r.querySelector('.row-state .state')?.textContent ?? ''
+        })))()`
+      )
+    };
+    await shot('waiting');
+
+    // Item 27: rename from the row, committed with Enter.
+    await read(win, `document.querySelector('.row .icon-button.rename')?.click()`);
+    await until(win, `document.querySelector('.rename-input')`, 5_000);
+    await read(
+      win,
+      `(() => {
+        const input = document.querySelector('.rename-input');
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(input, 'nightly backfill · ACME-2393');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      })()`
+    );
+    await new Promise((r) => setTimeout(r, 600));
+    const renamed = await read(
+      win,
+      `(() => ({
+        rowTitle: document.querySelector('.row-title')?.textContent ?? '',
+        headTitle: document.querySelector('.term-title')?.textContent ?? '',
+        subjectStillLinked: Boolean(document.querySelector('.row-title .subject-link'))
+      }))()`
+    );
+    await shot('renamed');
+
+    // Item 22: the identifier in the name goes to the thing it names — the
+    // ticket for a ticket, the pull request for a pull request.
+    const where = () =>
+      read(
+        win,
+        `(() => ({
+          view: document.querySelector('.rail-item[aria-current="page"]')?.getAttribute('aria-label'),
+          heading: document.querySelector('.detail-head h2')?.textContent ?? '',
+          key: document.querySelector('.detail-meta .key')?.textContent ?? ''
+        }))()`
+      );
+    await read(win, `document.querySelectorAll('.queue-list .subject-link')[0]?.click()`);
+    await new Promise((r) => setTimeout(r, 600));
+    const jumpedToTicket = await where();
+    await shot('jumped');
+
+    await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+    await until(win, `document.querySelector('.queue-list .subject-link')`, 5_000);
+    await read(win, `document.querySelectorAll('.queue-list .subject-link')[1]?.click()`);
+    await new Promise((r) => setTimeout(r, 600));
+    const jumpedToPull = await where();
+
+    // Item 26: closing what you were watching leaves a way forward, not a
+    // terminal pointed at a session the main process has already forgotten.
+    await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+    await until(win, `document.querySelector('.term-head .ghost')`, 5_000);
+    await read(
+      win,
+      `Array.from(document.querySelectorAll('.term-head .ghost'))
+        .find(b => b.textContent.includes('Close'))?.click()`
+    );
+    await new Promise((r) => setTimeout(r, 700));
+    const closed = await read(
+      win,
+      `(() => ({
+        emptyShown: Boolean(document.querySelector('.term-empty')),
+        text: document.querySelector('.term-empty .quiet')?.textContent ?? '',
+        terminalGone: !document.querySelector('.term-pane .term'),
+        rowsLeft: document.querySelectorAll('.queue-list .row').length
+      }))()`
+    );
+    await shot('closed');
+
+    // Leave the app as it was found, so anything checked after this block
+    // is not looking at a Sessions tab it did not ask for.
+    await read(win, `document.querySelector('[aria-label="Pull requests"]')?.click()`);
+    await new Promise((r) => setTimeout(r, 300));
+
+    console.log(
+      'sessionsTab:',
+      JSON.stringify({ named, font, shortcut, bell, renamed, jumpedToTicket, jumpedToPull, closed }, null, 2)
     );
   }
 

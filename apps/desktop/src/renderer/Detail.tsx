@@ -4,6 +4,7 @@ import { States } from './rows';
 import { Prose } from './Prose';
 import { RunViewer } from './RunViewer';
 import { Terminal } from './Terminal';
+import { FontSizeControl, useTerminalFontSize } from './terminalFontSize';
 import { DockBottomIcon, DockLeftIcon, DockRightIcon, DockTopIcon, TerminalIcon } from './icons';
 import type {
   AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, Reviewer, RunKind, SentryFrame,
@@ -135,8 +136,10 @@ function LiveSessions({
           <li key={s.id}>
             <span className="run-kind">{s.kind ?? 'terminal'}</span>
             <span className="state">
-              <span className={s.running ? 'dot live' : 'dot'} />
-              {s.running ? 'running' : `exited ${s.exitCode ?? ''}`}
+              <span className={s.running ? (s.attention ? 'dot running' : 'dot live') : 'dot'} />
+              {s.running
+                ? (s.attention ? 'waiting for you' : 'running')
+                : `exited ${s.exitCode ?? ''}`}
             </span>
             <span className="run-when">{formatAge(new Date(s.startedAt).toISOString())}</span>
             <button className="link" onClick={() => onOpen(s.id)}>
@@ -254,6 +257,7 @@ const DOCK_OPTIONS: { id: DockPosition; label: string; Icon: (p: { size?: number
  * but generalised to whichever axis the current dock position resizes along.
  */
 function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () => void }) {
+  const [fontSize, bumpFontSize] = useTerminalFontSize();
   const [dock, setDock] = useState<DockPosition>(storedDock);
   const [height, setHeight] = useState(() => storedSize(HEIGHT_KEY, DEFAULT_HEIGHT));
   const [width, setWidth] = useState(() => storedSize(WIDTH_KEY, DEFAULT_WIDTH));
@@ -331,10 +335,13 @@ function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () 
       <div className="detail-terminal-body">
         <div className="term-head">
           <span className="state">
-            <span className={session.running ? 'dot live' : 'dot'} />
-            {session.running ? (session.kind ?? session.runnerName) : `exited ${session.exitCode ?? ''}`}
+            <span className={session.running ? (session.attention ? 'dot running' : 'dot live') : 'dot'} />
+            {session.running
+              ? (session.attention ? 'waiting for you' : (session.kind ?? session.runnerName))
+              : `exited ${session.exitCode ?? ''}`}
           </span>
           <div className="term-head-actions">
+            <FontSizeControl size={fontSize} onBump={bumpFontSize} />
             <div className="dock-picker" role="group" aria-label="Dock position">
               {DOCK_OPTIONS.map(({ id, label, Icon }) => (
                 <button
@@ -358,7 +365,7 @@ function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () 
             </button>
           </div>
         </div>
-        <Terminal sessionId={session.id} />
+        <Terminal sessionId={session.id} fontSize={fontSize} />
       </div>
       {!handleFirst && handle}
     </div>

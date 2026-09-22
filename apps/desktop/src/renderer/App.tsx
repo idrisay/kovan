@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_PULL_SORT, formatAge, isBlocked, PULL_SORTS, sortPulls, type PullSort } from '@baton/core';
 import type {
   JiraIssue, PolledProvider, PullSummary, RunKind, RunTarget, SentryFrame, SentryIssue,
@@ -11,9 +11,10 @@ import { Terminal } from './Terminal';
 import { GroupHead, PullRow } from './rows';
 import { WorkspaceView } from './Workspace';
 import { Resizer } from './Resizer';
+import { FontSizeControl, useTerminalFontSize } from './terminalFontSize';
 import {
   PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon, SentryIcon,
-  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon
+  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon, EditIcon
 } from './icons';
 
 type ViewId = 'pulls' | 'tickets' | 'sentry' | 'workspace' | 'sessions';
@@ -94,6 +95,47 @@ function storedCollapsed(): Set<string> {
 }
 
 interface Selection { pull?: PullSummary; issue?: JiraIssue; sentry?: SentryIssue }
+
+/**
+ * A session's subject (`acme/acme-frontend#2738`, `ACME-2485`) resolved
+ * back to whichever already-loaded pull request, ticket or Sentry issue it
+ * names — the same string `Agents.subjectFor()` computed when the run
+ * started. Only ever looks in the snapshot already on screen: there is no
+ * per-subject fetch for a Sentry issue, and a pull or ticket that has since
+ * scrolled out of every loaded window (merged and aged out, resolved) simply
+ * has nothing to jump to, which is why this returns `undefined` instead of
+ * guessing at one.
+ */
+function findSubject(subject: string, snapshot: Snapshot): Selection | undefined {
+  const hash = subject.lastIndexOf('#');
+  if (hash > 0) {
+    const repo = subject.slice(0, hash);
+    const number = Number(subject.slice(hash + 1));
+    if (!Number.isFinite(number)) return undefined;
+    const pull = [
+      ...snapshot.blocked, ...snapshot.mine, ...snapshot.reviewRequested, ...snapshot.merged
+    ].find((p) => p.repo === repo && p.number === number);
+    return pull ? { pull } : undefined;
+  }
+  const issue = snapshot.tickets.find((t) => t.key === subject);
+  if (issue) return { issue };
+  const sentry = snapshot.sentryIssues.find((s) => s.shortId === subject);
+  return sentry ? { sentry } : undefined;
+}
+
+/**
+ * A session's title is generated as `${kind} · ${subject}` for an agent run
+ * and `Terminal — ${subject}` for a quick one — two different separators, so
+ * rather than parse either format this just finds where the subject itself
+ * sits inside the title it was built from, and splits there. Holds up even if
+ * a title is later renamed to something with no subject in it at all.
+ */
+function splitTitle(s: SessionInfo): { prefix: string; subject?: string } {
+  if (!s.subject) return { prefix: s.title };
+  const at = s.title.lastIndexOf(s.subject);
+  if (at === -1) return { prefix: s.title };
+  return { prefix: s.title.slice(0, at), subject: s.subject };
+}
 
 interface Group {
   /** Stable across renames, because the collapsed set is stored on it. */
@@ -599,6 +641,7 @@ export function App() {
   const [ticketFilters, setTicketFilters] = useState<TicketFilters>(emptyTicketFilters);
   const [ticketSort, setTicketSort] = useState<TicketSort>('updated');
   const [theme, setThemeState] = useState<ThemeChoice>('system');
+  const [fontSize, bumpFontSize] = useTerminalFontSize();
 
   // Seeded once from disk, then applied — and re-applied live if "System" is
   // the choice and the OS itself changes appearance underneath it.
@@ -702,6 +745,50 @@ export function App() {
    */
   const openSession = useCallback((id: string) => {
     setActiveSession(id);
+  }, []);
+
+  /**
+   * A closed session stops being the one on screen.
+   *
+   * Without this the pane kept rendering a terminal pointed at a session the
+   * main process had already forgotten — a frozen last frame you could not
+   * type into, which is what "it still shows it" was.
+   */
+  useEffect(() => {
+    if (activeSession && !sessions.some((s) => s.id === activeSession)) {
+      setActiveSession(undefined);
+    }
+  }, [sessions, activeSession]);
+
+  /**
+   * Opening Sessions with something already running shows the first one
+   * rather than an empty pane — but only ever the once. After that, closing
+   * whatever you were watching leaves the choice to you instead of silently
+   * sliding the next session into its place, which reads as "the terminal I
+   * just closed is still here" all over again.
+   */
+  const autoPicked = useRef(false);
+  useEffect(() => {
+    if (autoPicked.current) return;
+    if (activeSession) {
+      autoPicked.current = true;
+    } else if (sessions.length > 0) {
+      autoPicked.current = true;
+      setActiveSession(sessions[0]!.id);
+    }
+  }, [sessions, activeSession]);
+
+  /** Renaming only ever touches the label — never `subject`, which is what
+   *  the row's own click-through to a pull request or ticket goes by. */
+  const renameSession = useCallback((id: string, title: string) => {
+    void window.baton.sessionRename(id, title);
+  }, []);
+
+  /** A session row's identifier, clicked: the pull request or ticket it was
+   *  started on, in its own tab. */
+  const openSubject = useCallback((match: Selection) => {
+    setSelected(match);
+    setView(match.pull ? 'pulls' : match.issue ? 'tickets' : 'sentry');
   }, []);
 
   const current = VIEWS.find((v) => v.id === view)!;
@@ -899,6 +986,8 @@ export function App() {
             <Sessions
               sessions={sessions} active={activeSession} onSelect={setActiveSession}
               targets={targets} onOpen={openTerminal}
+              snapshot={snapshot} onOpenSubject={openSubject} onRename={renameSession}
+              fontSize={fontSize} onBumpFontSize={bumpFontSize}
             />
           ) : view === 'workspace' ? (
             <WorkspaceView onTerminal={openTerminal} />
@@ -1171,16 +1260,153 @@ function NewSessionMenu({
   );
 }
 
+/**
+ * A session's name, with the identifier it was started on kept clickable
+ * inside it. Shared by the sidebar row and the terminal pane's own header, so
+ * renaming and jumping to the ticket work the same in both places.
+ */
+function SessionName({
+  session, snapshot, onOpenSubject, editing, onEdit, onRename, className
+}: {
+  session: SessionInfo;
+  snapshot: Snapshot;
+  onOpenSubject: (match: Selection) => void;
+  editing: boolean;
+  onEdit: (editing: boolean) => void;
+  onRename: (id: string, title: string) => void;
+  className: string;
+}) {
+  const [draft, setDraft] = useState(session.title);
+  const { prefix, subject } = splitTitle(session);
+  const match = subject ? findSubject(subject, snapshot) : undefined;
+
+  function commit() {
+    onEdit(false);
+    if (draft.trim() && draft.trim() !== session.title) {
+      onRename(session.id, draft.trim());
+    }
+  }
+
+  if (editing) {
+    return (
+      <input
+        className="rename-input"
+        autoFocus
+        value={draft}
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter') commit();
+          else if (e.key === 'Escape') { setDraft(session.title); onEdit(false); }
+        }}
+      />
+    );
+  }
+
+  return (
+    <>
+      <span className={className}>
+        {prefix}
+        {subject && (match ? (
+          <button
+            type="button"
+            className="subject-link"
+            title={`Open ${subject}`}
+            onClick={(e) => { e.stopPropagation(); onOpenSubject(match); }}
+          >
+            {subject}
+          </button>
+        ) : (
+          <span>{subject}</span>
+        ))}
+      </span>
+      <button
+        type="button"
+        className="icon-button rename"
+        aria-label="Rename session"
+        title="Rename session"
+        onClick={(e) => { e.stopPropagation(); setDraft(session.title); onEdit(true); }}
+      >
+        <EditIcon />
+      </button>
+    </>
+  );
+}
+
+function SessionRow({
+  session, selected, snapshot, onSelect, onOpenSubject, onRename
+}: {
+  session: SessionInfo;
+  selected: boolean;
+  snapshot: Snapshot;
+  onSelect: () => void;
+  onOpenSubject: (match: Selection) => void;
+  onRename: (id: string, title: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  // A div, not a button: the name inside it carries a link to the ticket and
+  // a rename control of its own, and HTML will not nest those in a button —
+  // the parser closes the outer one and the row falls apart.
+  return (
+    <li>
+      <div
+        className={selected ? 'row selected' : 'row'}
+        role="button"
+        tabIndex={0}
+        onClick={() => { if (!editing) onSelect(); }}
+        onKeyDown={(e) => {
+          if (editing || (e.key !== 'Enter' && e.key !== ' ')) return;
+          e.preventDefault();
+          onSelect();
+        }}
+      >
+        <span className="row-top">
+          <SessionName
+            session={session} snapshot={snapshot} onOpenSubject={onOpenSubject}
+            editing={editing} onEdit={setEditing} onRename={onRename}
+            className="row-title"
+          />
+        </span>
+        <span className="row-state">
+          <span className="state">
+            {/* Amber, not green, the moment the agent rings the bell and goes
+                quiet on you — see `attention` in main/sessions.ts. */}
+            <span className={session.running ? (session.attention ? 'dot running' : 'dot live') : 'dot'} />
+            {session.running
+              ? (session.attention ? 'waiting for you' : session.runnerName)
+              : `exited ${session.exitCode ?? ''}`}
+          </span>
+          <span className="spacer" />
+          <span className="row-age">{formatAge(new Date(session.startedAt).toISOString())}</span>
+        </span>
+      </div>
+    </li>
+  );
+}
+
 function Sessions({
-  sessions, active, onSelect, targets, onOpen
+  sessions, active, onSelect, targets, onOpen, snapshot, onOpenSubject, onRename,
+  fontSize, onBumpFontSize
 }: {
   sessions: SessionInfo[];
   active?: string;
   onSelect: (id: string) => void;
   targets: RunTarget[];
   onOpen: (cwd?: string) => void;
+  snapshot: Snapshot;
+  onOpenSubject: (match: Selection) => void;
+  onRename: (id: string, title: string) => void;
+  fontSize: number;
+  onBumpFontSize: (step: number) => void;
 }) {
-  const current = active ?? sessions[0]?.id;
+  const [renamingHead, setRenamingHead] = useState(false);
+  // Only ever what is actually still open. Which session that is — including
+  // "none, you just closed it" — is decided in `App`, not defaulted here.
+  const shown = sessions.find((s) => s.id === active);
+
   return (
     <>
       <aside className="queue" aria-label="Sessions">
@@ -1198,24 +1424,15 @@ function Sessions({
           ) : (
             <ul className="rows">
               {sessions.map((s) => (
-                <li key={s.id}>
-                  <button
-                    className={s.id === current ? 'row selected' : 'row'}
-                    onClick={() => onSelect(s.id)}
-                  >
-                    <span className="row-top">
-                      <span className="row-title">{s.title}</span>
-                    </span>
-                    <span className="row-state">
-                      <span className="state">
-                        <span className={s.running ? 'dot live' : 'dot'} />
-                        {s.running ? s.runnerName : `exited ${s.exitCode ?? ''}`}
-                      </span>
-                      <span className="spacer" />
-                      <span className="row-age">{formatAge(new Date(s.startedAt).toISOString())}</span>
-                    </span>
-                  </button>
-                </li>
+                <SessionRow
+                  key={s.id}
+                  session={s}
+                  selected={s.id === active}
+                  snapshot={snapshot}
+                  onSelect={() => onSelect(s.id)}
+                  onOpenSubject={onOpenSubject}
+                  onRename={onRename}
+                />
               ))}
             </ul>
           )}
@@ -1223,18 +1440,37 @@ function Sessions({
       </aside>
       <Resizer />
       <main className="pane term-pane">
-        {current ? (
+        {shown ? (
           <>
             <div className="term-head">
-              <span>{sessions.find((s) => s.id === current)?.cwd}</span>
-              <button className="ghost" onClick={() => void window.baton.sessionClose(current)}>
-                Close
-              </button>
+              <div className="term-head-name">
+                <span className="term-head-title-row">
+                  <SessionName
+                    session={shown} snapshot={snapshot} onOpenSubject={onOpenSubject}
+                    editing={renamingHead} onEdit={setRenamingHead} onRename={onRename}
+                    className="term-title"
+                  />
+                </span>
+                <span className="term-cwd">{shown.cwd}</span>
+              </div>
+              <div className="term-head-actions">
+                <FontSizeControl size={fontSize} onBump={onBumpFontSize} />
+                <button className="ghost" onClick={() => void window.baton.sessionClose(shown.id)}>
+                  Close
+                </button>
+              </div>
             </div>
-            <Terminal sessionId={current} />
+            <Terminal sessionId={shown.id} fontSize={fontSize} />
           </>
         ) : (
-          <p className="quiet centred">Nothing running.</p>
+          <div className="term-empty">
+            <p className="quiet">
+              {sessions.length > 0
+                ? 'Select another session, or start a new one in any repo in the workspace.'
+                : 'Nothing running. Start a new session in any repo in the workspace.'}
+            </p>
+            <NewSessionMenu targets={targets} onOpen={onOpen} />
+          </div>
         )}
       </main>
     </>

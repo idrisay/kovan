@@ -10,8 +10,12 @@ import '@xterm/xterm/css/xterm.css';
  * outlives this component: closing the window destroys the renderer, and the
  * agent carries on. Whatever it printed meanwhile has to be recoverable.
  */
-export function Terminal({ sessionId }: { sessionId: string }) {
+export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; fontSize?: number }) {
   const host = useRef<HTMLDivElement>(null);
+  // Read by the font-size effect below, which intentionally does not tear
+  // down and rebuild the terminal on every keystroke of Cmd+= — that would
+  // cost the scroll position and flicker on every step.
+  const live = useRef<{ term: Xterm; fit: FitAddon } | null>(null);
 
   useEffect(() => {
     if (!host.current) return;
@@ -24,7 +28,7 @@ export function Terminal({ sessionId }: { sessionId: string }) {
     const light = document.documentElement.dataset.theme === 'light';
     const term = new Xterm({
       fontFamily: "'IBM Plex Mono', ui-monospace, Menlo, monospace",
-      fontSize: 12,
+      fontSize,
       cursorBlink: true,
       // The editor surface and the status palette, so the terminal belongs to
       // the same room as the rest of the app rather than looking pasted on.
@@ -59,6 +63,7 @@ export function Terminal({ sessionId }: { sessionId: string }) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host.current);
+    live.current = { term, fit };
 
     let disposed = false;
 
@@ -102,12 +107,28 @@ export function Terminal({ sessionId }: { sessionId: string }) {
 
     return () => {
       disposed = true;
+      live.current = null;
       observer.disconnect();
       offOutput();
       typed.dispose();
       term.dispose();
     };
   }, [sessionId]);
+
+  // Mutates the live instance rather than rebuilding it — a remount here
+  // would cost the scroll position and flicker on every step of Cmd+=.
+  useEffect(() => {
+    const current = live.current;
+    if (!current || current.term.options.fontSize === fontSize) return;
+    current.term.options.fontSize = fontSize;
+    try {
+      const proposed = current.fit.proposeDimensions();
+      current.fit.fit();
+      if (proposed) void window.baton.sessionResize(sessionId, proposed.cols, proposed.rows);
+    } catch {
+      // Same detached/zero-size case `sync` above already tolerates.
+    }
+  }, [fontSize, sessionId]);
 
   return <div className="term" ref={host} />;
 }

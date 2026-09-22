@@ -128,6 +128,11 @@
   border-color: rgba(20, 20, 19, 0.12);
 }
 :root[data-theme='light'] .primary { color: #fff7f2; }
+/* ...but the outline variant has no clay behind it to sit on. Left to inherit
+   the rule above, "Review in an agent" was near-white text on a near-white
+   pane in light mode: a bordered pill with nothing in it. */
+:root[data-theme='light'] .primary.outline { color: var(--clay); }
+:root[data-theme='light'] .primary.outline:hover:not(:disabled) { color: var(--clay-bright); }
 :root[data-theme='light'] .row:hover { background: rgba(20, 20, 19, 0.035); }
 :root[data-theme='light'] .row.blocked {
   background: rgba(180, 84, 74, 0.08);
@@ -418,7 +423,12 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
   position: relative; display: block; width: 100%; text-align: left;
   padding: 9px 11px 10px; border-radius: 9px;
   background: transparent; border: 1px solid transparent; color: inherit;
+  /* Session rows are divs, not buttons — they carry a link and a rename
+     control inside them, which HTML will not nest in a button — so the
+     cursor and the focus ring have to be asked for rather than inherited. */
+  cursor: pointer;
 }
+.row:focus-visible { outline: 1px solid var(--clay); outline-offset: -1px; }
 .row:hover { background: rgba(255, 255, 255, 0.025); }
 .row.selected { background: var(--wash); border-color: rgba(255, 255, 255, 0.05); }
 
@@ -952,11 +962,65 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .session-cwd { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
 .term-pane { padding: 0; display: flex; flex-direction: column; background: var(--editor); }
 .term-head {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 7px 12px; border-bottom: 1px solid var(--hair); flex: none;
   font-family: var(--mono); font-size: 10.5px; color: var(--dim);
 }
+/* The session's own name first, the folder it runs in under it: a path alone
+   says which clone, never which piece of work. */
+.term-head-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.term-head-title-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.term-title {
+  font-family: var(--sans); font-size: 12px; color: var(--prose);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.term-cwd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .term { flex: 1; min-width: 0; min-height: 0; overflow: hidden; padding: 8px 10px; }
+
+/* Nothing selected, because what was selected is closed. Says which of the
+   two ways out you have rather than leaving a dead terminal on screen. */
+.term-empty {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; text-align: center; padding: 0 24px;
+}
+.term-empty .quiet { max-width: 34ch; line-height: 1.6; }
+
+/* The identifier inside a session's name — the ticket or pull request it was
+   started on — kept clickable where it sits, rather than repeated as a chip. */
+.subject-link {
+  background: none; border: 0; padding: 0; margin: 0;
+  font: inherit; color: inherit; text-decoration: underline;
+  text-decoration-color: transparent; text-underline-offset: 2px;
+}
+.subject-link:hover { color: var(--clay-bright); text-decoration-color: currentColor; }
+.subject-link:focus-visible { color: var(--clay-bright); text-decoration-color: currentColor; }
+
+/* Renaming: the pencil stays out of the way until the row is under the
+   pointer, the same as the revert control in the Changes list. */
+.icon-button.rename { flex: none; width: 20px; height: 20px; opacity: 0; }
+.row:hover .icon-button.rename,
+.term-head:hover .icon-button.rename,
+.icon-button.rename:focus-visible { opacity: 1; }
+.rename-input {
+  flex: 1; min-width: 0;
+  padding: 1px 6px; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(217, 119, 87, 0.45);
+  color: var(--title); font: inherit; font-size: 12.5px; outline: none;
+}
+
+/* Font size: a stepper, and the shortcut that does the same thing without it
+   (⌘+/⌘−, intercepted in main so it sizes the terminal instead of the page). */
+.font-size-control {
+  display: flex; align-items: center; gap: 1px;
+  padding-right: 4px; margin-right: 2px;
+  border-right: 1px solid var(--hair);
+}
+.font-size-control .icon-button { width: 20px; height: 20px; }
+.font-size-control .icon-button:disabled { opacity: 0.35; cursor: default; }
+.font-size-value {
+  min-width: 17px; text-align: center;
+  font-family: var(--mono); font-size: 10px; color: var(--dim);
+}
 
 @media (max-width: 1000px) {
   :root { --queue-default: 260px; }

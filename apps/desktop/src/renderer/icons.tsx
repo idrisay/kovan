@@ -272,3 +272,22 @@ export function RevertIcon({ size = 13 }: Props) {
     </svg>
   );
 }
+
+export function MinusIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={2} aria-hidden="true">
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+/** A pencil, for "rename" — the one place in the app that lets you type over
+ *  a name the app generated instead of one you chose. */
+export function EditIcon({ size = 13 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M15.2 4.8 19.2 8.8 8 20H4v-4Z" />
+      <path d="M13.4 6.6 17.4 10.6" />
+    </svg>
+  );
+}

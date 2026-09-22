@@ -113,6 +113,24 @@ function createWindow(): void {
     return { action: 'deny' };
   });
 
+  // Cmd+=/Cmd+- already did something before this line existed: Electron's
+  // own default menu zooms the whole page with it, chrome and all, because
+  // this window never installs a menu of its own. Rather than replace that
+  // menu wholesale (and take on reimplementing every other default — Cmd+Q,
+  // Cmd+W, copy/paste — as a side effect), intercept just these two keys at
+  // the input level and repoint them at the terminal's own font size, which
+  // is the thing people actually meant to be resizing.
+  window.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.meta || input.alt || input.control) return;
+    if (input.key === '=' || input.key === '+') {
+      event.preventDefault();
+      window?.webContents.send('baton:font-size-step', 1);
+    } else if (input.key === '-') {
+      event.preventDefault();
+      window?.webContents.send('baton:font-size-step', -1);
+    }
+  });
+
   const devServer = process.env['ELECTRON_RENDERER_URL'];
   if (devServer) {
     void window.loadURL(devServer);
@@ -345,6 +363,9 @@ app.whenReady().then(async () => {
     sessions.resize(id, cols, rows);
   });
   ipcMain.handle('baton:session-close', (_event, id: string) => sessions.close(id));
+  ipcMain.handle('baton:session-rename', (_event, id: string, title: string) => {
+    sessions.rename(id, title);
+  });
   ipcMain.handle(
     'baton:open-terminal',
     async (_event, cwd?: string, subject?: string, title?: string) => {

@@ -38,6 +38,8 @@ export interface SessionInfo {
   running: boolean;
   exitCode?: number;
   runDirectory?: string;
+  /** Set while the session is idle on your reply — see `Sessions.write()` in main. */
+  attention: boolean;
 }
 
 export interface Snapshot {
@@ -130,9 +132,11 @@ export interface BatonApi {
   sessionWrite(id: string, data: string): Promise<void>;
   sessionResize(id: string, cols: number, rows: number): Promise<void>;
   sessionClose(id: string): Promise<void>;
+  sessionRename(id: string, title: string): Promise<void>;
   openTerminal(cwd?: string, subject?: string, title?: string): Promise<SessionInfo>;
   onSessionOutput(listener: (id: string, data: string) => void): () => void;
   onSessions(listener: (list: SessionInfo[]) => void): () => void;
+  onFontSizeStep(listener: (step: number) => void): () => void;
 }
 
 declare global {

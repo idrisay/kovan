@@ -78,6 +78,7 @@ const api = {
   sessionResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.invoke('baton:session-resize', id, cols, rows),
   sessionClose: (id: string) => ipcRenderer.invoke('baton:session-close', id),
+  sessionRename: (id: string, title: string) => ipcRenderer.invoke('baton:session-rename', id, title),
   openTerminal: (cwd?: string, subject?: string, title?: string) =>
     ipcRenderer.invoke('baton:open-terminal', cwd, subject, title),
   onSessionOutput: (listener: (id: string, data: string) => void) => {
@@ -89,6 +90,11 @@ const api = {
     const handler = (_e: unknown, list: unknown[]) => listener(list);
     ipcRenderer.on('baton:sessions', handler);
     return () => ipcRenderer.removeListener('baton:sessions', handler);
+  },
+  onFontSizeStep: (listener: (step: number) => void) => {
+    const handler = (_e: unknown, step: number) => listener(step);
+    ipcRenderer.on('baton:font-size-step', handler);
+    return () => ipcRenderer.removeListener('baton:font-size-step', handler);
   }
 };
 
