@@ -505,6 +505,8 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
   container: pane / inline-size;
 }
 .detail { max-width: var(--page); margin-inline: auto; padding: 22px 30px 44px; }
+/* Settings → General → Ticket and pull request text size (see readingSize.tsx). */
+.detail.reading { zoom: var(--reading-zoom, 1); }
 
 /*
  * A run started from this pull or ticket docks its terminal right here
@@ -1880,3 +1882,43 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .agent-kid { font: 11px var(--mono, ui-monospace, monospace); color: var(--meta); background: var(--wash); border-radius: 4px; padding: 1px 6px; }
 .agent-kid.port { color: var(--waiting); }
 .agent-error { font-size: 12px; color: var(--blocked-bright); }
+
+/* --- Environments and test accounts (Settings, and the run sheet's picker) --- */
+.provider select, .run-test-env select {
+  background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 8px;
+  padding: 7px 8px; color: var(--prose); font: inherit; font-size: 12.5px; width: 100%;
+}
+.env-picker { flex-wrap: wrap; margin-bottom: 14px; }
+.env-picker button { flex: 0 1 auto; padding: 6px 14px; display: inline-flex; align-items: center; gap: 6px; }
+.env-picker .env-add { border-style: dashed; color: var(--muted); }
+.env-default-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--clay); }
+.env-grid { display: grid; grid-template-columns: 1fr 1.6fr; gap: 0 12px; }
+.env-count { color: var(--dim); font-weight: 500; letter-spacing: 0; }
+.account-list { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.account-card {
+  border: 1px solid var(--hair-strong); border-radius: 10px; padding: 10px 12px 0;
+  background: rgba(255, 255, 255, 0.015);
+}
+.account-row { display: flex; gap: 10px; align-items: flex-end; }
+.account-row > label { flex: 1; min-width: 0; }
+.account-row > .account-role { flex: 0 0 150px; }
+.account-row > .account-segment { flex: 0 0 84px; }
+.account-remove { margin-bottom: 20px; flex: none; }
+.env-confirm { display: inline-flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--secondary); }
+.link.danger { color: var(--blocked-bright); }
+.env-save { margin-top: 16px; align-items: center; }
+.env-save .settings-note { margin: 0; }
+
+.run-test-env {
+  border: 1px solid var(--hair); border-radius: 10px; padding: 10px 12px; margin: 4px 0 14px;
+}
+.run-test-env-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.run-test-env-head .env-picker { margin: 0; }
+.run-test-env-label { color: var(--muted); font-size: 11.5px; }
+.run-test-env-site {
+  font-family: var(--mono); font-size: 10.5px; color: var(--dim);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+.run-test-accounts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 10px; }
+.run-test-accounts .checkbox-row { display: flex; align-items: center; gap: 7px; margin: 0; }
+.run-test-env .settings-note { margin: 8px 0 0; }

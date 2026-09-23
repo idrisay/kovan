@@ -16,6 +16,7 @@ import {
   DEFAULTUPDATETEMPLATE,
   DEFAULTVERIFYTEMPLATE,
   renderVerifyPrompt,
+  testingClause,
   renderIssuePrompt,
   renderPullPrompt,
   renderSentryPrompt,
@@ -34,6 +35,7 @@ import { HttpClient, JiraClient, SentryClient, type RawSentryFrame } from '@bato
 import type { DesktopHost } from './host';
 import type { Sessions } from './sessions';
 import type { QuickModel } from './quick';
+import { TestEnvironments, type TestSelection } from './testEnvironments';
 
 /**
  * Jira attachments arrive already inlined as base64 data URIs — that is for
@@ -90,6 +92,13 @@ export interface StartRequest {
    * around.
    */
   model?: string;
+  /**
+   * The environment to check on and the accounts to sign in as, from the run
+   * sheet. Verify always has one (the default environment when unset); for
+   * the other kinds it is opt-in, and absent means the prompt says nothing
+   * about where to test.
+   */
+  test?: TestSelection;
 }
 
 /** Everything a run can be started against. Every field is optional because
@@ -105,6 +114,8 @@ export class Agents {
   private readonly http: HttpClient;
   private cachedTargets?: RunTarget[];
 
+  readonly testEnvironments: TestEnvironments;
+
   constructor(
     private readonly host: DesktopHost,
     private readonly sessions: Sessions,
@@ -112,6 +123,7 @@ export class Agents {
   ) {
     this.store = new RunStore(RunStore.rootFor(host.files.stateDir()));
     this.http = new HttpClient(host.log);
+    this.testEnvironments = new TestEnvironments(host);
   }
 
   runners(): Promise<Runner[]> {
@@ -138,7 +150,14 @@ export class Agents {
   }
 
   /** The prompt a given piece of work would be started with. */
-  buildPrompt(kind: RunKind, subject: Subject): string {
+  async buildPrompt(kind: RunKind, subject: Subject, test?: TestSelection): Promise<string> {
+    const base = await this.basePrompt(kind, subject, test);
+    if (kind === 'verify' || !test || !base) return base;
+    const resolved = await this.testEnvironments.resolve(test);
+    return resolved ? `${base}\n\n${testingClause(resolved.environment, resolved.accounts)}` : base;
+  }
+
+  private async basePrompt(kind: RunKind, subject: Subject, test?: TestSelection): Promise<string> {
     const reviewers = this.host.config.get('runner.reviewers', [] as string[]);
     const conventions = this.conventions();
 
@@ -164,13 +183,15 @@ export class Agents {
       // ${verdicts} and ${basicAuth}, none of which renderPullPrompt knows —
       // and `substitute` leaves an unknown placeholder alone, so through the
       // general path all four reached the agent as literal text.
+      const resolved = await this.testEnvironments.resolve(test ?? {});
       return renderVerifyPrompt(
         this.host.config.get('prompt.template.verify', '') || DEFAULTVERIFYTEMPLATE,
         subject.pull,
         {
-          name: this.host.config.get('verify.environment', ''),
-          site: this.host.config.get('verify.site', ''),
-          hasBasicAuth: this.host.config.get('verify.basicAuth', false)
+          name: resolved?.environment.name ?? '',
+          site: resolved?.environment.site ?? '',
+          hasBasicAuth: resolved?.environment.basicAuth ?? false,
+          accounts: resolved?.accounts ?? []
         },
         { reviewers, conventions }
       );
@@ -204,32 +225,6 @@ export class Agents {
     // which in turn always wins over the built-in default.
     const model = explicitModel || overrides[kind] || defaults[kind];
     return model && runner.modelFlag ? { ...runner, model } : runner;
-  }
-
-  /**
-   * The dev-environment credentials a "verify" run signs in with — handed to
-   * the agent only as environment variables, never woven into the prompt
-   * text, and named to match what `DEFAULTVERIFYTEMPLATE` already tells the
-   * agent to read: `$BATON_ENV_USER`/`$BATON_ENV_PASSWORD` for the app's own
-   * sign-in, `$BATON_ENV_BASIC_USER`/`$BATON_ENV_BASIC_PASSWORD` for an HTTP
-   * Basic Auth wall in front of it. A field left unconfigured is simply
-   * omitted, the same as an unanswered review request — the agent finds it
-   * unset and reports `could not check` rather than guessing.
-   */
-  private async verifyEnv(): Promise<Record<string, string>> {
-    const vars: Record<string, string> = {};
-    const username = this.host.config.get('verify.username', '');
-    const password = await this.host.secrets.get('verify.password');
-    if (username) vars['BATON_ENV_USER'] = username;
-    if (password) vars['BATON_ENV_PASSWORD'] = password;
-
-    if (this.host.config.get('verify.basicAuth', false)) {
-      const basicUsername = this.host.config.get('verify.basicUsername', '');
-      const basicPassword = await this.host.secrets.get('verify.basicPassword');
-      if (basicUsername) vars['BATON_ENV_BASIC_USER'] = basicUsername;
-      if (basicPassword) vars['BATON_ENV_BASIC_PASSWORD'] = basicPassword;
-    }
-    return vars;
   }
 
   /**
@@ -272,7 +267,7 @@ export class Agents {
       return { ok: false, error: `No runner "${request.runnerId}". It may have been uninstalled.` };
     }
 
-    const prompt = request.prompt ?? this.buildPrompt(request.kind, subject);
+    const prompt = request.prompt ?? (await this.buildPrompt(request.kind, subject, request.test));
     const cwd = request.cwd ?? (await this.defaultCwd(subject.pull?.repo));
     if (!cwd) {
       return {
@@ -295,7 +290,9 @@ export class Agents {
 
     const env = {
       ...this.store.env(run, ticketFile),
-      ...(request.kind === 'verify' ? await this.verifyEnv() : {})
+      // Verify always signs in somewhere; the other kinds only when the run
+      // sheet picked an environment to test on.
+      ...(request.kind === 'verify' || request.test ? await this.testEnvironments.env(request.test ?? {}) : {})
     };
 
     const result = await this.sessions.run({

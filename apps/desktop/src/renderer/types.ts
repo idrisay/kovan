@@ -9,11 +9,13 @@ import type {
 import type {
   Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
 } from '../main/workspace';
+import type { TestEnvironmentSave, TestEnvironmentState, TestSelection } from '../main/testEnvironments';
 
 export type {
   PullDetail, ReviewComment, ReviewThread, Reviewer, AgentRun, RunFile, Runner, RunKind, RunTarget,
   JiraIssue, PullSummary, SentryIssue, SentryFrame
 };
+export type { TestEnvironmentSave, TestEnvironmentState, TestSelection };
 export type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus,
   Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
@@ -129,11 +131,15 @@ export interface BatonApi {
    *  see the note on `KNOWN_MODELS` in `@baton/agent`. */
   knownModels(): Promise<Record<string, string[]>>;
   runTargets(force?: boolean): Promise<RunTarget[]>;
-  buildPrompt(kind: RunKind, subject: Subject): Promise<string>;
+  buildPrompt(kind: RunKind, subject: Subject, test?: TestSelection): Promise<string>;
+  /** Environments and test accounts. Passwords never come back — only which are saved. */
+  testEnvironments(): Promise<TestEnvironmentState>;
+  testEnvironmentsSave(next: TestEnvironmentSave): Promise<TestEnvironmentState>;
   defaultCwd(repo?: string): Promise<string | undefined>;
   startAgent(
     request: {
-      kind: RunKind; subjectId: string; runnerId: string; cwd?: string; prompt?: string; model?: string
+      kind: RunKind; subjectId: string; runnerId: string; cwd?: string; prompt?: string; model?: string;
+      test?: TestSelection;
     },
     subject: Subject
   ): Promise<StartResult>;

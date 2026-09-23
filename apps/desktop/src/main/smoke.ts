@@ -517,7 +517,7 @@ export async function smokePty(
   sessions.rename(lineSession.id, 'renamed by smoke');
   const renamed = sessions.list().find((s) => s.id === lineSession.id);
 
-  const prompt = agents.buildPrompt('unblock', { pull: FIXTURE });
+  const prompt = await agents.buildPrompt('unblock', { pull: FIXTURE });
   return {
     ptyOpened: Boolean(session.id),
     sawEcho: seen.includes('BATON_PTY_OK-42'),
@@ -1926,6 +1926,110 @@ export async function smokeUi(
     await shot('overview-bottom');
     await read(win, `document.querySelector('[aria-label="Pull requests"]')?.click()`);
     await new Promise((r) => setTimeout(r, 400));
+  }
+
+  // --- Items 42–44: environments, test accounts, reading text size ----------
+  if (process.env['BATON_SHOT_ENVS']) {
+    const prefix = process.env['BATON_SHOT_ENVS'];
+    const shot = async (name: string) => {
+      win.webContents.invalidate();
+      await new Promise((r) => setTimeout(r, 400));
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+    win.show();
+    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    // The single environment this replaces, as an existing profile has it.
+    // `setSecret` re-polls, and a poll with no real credentials replaces the
+    // fixture with "Nothing connected" — keep putting it back.
+    const keepEnvFixture = setInterval(() => win.webContents.send('baton:snapshot', fixtureSnapshot(10)), 1_000);
+    // An earlier step may already have seeded the list; start again from the old shape.
+    await read(win, `window.baton.setSetting('verify.environments', [])`);
+    await read(win, `window.baton.setSetting('verify.environment', 'Dev')`);
+    await read(win, `window.baton.setSetting('verify.site', 'https://dev.example.invalid')`);
+    await read(win, `window.baton.setSetting('verify.username', 'legacy@example.invalid')`);
+    await read(win, `window.baton.setSecret('verify.password', 'legacy-pw')`);
+    const migrated = await read(win, `window.baton.testEnvironments()`) as {
+      environments: { id: string; name: string; site: string }[];
+      accounts: { id: string; environmentId: string; username: string }[];
+      savedPasswords: string[];
+    };
+    const legacy = migrated.accounts[0];
+    await read(win, `window.baton.testEnvironmentsSave(${JSON.stringify({
+      environments: migrated.environments,
+      defaultEnvironment: 'dev',
+      accounts: [
+        ...migrated.accounts,
+        { id: 'acct-student', environmentId: 'local', label: 'Student', role: 'student', segment: 'b2c', username: 'student@example.invalid', notes: '' },
+        { id: 'acct-teacher', environmentId: 'local', label: 'Teacher with two classes', role: 'teacher', segment: 'b2b', username: 'teacher@example.invalid', notes: 'owns class 7B' },
+        { id: 'acct-parent', environmentId: 'local', label: 'Parent', role: 'parent', segment: 'b2c', username: 'parent@example.invalid', notes: '' }
+      ],
+      passwords: { 'testAccount.acct-student.password': 'x', 'testAccount.acct-teacher.password': 'y' }
+    })})`);
+
+    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    await until(win, `document.querySelector('.rail [aria-label="Settings"]')`, 10_000);
+    await read(win, `document.querySelector('.rail [aria-label="Settings"]')?.click()`);
+    await until(win, `document.querySelector('.settings-nav')`, 5_000);
+    await read(win, `Array.from(document.querySelectorAll('.settings-nav button')).find(b => b.textContent.startsWith('Environments'))?.click()`);
+    await until(win, `document.querySelector('.test-envs .account-card')`, 5_000);
+    await shot('settings-dev');
+    await read(win, `Array.from(document.querySelectorAll('.test-envs .env-picker button')).find(b => b.textContent.trim() === 'Local')?.click()`);
+    await new Promise((r) => setTimeout(r, 300));
+    await shot('settings-local');
+    const settingsView = await read(win, `({
+      tabs: Array.from(document.querySelectorAll('.test-envs .env-picker button')).map(b => b.textContent.trim()),
+      cards: document.querySelectorAll('.test-envs .account-card').length,
+      placeholders: Array.from(document.querySelectorAll('.test-envs .account-card input[type=password]')).map(i => i.placeholder)
+    })`);
+    await read(win, `Array.from(document.querySelectorAll('.settings-nav button')).find(b => b.textContent.startsWith('General'))?.click()`);
+    await new Promise((r) => setTimeout(r, 200));
+    await read(win, `document.querySelector('[aria-label="Larger reading text"]')?.click()`);
+    await read(win, `document.querySelector('[aria-label="Larger reading text"]')?.click()`);
+    const readingSize = await read(win, `document.querySelector('[aria-label="Ticket and pull request text size"] .font-size-value')?.textContent`);
+    await shot('settings-general');
+    await read(win, `Array.from(document.querySelectorAll('.sheet-head button')).find(b => b.textContent.trim() === 'Done')?.click()`);
+
+    // A merged pull request, so "Check it shipped" is offered.
+    await read(win, `document.querySelector('[aria-label="Pull requests"]')?.click()`);
+    await until(win, `document.querySelector('.queue .row')`, 5_000);
+    if (!(await read(win, `Boolean(document.querySelector('.queue .row.shipped'))`))) {
+      await read(win, `Array.from(document.querySelectorAll('.queue button')).find(b => /recently merged/i.test(b.textContent))?.click()`);
+      await until(win, `document.querySelector('.queue .row.shipped')`, 5_000);
+    }
+    await read(win, `document.querySelector('.queue .row.shipped')?.click()`);
+    await until(win, `Array.from(document.querySelectorAll('.detail-actions button')).some(b => b.textContent.includes('Check it shipped'))`, 10_000);
+    const zoom = await read(win, `getComputedStyle(document.querySelector('.detail.reading')).zoom`);
+    await shot('pull-at-120');
+    const hasVerify = await read(win, `Boolean(Array.from(document.querySelectorAll('.detail-actions button')).find(b => b.textContent.includes('Check it shipped')))`);
+    await read(win, `Array.from(document.querySelectorAll('.detail-actions button')).find(b => b.textContent.includes('Check it shipped'))?.click()`);
+    await until(win, `document.querySelector('.run-test-env')`, 5_000);
+    await until(win, `document.querySelector('.prompt-label textarea')?.value.includes('actually live on')`, 10_000);
+    const devPrompt = await read(win, `document.querySelector('.prompt-label textarea').value`) as string;
+    await shot('verify-dev');
+    await read(win, `Array.from(document.querySelectorAll('.run-test-env .env-picker button')).find(b => b.textContent.trim() === 'Local')?.click()`);
+    await until(win, `document.querySelector('.prompt-label textarea')?.value.includes('live on Local')`, 10_000);
+    await read(win, `Array.from(document.querySelectorAll('.run-test-accounts label')).find(l => l.textContent.startsWith('Parent'))?.querySelector('input')?.click()`);
+    await until(win, `!document.querySelector('.prompt-label textarea')?.value.includes('Parent')`, 10_000);
+    const localPrompt = await read(win, `document.querySelector('.prompt-label textarea').value`) as string;
+    await shot('verify-local');
+    await read(win, `Array.from(document.querySelectorAll('.sheet-head button')).find(b => b.textContent.trim() === 'Cancel')?.click()`);
+    await read(win, `document.querySelector('[aria-label="Smaller reading text"]')`);
+
+    clearInterval(keepEnvFixture);
+    const pick = (text: string, re: RegExp) => (text.match(re) ?? []).join(' | ');
+    console.log(JSON.stringify({
+      migrated: {
+        environments: migrated.environments.map((e) => `${e.name} ${e.site}`),
+        legacyAccount: legacy ? `${legacy.environmentId} ${legacy.username}` : null,
+        legacyPasswordCarried: legacy ? migrated.savedPasswords.includes(`testAccount.${legacy.id}.password`) : false
+      },
+      settingsView, readingSize, zoom, hasVerify,
+      devPrompt: pick(devPrompt, /live on \w+|Sign in as [^\n]*/g),
+      localPrompt: pick(localPrompt, /live on \w+|\d\. [^\n]*/g),
+      // Usernames and passwords, not the site URL, which is meant to be there.
+      credentialsInPrompt: /@example\.invalid|legacy-pw/.test(devPrompt + localPrompt)
+    }, null, 2));
   }
 
   // --- Items 37–41: a simpler Sessions tab, a leaner rail, a fitted terminal --

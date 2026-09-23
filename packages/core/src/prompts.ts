@@ -17,6 +17,7 @@
 import type { PullSummary } from './github/pullStatus';
 import { describePull } from './github/pullStatus';
 import type { JiraIssue, SentryFrame, SentryIssue } from './types';
+import { verifyAccountsClause, type TestAccount } from './testAccounts';
 
 export const DEFAULTREVIEWTEMPLATE = `Review \${url} using gh.
 
@@ -169,7 +170,7 @@ Pull the full diff only for the files that stat shows changed — skip  generate
 
 Step 2 — go and look. The site is \${site}. Drive a real browser with  Playwright and check each of those behaviours against what is actually on  screen. Do not infer the answer from the code — the whole point is that  the code being merged and the feature being live are different facts.
 
-Sign in with the username in $BATON_ENV_USER and the password in  $BATON_ENV_PASSWORD. Read both from the environment. Never print them,  never echo them into a terminal, never write them into a file, a commit or  a screenshot, and do not repeat them back to me.
+\${accounts}
 \${basicAuth}
 Screenshot everything that proves something — the feature working, or the  place it should be and is not. Save each one as a PNG in $BATON_SHOTS,  numbered in the order you took them and named for what they show:
 
@@ -223,7 +224,15 @@ export interface VerifyEnvironment {
   site: string;
   /** Whether there is a Basic Auth wall, distinct from the app's own sign-in. */
   hasBasicAuth?: boolean;
+  /**
+   * Who the agent can sign in as, in the order `$BATON_ACCOUNT_n_*` numbers
+   * them. Left out, the prompt keeps the single `$BATON_ENV_USER` sign-in it
+   * had before accounts existed.
+   */
+  accounts?: readonly TestAccount[];
 }
+
+const SINGLE_SIGN_IN = `Sign in with the username in $BATON_ENV_USER and the password in  $BATON_ENV_PASSWORD. Read both from the environment. Never print them,  never echo them into a terminal, never write them into a file, a commit or  a screenshot, and do not repeat them back to me.`;
 
 /**
  * The "check it shipped" prompt.
@@ -247,11 +256,21 @@ export function renderVerifyPrompt(
   const site = environment.site.trim()
     || 'NOT CONFIGURED — no site is set in Baton. Stop here and report `could not check`, saying that no environment is configured.';
 
-  return substitute(renderPullPrompt(template, pull, options), {
+  const accounts = environment.accounts
+    ? verifyAccountsClause(named, environment.accounts)
+    : SINGLE_SIGN_IN;
+  // A template saved before `${accounts}` existed still gets told who it can
+  // sign in as — at the end, rather than not at all.
+  const withAccounts = template.includes('${accounts}') || !environment.accounts
+    ? template
+    : `${template}\n\n${accounts}`;
+
+  return substitute(renderPullPrompt(withAccounts, pull, options), {
     env: named,
     site,
     verdicts: verdictLines(),
-    basicAuth: basicAuthClause(Boolean(environment.hasBasicAuth))
+    basicAuth: basicAuthClause(Boolean(environment.hasBasicAuth)),
+    accounts
   });
 }
 

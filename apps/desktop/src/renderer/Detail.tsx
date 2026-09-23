@@ -617,7 +617,7 @@ export function PullPane({
   return (
     <div className="detail-shell">
     <div className="detail-scroll">
-    <div className="detail">
+    <div className="detail reading">
       <header className="detail-head">
         <div className="detail-pill-row">
           <StatusPill tone={TONE[primaryFlag.id]} label={primaryFlag.label} />
@@ -867,7 +867,7 @@ export function TicketPane({
   return (
     <div className="detail-shell">
     <div className="detail-scroll">
-    <div className="detail">
+    <div className="detail reading">
       <header className="detail-head">
         <div className="detail-pill-row">
           <StatusPill tone={issue.statusCategory === 'done' ? 'pass' : 'waiting'} label={issue.status} />
@@ -1061,7 +1061,7 @@ export function SentryPane({
   return (
     <div className="detail-shell">
     <div className="detail-scroll">
-    <div className="detail">
+    <div className="detail reading">
       <header className="detail-head">
         <h2>{issue.title}</h2>
         <div className="detail-meta">

@@ -6,6 +6,8 @@ import {
 import { savePrices, useUsage } from './Usage';
 import type { ThemeChoice } from './types';
 import { FontSizeControl, useTerminalFontSize } from './terminalFontSize';
+import { TestEnvironmentSettings } from './TestEnvironments';
+import { ReadingSizeControl } from './readingSize';
 
 interface Field {
   key: string;
@@ -26,24 +28,6 @@ const THEME_OPTIONS: { id: ThemeChoice; label: string }[] = [
   { id: 'system', label: 'System' },
   { id: 'light', label: 'Light' },
   { id: 'dark', label: 'Dark' }
-];
-
-/**
- * The dev environment "Check it shipped" signs an agent into — one site, its
- * own login, and an optional Basic Auth wall in front of it. Shaped as a
- * `Field[]` on purpose: it reuses the exact save path a provider does, values
- * to settings, secrets to the Keychain, nothing read back once it is secret.
- */
-const ENVIRONMENT_FIELDS: Field[] = [
-  { key: 'verify.environment', label: 'Environment name', placeholder: 'Staging' },
-  { key: 'verify.site', label: 'Site URL', placeholder: 'https://staging.acme.app' },
-  { key: 'verify.username', label: 'Username or email' },
-  { key: 'verify.password', label: 'Password', secret: true }
-];
-
-const BASIC_AUTH_FIELDS: Field[] = [
-  { key: 'verify.basicUsername', label: 'Basic auth username' },
-  { key: 'verify.basicPassword', label: 'Basic auth password', secret: true }
 ];
 
 /**
@@ -308,7 +292,6 @@ export function Settings({
   const [values, setValues] = useState<Record<string, string>>({});
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
   const [notify, setNotify] = useState(true);
-  const [basicAuth, setBasicAuth] = useState(false);
   const [saving, setSaving] = useState('');
   const [active, setActive] = useState('general');
   const [saveResult, setSaveResult] = useState<Record<string, { ok: boolean; text: string }>>({});
@@ -326,7 +309,6 @@ export function Settings({
       setValues(seed);
       setLaunchAtLogin(Boolean(settings['launchAtLogin']));
       setNotify(settings['notify.enabled'] !== false);
-      setBasicAuth(Boolean(settings['verify.basicAuth']));
     });
   }, []);
 
@@ -393,7 +375,6 @@ export function Settings({
   }
 
   const sections = ['general', ...Object.keys(fields), 'environment'];
-  const configured = Boolean(values['verify.site']);
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>
@@ -413,11 +394,10 @@ export function Settings({
                 className={id === active ? 'active' : ''}
                 onClick={() => setActive(id)}
               >
-                {id === 'general' ? 'General' : id === 'environment' ? 'Dev environment' : PROVIDER_LABEL[id] ?? id}
+                {id === 'general' ? 'General' : id === 'environment' ? 'Environments' : PROVIDER_LABEL[id] ?? id}
                 {id !== 'general' && id !== 'environment' && connected.includes(id as ProviderId) && (
                   <span className="badge">connected</span>
                 )}
-                {id === 'environment' && configured && <span className="badge">configured</span>}
               </button>
             ))}
           </nav>
@@ -444,6 +424,10 @@ export function Settings({
                 <label>
                   <span>Terminal font size</span>
                   <FontSizeControl size={fontSize} onBump={bumpFontSize} />
+                </label>
+                <label>
+                  <span>Ticket and pull request text size</span>
+                  <ReadingSizeControl />
                 </label>
 
                 <h3>General</h3>
@@ -495,42 +479,7 @@ export function Settings({
               </section>
             )}
 
-            {active === 'environment' && (
-              <section className="provider">
-                <h3>
-                  Dev environment
-                  {configured && <span className="badge">configured</span>}
-                </h3>
-                {ENVIRONMENT_FIELDS.map(field)}
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={basicAuth}
-                    onChange={(e) => void toggle('verify.basicAuth', e.target.checked, setBasicAuth)}
-                  />
-                  <span>Site sits behind a separate HTTP Basic Auth wall</span>
-                </label>
-                {basicAuth && BASIC_AUTH_FIELDS.map(field)}
-                <p className="settings-note">
-                  Handed to the agent only as environment variables when it runs "Check it
-                  shipped" — never written into the prompt, and never sent anywhere else.
-                </p>
-                <button
-                  className="primary"
-                  disabled={saving === 'environment'}
-                  onClick={() =>
-                    void save([...ENVIRONMENT_FIELDS, ...(basicAuth ? BASIC_AUTH_FIELDS : [])], 'environment')
-                  }
-                >
-                  {saving === 'environment' ? 'Saving…' : 'Save environment'}
-                </button>
-                {saveResult['environment'] && (
-                  <p className={saveResult['environment'].ok ? 'settings-note ok' : 'settings-note error'}>
-                    {saveResult['environment'].text}
-                  </p>
-                )}
-              </section>
-            )}
+            {active === 'environment' && <TestEnvironmentSettings />}
           </div>
         </div>
       </div>

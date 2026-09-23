@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
-import type { JiraIssue, PullSummary, RunKind, Runner, RunTarget, SentryFrame, SentryIssue, StartResult } from './types';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type {
+  JiraIssue, PullSummary, RunKind, Runner, RunTarget, SentryFrame, SentryIssue, StartResult, TestSelection
+} from './types';
+import { TestEnvironmentPicker } from './TestEnvironments';
 
 const LAST_MODEL_KEY = 'runner.lastModel';
 
@@ -41,6 +44,12 @@ export function RunSheet({
   const [model, setModel] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [test, setTest] = useState<TestSelection>();
+  // Hand edits to the prompt survive an environment change: the prompt is
+  // only rebuilt for you while you have not touched it.
+  const [edited, setEdited] = useState(false);
+  const [stale, setStale] = useState(false);
+  const firstBuild = useRef(true);
 
   const subject = { pull, issue, sentry };
   const subjectId = sentry ? sentry.issue.shortId : issue ? issue.key : pull ? `${pull.repo}#${pull.number}` : '';
@@ -54,12 +63,31 @@ export function RunSheet({
     });
     void window.baton.knownModels().then(setKnownModels);
     void window.baton.runTargets().then(setTargets);
-    void window.baton.buildPrompt(kind, subject).then(setPrompt);
     void window.baton.defaultCwd(pull?.repo).then((dir) => setCwd((c) => c || dir || ''));
     // Rebuilding on every keystroke of the prompt would discard the user's
     // edits, so this deliberately runs once per sheet.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, subjectId]);
+
+  const rebuild = useCallback((selection: TestSelection | undefined) => {
+    void window.baton.buildPrompt(kind, subject, selection).then((next) => {
+      setPrompt(next);
+      setEdited(false);
+      setStale(false);
+    });
+    // `subject` is rebuilt every render; the sheet is keyed by kind and subject.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, subjectId]);
+
+  const onTestChange = useCallback((selection: TestSelection | undefined) => {
+    setTest(selection);
+    if (firstBuild.current || !edited) {
+      firstBuild.current = false;
+      rebuild(selection);
+    } else {
+      setStale(true);
+    }
+  }, [edited, rebuild]);
 
   // Whichever model this agent was last run with, anywhere — not per ticket,
   // per agent: switching the Agent dropdown re-reads this for the newly
@@ -78,7 +106,7 @@ export function RunSheet({
     setError('');
     try {
       const result: StartResult = await window.baton.startAgent(
-        { kind, subjectId, runnerId, cwd, prompt, model: model || undefined },
+        { kind, subjectId, runnerId, cwd, prompt, model: model || undefined, test },
         subject
       );
       if (result.ok) {
@@ -151,11 +179,21 @@ export function RunSheet({
           )}
         </div>
 
+        <TestEnvironmentPicker kind={kind} onChange={onTestChange} />
+
         <label className="prompt-label">
-          <span>Prompt — edit before sending if you want</span>
+          <span>
+            Prompt — edit before sending if you want
+            {stale && (
+              <>
+                {' · '}the environment changed after you edited it.{' '}
+                <button type="button" className="link" onClick={() => rebuild(test)}>Rebuild prompt</button>
+              </>
+            )}
+          </span>
           <textarea
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) => { setPrompt(e.target.value); setEdited(true); }}
             spellCheck={false}
             rows={18}
           />

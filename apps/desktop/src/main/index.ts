@@ -32,6 +32,7 @@ import {
 } from './smoke';
 import { Sessions } from './sessions';
 import { Agents } from './agents';
+import type { TestEnvironmentSave, TestSelection } from './testEnvironments';
 import { KNOWN_MODELS } from '@baton/agent';
 import { Workspaces } from './workspace';
 import { QuickModel } from './quick';
@@ -396,8 +397,12 @@ app.whenReady().then(async () => {
   ipcMain.handle('baton:runners', () => agents.runners());
   ipcMain.handle('baton:known-models', () => KNOWN_MODELS);
   ipcMain.handle('baton:run-targets', (_event, force?: boolean) => agents.targets(force));
-  ipcMain.handle('baton:build-prompt', (_event, kind, subject) =>
-    agents.buildPrompt(kind, subject)
+  ipcMain.handle('baton:build-prompt', (_event, kind, subject, test?: TestSelection) =>
+    agents.buildPrompt(kind, subject, test)
+  );
+  ipcMain.handle('baton:test-environments', () => agents.testEnvironments.state());
+  ipcMain.handle('baton:test-environments-save', (_event, next: TestEnvironmentSave) =>
+    agents.testEnvironments.save(next)
   );
   ipcMain.handle('baton:default-cwd', (_event, repo?: string) => agents.defaultCwd(repo));
   ipcMain.handle('baton:start-agent', async (_event, request, subject) => {

@@ -75,8 +75,10 @@ const api = {
   runners: () => ipcRenderer.invoke('baton:runners'),
   knownModels: () => ipcRenderer.invoke('baton:known-models'),
   runTargets: (force?: boolean) => ipcRenderer.invoke('baton:run-targets', force),
-  buildPrompt: (kind: string, subject: unknown) =>
-    ipcRenderer.invoke('baton:build-prompt', kind, subject),
+  buildPrompt: (kind: string, subject: unknown, test?: unknown) =>
+    ipcRenderer.invoke('baton:build-prompt', kind, subject, test),
+  testEnvironments: () => ipcRenderer.invoke('baton:test-environments'),
+  testEnvironmentsSave: (next: unknown) => ipcRenderer.invoke('baton:test-environments-save', next),
   defaultCwd: (repo?: string) => ipcRenderer.invoke('baton:default-cwd', repo),
   startAgent: (request: unknown, subject: unknown) =>
     ipcRenderer.invoke('baton:start-agent', request, subject),

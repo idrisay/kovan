@@ -11,6 +11,8 @@
  * `defaults read com.idrisay.devhub` import lands on the right names.
  */
 
+import type { TestAccount, TestEnvironment } from './testAccounts';
+
 import type { PathMapping } from './types';
 
 export interface Settings {
@@ -73,6 +75,15 @@ export interface Settings {
   'verify.username': string;
   'verify.basicAuth': boolean;
   'verify.basicUsername': string;
+  /**
+   * Environments and the test accounts on each (see `testAccounts.ts`). The
+   * five `verify.*` keys above are the single environment this replaced;
+   * they are read once to seed these and then left alone.
+   */
+  'verify.environments': TestEnvironment[];
+  'verify.accounts': TestAccount[];
+  /** Which environment "Check it shipped" preselects. */
+  'verify.defaultEnvironment': string;
 
   'runner.default': string;
   'runner.custom': unknown[];
@@ -141,6 +152,9 @@ export const DEFAULT_SETTINGS: Settings = {
   'verify.username': '',
   'verify.basicAuth': false,
   'verify.basicUsername': '',
+  'verify.environments': [],
+  'verify.accounts': [],
+  'verify.defaultEnvironment': '',
 
   'runner.default': '',
   'runner.custom': [],
