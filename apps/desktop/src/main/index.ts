@@ -13,6 +13,7 @@
  */
 
 import { app, BrowserWindow, ipcMain, nativeTheme, shell } from 'electron';
+import { execFile } from 'node:child_process';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHost } from './host';
@@ -21,16 +22,22 @@ import type { ProviderId } from '@baton/core';
 import type { ChangeKind } from '@baton/git';
 import { BatonTray } from './tray';
 import { Activity } from './notify';
-import { CREDENTIAL_FIELDS, Credentials, HttpClient, JiraClient, fetchPullDetail } from '@baton/providers';
+import {
+  CREDENTIAL_FIELDS, Credentials, HttpClient, JiraClient, fetchPullDetail, fetchPullDiff, submitPullReview
+} from '@baton/providers';
 import { adoptImportedTokens } from './adopt';
 import {
-  smokePty, smokeUi, type SmokeMode, detailFixture, fixtureSnapshot, sentryFramesFixture,
+  smokePty, smokeUi, type SmokeMode, detailFixture, diffFixture, fixtureSnapshot, sentryFramesFixture,
   sentryTicketFixture, ticketFixture
 } from './smoke';
 import { Sessions } from './sessions';
 import { Agents } from './agents';
 import { KNOWN_MODELS } from '@baton/agent';
 import { Workspaces } from './workspace';
+import { QuickModel } from './quick';
+import { Usage } from './usage';
+import { RunningAgents } from './running';
+import { ticketKeyInTitle, type QuickKind, type ReviewEvent } from '@baton/core';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -61,10 +68,108 @@ const host = createHost();
 const poller = new Poller(host);
 const activity = new Activity(host);
 const sessions = new Sessions();
-const agents = new Agents(host, sessions);
-const workspaces = new Workspaces(host);
 const detailHttp = new HttpClient(host.log);
 const credentials = new Credentials(host);
+const quick = new QuickModel(host, {
+  pull: loadPullDetail, ticket: loadTicket, diff: loadPullDiff, submitReview: postPullReview
+});
+const usage = new Usage(host, sessions, () => quick.listJobs());
+const agents = new Agents(host, sessions, quick);
+const running = new RunningAgents(host, sessions, () => {
+  createWindow();
+  window?.webContents.send('baton:show-agents');
+});
+const workspaces = new Workspaces(host);
+
+/**
+ * One pull request's full detail. Shared by the detail pane and the quick
+ * model, so "Summarize" reads exactly what the pane shows.
+ */
+async function loadPullDetail(repo: string, number: number) {
+  // Guarded by BATON_USER_DATA, the same way workspace seeding is: a fixture
+  // can only ever be served to a throwaway profile, never to a real one.
+  if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+    return detailFixture(repo, number);
+  }
+  const token = await host.secrets.get('github');
+  if (!token) {
+    throw new Error('GitHub is not connected');
+  }
+  return fetchPullDetail(
+    detailHttp,
+    host.config.get('github.baseUrl', 'https://api.github.com'),
+    token,
+    repo,
+    number
+  );
+}
+
+/** A pull request's unified diff, for the Kimi K3 review. */
+async function loadPullDiff(repo: string, number: number) {
+  if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+    return diffFixture();
+  }
+  const token = await host.secrets.get('github');
+  if (!token) {
+    throw new Error('GitHub is not connected');
+  }
+  return fetchPullDiff(detailHttp, host.config.get('github.baseUrl', 'https://api.github.com'), token, repo, number);
+}
+
+/** Posts a review as the user. Only from a confirmed click on the review card. */
+async function postPullReview(repo: string, number: number, event: ReviewEvent, body: string) {
+  // A smoke run must never post anything, anywhere.
+  if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+    return { url: `https://github.com/${repo}/pull/${number}#pullrequestreview-smoke` };
+  }
+  const token = await host.secrets.get('github');
+  if (!token) {
+    throw new Error('GitHub is not connected');
+  }
+  return submitPullReview(detailHttp, host.config.get('github.baseUrl', 'https://api.github.com'), token, repo, number, event, body);
+}
+
+async function loadTicket(key: string) {
+  if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+    return ticketFixture(key);
+  }
+  const token = await host.secrets.get('jira');
+  const site = host.config.get('jira.baseUrl', '');
+  const email = host.config.get('jira.email', '');
+  if (!token || !site || !email) {
+    throw new Error('Jira is not connected');
+  }
+  return new JiraClient(detailHttp, site, email, token).getIssue(key);
+}
+
+/**
+ * What a plain terminal is called, when nothing opening it named it: the
+ * repository and branch it sits on, and the ticket when the branch names one
+ * (`fix/ACME-2393-tablet-qa` → `acme/acme-frontend · ACME-2393`) — so
+ * the row links to that ticket instead of reading "Terminal" like every other.
+ */
+async function nameTerminal(cwd: string, subject?: string): Promise<{ title: string; subject?: string }> {
+  // One git call: the clone's root (a terminal opened in a subfolder is
+  // still named after its repository) and the branch.
+  const [root, branch] = await new Promise<[string, string]>((resolve) => {
+    execFile('git', ['-C', cwd, 'rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD'], { timeout: 3000 }, (err, stdout) => {
+      const [top = '', head = ''] = err ? [] : stdout.trim().split('\n');
+      resolve([top.trim(), head.trim()]);
+    });
+  });
+  const targets = await agents.targets().catch(() => []);
+  const target = targets.find((t) => t.path === cwd) ?? targets.find((t) => root && t.path === root);
+  const label = target?.label ?? path.basename(root || cwd);
+  if (subject) return { title: `${label} · ${subject}`, subject };
+  // Branches are usually lower-case (`fix/acme-2393-…`); an upper-cased
+  // match only counts for a project Baton already has tickets from, so
+  // `feat/utf-8` does not become ticket UTF-8.
+  const projects = new Set(poller.current().tickets.map((t) => t.key.split('-')[0]));
+  const loose = ticketKeyInTitle(branch.toUpperCase());
+  const key = ticketKeyInTitle(branch) || (loose && projects.has(loose.split('-')[0]!) ? loose : '');
+  if (key) return { title: `${label} · ${key}`, subject: key };
+  return { title: branch && branch !== 'HEAD' ? `${label} (${branch})` : label };
+}
 
 let window: BrowserWindow | undefined;
 let tray: BatonTray | undefined;
@@ -240,37 +345,52 @@ app.whenReady().then(async () => {
     return poller.loadMoreMerged(want);
   });
 
-  ipcMain.handle('baton:pull-detail', async (_event, repo: string, number: number) => {
-    // Guarded by BATON_USER_DATA, the same way workspace seeding is: a fixture
-    // can only ever be served to a throwaway profile, never to a real one.
-    if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
-      return detailFixture(repo, number);
-    }
-    const token = await host.secrets.get('github');
-    if (!token) {
-      throw new Error('GitHub is not connected');
-    }
-    return fetchPullDetail(
-      detailHttp,
-      host.config.get('github.baseUrl', 'https://api.github.com'),
-      token,
-      repo,
-      number
-    );
-  });
+  ipcMain.handle('baton:pull-detail', (_event, repo: string, number: number) => loadPullDetail(repo, number));
+  ipcMain.handle('baton:ticket-detail', (_event, key: string) => loadTicket(key));
 
-  ipcMain.handle('baton:ticket-detail', async (_event, key: string) => {
-    if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
-      return ticketFixture(key);
+  // --- Quick model ----------------------------------------------------------
+  quick.onChange((kind, subject, state) => {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('baton:quick', kind, subject, state);
     }
-    const token = await host.secrets.get('jira');
-    const site = host.config.get('jira.baseUrl', '');
-    const email = host.config.get('jira.email', '');
-    if (!token || !site || !email) {
-      throw new Error('Jira is not connected');
-    }
-    return new JiraClient(detailHttp, site, email, token).getIssue(key);
   });
+  quick.onJobs((jobs) => {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('baton:quick-jobs', jobs);
+    }
+    void usage.quickChanged();
+  });
+  ipcMain.handle('baton:quick-jobs', () => quick.listJobs());
+  ipcMain.handle('baton:quick-job-remove', (_event, id: string) => quick.removeJob(id));
+  ipcMain.handle('baton:quick-state', (_event, kind: QuickKind, subject: string) => quick.state(kind, subject));
+  ipcMain.handle('baton:quick-run', (_event, kind: QuickKind, subject: string) => quick.run(kind, subject));
+  ipcMain.handle('baton:quick-cancel', (_event, kind: QuickKind, subject: string) => quick.cancel(kind, subject));
+  ipcMain.handle('baton:quick-dismiss', (_event, kind: QuickKind, subject: string) => quick.dismiss(kind, subject));
+  ipcMain.handle('baton:quick-test', (_event, model?: string) => quick.test(model));
+  ipcMain.handle('baton:review-submit', (_event, subject: string, event: ReviewEvent) => quick.submitReview(subject, event));
+
+  // --- Token usage ----------------------------------------------------------
+  usage.onChange((records) => {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('baton:usage', records);
+    }
+  });
+  ipcMain.handle('baton:usage', () => usage.list());
+  usage.start();
+
+  // --- Running agents -------------------------------------------------------
+  running.onChange((report) => {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('baton:running-agents', report);
+    }
+  });
+  ipcMain.handle('baton:running-agents', () => running.current());
+  ipcMain.handle('baton:running-agents-watch', (_event, on: boolean) => running.watch(on));
+  ipcMain.handle('baton:running-agents-stop', (_event, keys: string[], children: boolean) =>
+    running.stop(Array.isArray(keys) ? keys.filter((k) => typeof k === 'string') : [], children !== false)
+  );
+  ipcMain.handle('baton:running-agents-force', (_event, key: string) => running.forceStop(key));
+  running.start();
 
   // --- Agents ---------------------------------------------------------------
   ipcMain.handle('baton:runners', () => agents.runners());
@@ -373,7 +493,8 @@ app.whenReady().then(async () => {
       if (!target) {
         throw new Error('No folder to open a terminal in');
       }
-      return sessions.open({ cwd: target, title: title ?? 'Terminal', runnerName: 'Shell', subject });
+      const named = title ? { title, subject } : await nameTerminal(target, subject);
+      return sessions.open({ cwd: target, title: named.title, runnerName: 'Shell', subject: named.subject });
     }
   );
 
@@ -457,6 +578,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  usage.dispose();
+  running.dispose();
   poller.stop();
   sessions.disposeAll();
   tray?.dispose();

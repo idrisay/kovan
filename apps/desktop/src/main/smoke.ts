@@ -27,6 +27,7 @@ import * as path from 'node:path';
 import type { Agents } from './agents';
 import type { Poller, Snapshot } from './poller';
 import type { Sessions } from './sessions';
+import { reviewBasis } from '@baton/core';
 
 export type SmokeMode = '1' | 'seeded' | 'live' | 'pty' | 'workspace';
 
@@ -292,9 +293,53 @@ const TICKET_HIGHEST = {
  * Served instead of the network only when `BATON_USER_DATA` is also set —
  * the same guard `detailFixture` uses — so it can never reach a real profile.
  */
+/** A small diff with one real defect in it, for the Kimi K3 review shot. */
+export function diffFixture(): string {
+  return [
+    'diff --git a/src/components/QuestionTable.tsx b/src/components/QuestionTable.tsx',
+    '--- a/src/components/QuestionTable.tsx',
+    '+++ b/src/components/QuestionTable.tsx',
+    '@@ -112,7 +112,11 @@ export function QuestionTable({ rows, columns }: Props) {',
+    '-  return <div className="overflow-x-auto"><div className="min-w-full overflow-hidden">',
+    '+  const floor = 860;',
+    '+  const width = columns.reduce((sum, c) => sum + c.width, 0);',
+    '+  const scroll = width / rows.length > floor;',
+    '+  return <div className={scroll ? "table-scroll-x" : ""}>',
+    '+    <div className="min-w-full" style={{ minWidth: floor }}>'
+  ].join('\n');
+}
+
 export function ticketFixture(_key: string) {
+  // The quick-model shot needs a thread long enough for "Condense" to appear
+  // (more than the latest ten). Only under that flag, so every other shot of
+  // the ticket pane keeps the one comment it was taken with.
+  if (process.env['BATON_SHOT_QUICK']) {
+    return { ...TICKET, comments: [...LONG_THREAD, ...TICKET.comments] };
+  }
   return TICKET;
 }
+
+const LONG_THREAD = [
+  'Reproduced on iPad landscape: the table overlaps the sidebar below 1100px.',
+  'Is this the same bug as the scrollbar ticket, or separate?',
+  'Separate. The scrollbar is ACME-2401; this is the row actions overlapping.',
+  'Decision from design: keep the scrollbar visible whenever the table is cut off, not only on hover.',
+  'We tried a CSS-only fix with overflow: overlay, but Safari dropped support, so that is out.',
+  'Touch devices above 1000px should get the tap fallback, not hover.',
+  'Still open: do we need the fallback on Android tablets too?',
+  'QA: first round shipped in August, overlaps still reproducible 75 minutes after merge.',
+  'Root cause: the row actions are absolutely positioned against the wrong container.',
+  'Fix in review, see the linked PR.',
+  'Re-test scheduled for Thursday.',
+  'Design signed off on the persistent scrollbar colours.',
+  'Android tablets: product says yes, same fallback.',
+  'PR updated with the Android fallback.',
+  'Waiting on QA.'
+].map((body, i) => ({
+  author: ['qa', 'dev', 'design', 'product'][i % 4]!,
+  created: new Date(Date.now() - (40 - i) * 86_400_000).toISOString(),
+  body
+}));
 
 /**
  * A pull request detail rich enough to judge the layout by: a long body with a
@@ -308,6 +353,7 @@ export function detailFixture(repo: string, number: number) {
     repo,
     title: FIXTURE.title,
     url: FIXTURE.url,
+    author: 'someone',
     body: [
       '## Tablet and mobile QA, second round',
       '',
@@ -507,6 +553,35 @@ async function until(
 
 const read = (win: BrowserWindow, expression: string) =>
   win.webContents.executeJavaScript(expression) as Promise<unknown>;
+
+/**
+ * Clicks a quick-model button and waits for the card — a real `opencode run`
+ * against the fixture, so it is opt-in (BATON_SHOT_QUICK) and allowed to be
+ * slow. Captures the running state and the finished card.
+ */
+async function shootQuick(
+  win: BrowserWindow, file: string, label = '', timeoutMs = 180_000
+): Promise<Record<string, unknown>> {
+  const button = `Array.from(document.querySelectorAll('.detail-actions button.quick')).find(b => b.textContent.includes(${JSON.stringify(label)}))`;
+  await read(win, `${button}?.click()`);
+  await until(win, `document.querySelector('.quick-card')`, 10_000);
+  await new Promise((r) => setTimeout(r, 1200));
+  await writeFile(file.replace(/\.png$/, '-running.png'), (await win.webContents.capturePage()).toPNG());
+  await until(
+    win,
+    `!Array.from(document.querySelectorAll('.detail-actions button.quick')).some(b => b.disabled)`,
+    timeoutMs
+  );
+  await new Promise((r) => setTimeout(r, 300));
+  await read(win, `document.querySelector('.quick-card')?.scrollIntoView({ block: 'start' })`);
+  await new Promise((r) => setTimeout(r, 200));
+  await writeFile(file, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${file}`);
+  return {
+    button: await read(win, `document.querySelector('.detail-actions button.quick')?.textContent ?? ''`),
+    card: await read(win, `document.querySelector('.quick-card')?.innerText ?? ''`)
+  };
+}
 
 export async function smokeUi(
   win: BrowserWindow,
@@ -1742,6 +1817,271 @@ export async function smokeUi(
     console.log(`shot: ${process.env['BATON_SHOT_DETAIL']}-expanded.png`);
   }
 
+  if (process.env['BATON_SHOT_QUICK']) {
+    await read(win, `document.querySelector('.detail-scroll').scrollTo(0, 0)`);
+    result['quickPull'] = await shootQuick(win, process.env['BATON_SHOT_QUICK'].replace(/\.png$/, '-pull.png'), 'Summarize');
+  }
+
+  // Opt-in on its own: a real Kimi K3 review takes minutes, so this polls
+  // every ten seconds rather than holding one long wait open.
+  if (process.env['BATON_SHOT_KIMI']) {
+    const file = process.env['BATON_SHOT_KIMI'];
+    await read(win, `document.querySelector('.detail-scroll').scrollTo(0, 0)`);
+    await read(win, `Array.from(document.querySelectorAll('.detail-actions button.quick')).find(b => b.textContent.includes('Kimi'))?.click()`);
+    await new Promise((r) => setTimeout(r, 1500));
+    await writeFile(file.replace(/\.png$/, '-running.png'), (await win.webContents.capturePage()).toPNG());
+    const cardOf = `Array.from(document.querySelectorAll('.quick-card')).find(c => c.innerText.startsWith('Kimi K3 review'))`;
+    const deadline = Date.now() + 21 * 60_000;
+    while (Date.now() < deadline) {
+      const done = await read(win, `Boolean(${cardOf}?.querySelector('.quick-card-body') || ${cardOf}?.classList.contains('failed'))`);
+      if (done) break;
+      await new Promise((r) => setTimeout(r, 10_000));
+    }
+    await read(win, `${cardOf}?.scrollIntoView({ block: 'start' })`);
+    // After a long wait in the background Chromium stops painting the window,
+    // and capturePage hands back the last frame it did paint — here, the
+    // card still "reviewing… 2s". Bring it forward and repaint first.
+    win.show();
+    win.focus();
+    win.webContents.invalidate();
+    await new Promise((r) => setTimeout(r, 600));
+    await writeFile(file, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${file}`);
+    result['kimiReview'] = await read(win, `${cardOf}?.innerText ?? ''`);
+    result['kimiHistory'] = await read(win, `Array.from(document.querySelectorAll('.runs li')).map(li => li.innerText)`);
+    // Put the pane back as the later layout checks expect to find it.
+    await read(win, `${cardOf}?.querySelector('[aria-label="Dismiss"]')?.click()`);
+    await read(win, `document.querySelector('.detail-scroll').scrollTo(0, 0)`);
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
+  // --- Items 33 and 34: token usage, and submitting a review ----------------
+  // Seeds a finished review for whichever PR is open (usage.json is seeded by
+  // the caller before launch), then walks: verdict card → confirm → posted
+  // (the smoke's own submit never reaches GitHub) → Sessions' Token usage.
+  if (process.env['BATON_SHOT_USAGE']) {
+    const prefix = process.env['BATON_SHOT_USAGE'];
+    const shot = async (name: string) => {
+      win.webContents.invalidate();
+      await new Promise((r) => setTimeout(r, 400));
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+    // A live poll (the fixture profile's Sentry 401) can replace the fixture
+    // snapshot mid-run; put it back before driving the pane.
+    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    await read(win, `document.querySelector('[aria-label="Pull requests"]')?.click()`);
+    await until(win, `document.querySelector('.queue .row')`, 5_000);
+    if (!(await read(win, `Boolean(document.querySelector('.detail-pill-repo'))`))) {
+      await read(win, `document.querySelector('.queue .row')?.click()`);
+      await until(win, `document.querySelector('.detail-pill-repo')`, 10_000);
+    }
+    const repoText = String(await read(win, `document.querySelector('.detail-pill-repo')?.textContent ?? ''`));
+    const [, repo, num] = /^(\S+) #(\d+)$/.exec(repoText.trim()) ?? [];
+    const subject = `${repo}#${num}`;
+    const detail = detailFixture(repo!, Number(num));
+    await mkdir(path.join(app.getPath('userData'), 'quick'), { recursive: true });
+    await writeFile(
+      path.join(app.getPath('userData'), 'quick', `${subject.replace(/[/\\:]/g, '_')}.json`),
+      JSON.stringify({
+        'pull-review': {
+          kind: 'pull-review', subject, model: 'moonshotai/kimi-k3 (nv-review)', createdAt: new Date(Date.now() - 180_000).toISOString(),
+          basis: reviewBasis(detail), verdict: 'request_changes',
+          text: '## Summary\nMakes the question table scroll horizontally on tablets. Not ready: one overflow case is still broken.\n\n' +
+            '## Must fix\n- `src/components/QuestionTable.tsx:48`: the row actions are positioned against the wrong container, so they still overlap below 1100px. Anchor them to the scroll container.\n\n' +
+            '## Should fix\n- No test covers the tap fallback added for touch devices.\n\n## Already raised\nnone'
+        }
+      }),
+      'utf8'
+    );
+    // Select another pull request and come back, so the pane reads the seeded result.
+    const rowOf = (n: string) => `Array.from(document.querySelectorAll('.queue .row')).find(r => r.innerText.trim().startsWith(${JSON.stringify(n)}))`;
+    await read(win, `Array.from(document.querySelectorAll('.queue .row')).find(r => !r.innerText.trim().startsWith(${JSON.stringify(num)}))?.click()`);
+    await new Promise((r) => setTimeout(r, 500));
+    await read(win, `${rowOf(num!)}?.click()`);
+    await until(win, `Array.from(document.querySelectorAll('.quick-card')).some(c => c.innerText.startsWith('Code review'))`, 10_000);
+    const cardOf = `Array.from(document.querySelectorAll('.quick-card')).find(c => c.innerText.startsWith('Code review'))`;
+    await read(win, `${cardOf}?.scrollIntoView({ block: 'start' })`);
+    await shot('review-verdict');
+    await read(win, `${cardOf}?.querySelector('.review-event.changes')?.click()`);
+    await new Promise((r) => setTimeout(r, 200));
+    await shot('review-confirm');
+    result['usageConfirm'] = await read(win, `${cardOf}?.querySelector('.review-confirm')?.innerText ?? ''`);
+    await read(win, `Array.from(${cardOf}?.querySelectorAll('.review-confirm button') ?? []).find(b => b.textContent === 'Post review')?.click()`);
+    await until(win, `Boolean(${cardOf}?.querySelector('.review-decision.posted'))`, 10_000);
+    await shot('review-posted');
+    result['usagePosted'] = await read(win, `${cardOf}?.querySelector('.review-decision')?.innerText ?? ''`);
+    result['usageRail'] = await read(win, `document.querySelector('.rail-usage')?.innerText ?? ''`);
+    await read(win, `document.querySelector('.rail-usage')?.scrollIntoView({ block: 'center' })`);
+    await shot('pull-rail');
+
+    await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+    await until(win, `Array.from(document.querySelectorAll('.row-title')).some(t => t.textContent === 'Token usage')`, 5_000);
+    await read(win, `Array.from(document.querySelectorAll('.row')).find(r => r.innerText.startsWith('Token usage'))?.click()`);
+    await until(win, `document.querySelector('.detail.usage')`, 5_000);
+    await read(win, `Array.from(document.querySelectorAll('.usage-range')).find(b => b.textContent === '30 days')?.click()`);
+    await shot('overview');
+    result['usageOverview'] = await read(win, `document.querySelector('.detail.usage')?.innerText.slice(0, 1500) ?? ''`);
+    await read(win, `document.querySelector('.detail.usage .detail-scroll, .detail-scroll')?.scrollTo(0, 10000)`);
+    await shot('overview-bottom');
+    await read(win, `document.querySelector('[aria-label="Pull requests"]')?.click()`);
+    await new Promise((r) => setTimeout(r, 400));
+  }
+
+  // --- Item 35: Sessions tab — open links, terminal names, quick-job controls --
+  // Real mouse events, not element.click(): the open-link bug lived in the
+  // row's pointer capture, which a synthetic click never goes through.
+  if (process.env['BATON_SHOT_SESSIONS']) {
+    const prefix = process.env['BATON_SHOT_SESSIONS'];
+    const shot = async (name: string) => {
+      win.webContents.invalidate();
+      await new Promise((r) => setTimeout(r, 400));
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+    const mouseClick = async (expression: string) => {
+      const rect = await read(win, `(() => { const el = ${expression}; if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`) as { x: number; y: number } | null;
+      if (!rect) return false;
+      const x = Math.round(rect.x);
+      const y = Math.round(rect.y);
+      win.webContents.sendInputEvent({ type: 'mouseMove', x, y });
+      await new Promise((r) => setTimeout(r, 80));
+      win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+      await new Promise((r) => setTimeout(r, 40));
+      win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+      await new Promise((r) => setTimeout(r, 300));
+      return true;
+    };
+    win.show();
+    win.focus();
+    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Three ways a terminal gets opened: from a PR's own Terminal button
+    // (named), from the + menu on a folder with a branch, and on a folder
+    // that is not a clone at all.
+    await read(win, `window.baton.openTerminal(${JSON.stringify(process.cwd())}, 'acme/web#42', 'Terminal — acme/web#42')`);
+    await read(win, `window.baton.openTerminal(${JSON.stringify(process.cwd())})`);
+    await read(win, `window.baton.openTerminal(${JSON.stringify(app.getPath('userData'))})`);
+    // A quick job to cancel and close.
+    await read(win, `window.baton.quickRun('pull-summary', 'acme/web#118')`);
+    await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+    await until(win, `document.querySelectorAll('.queue .row').length >= 4`, 10_000);
+    await new Promise((r) => setTimeout(r, 800));
+    result['sessionRows'] = await read(win, `Array.from(document.querySelectorAll('.queue .row')).map(r => r.innerText.replace(/\\n/g, ' | '))`);
+    await shot('list');
+
+    const rowWith = (text: string) => `Array.from(document.querySelectorAll('.queue .row')).find(r => r.innerText.includes(${JSON.stringify(text)}))`;
+    await mouseClick(`${rowWith('Terminal — acme/web#42')}?.querySelector('.open-link')`);
+    result['openLinkLanded'] = await read(win, `({
+      view: document.querySelector('.rail-item[aria-current="page"]')?.getAttribute('aria-label'),
+      pill: document.querySelector('.detail-pill-repo')?.textContent ?? ''
+    })`);
+    await shot('open-link-landed');
+
+    await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+    await until(win, `${rowWith('Summarize · acme/web#118')}`, 5_000);
+    await mouseClick(`${rowWith('Summarize · acme/web#118')}?.querySelector('[aria-label="Cancel"]')`);
+    await until(win, `${rowWith('Summarize · acme/web#118')}?.innerText.includes('cancelled')`, 10_000);
+    result['quickAfterCancel'] = await read(win, `${rowWith('Summarize · acme/web#118')}?.innerText ?? 'gone'`);
+    await shot('quick-cancelled');
+    await mouseClick(`${rowWith('Summarize · acme/web#118')}?.querySelector('[aria-label="Close"]')`);
+    await new Promise((r) => setTimeout(r, 500));
+    result['quickAfterClose'] = await read(win, `${rowWith('Summarize · acme/web#118')}?.innerText ?? 'gone'`);
+    await shot('after-close');
+  }
+
+  // --- Item 36: Running agents ---------------------------------------------
+  // A fake `claude` (BATON_FAKE_AGENT: a node script that ignores SIGINT and
+  // starts a web server) in a Baton terminal: listed with its port, turns
+  // idle, and Stop takes both it and the server down through the escalation.
+  // Only ever the fake's own row is clicked — every other agent on the Mac is
+  // real.
+  if (process.env['BATON_SHOT_AGENTS'] && process.env['BATON_FAKE_AGENT']) {
+    const prefix = process.env['BATON_SHOT_AGENTS'];
+    const fake = process.env['BATON_FAKE_AGENT'];
+    const shot = async (name: string) => {
+      // A live poll with no real credentials replaces the fixture mid-run.
+      win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+      win.webContents.invalidate();
+      await new Promise((r) => setTimeout(r, 400));
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+    const mouseClick = async (expression: string) => {
+      const rect = await read(win, `(() => { const el = ${expression}; if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`) as { x: number; y: number } | null;
+      if (!rect) return false;
+      const x = Math.round(rect.x);
+      const y = Math.round(rect.y);
+      win.webContents.sendInputEvent({ type: 'mouseMove', x, y });
+      await new Promise((r) => setTimeout(r, 80));
+      win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+      await new Promise((r) => setTimeout(r, 40));
+      win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+      await new Promise((r) => setTimeout(r, 300));
+      return true;
+    };
+    win.show();
+    win.focus();
+    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    await read(win, `window.baton.setSetting('agents.idleMinutes', 1)`);
+    const keepFixture = setInterval(() => win.webContents.send('baton:snapshot', fixtureSnapshot(10)), 2_000);
+
+    const session = await read(win, `window.baton.openTerminal(${JSON.stringify(process.cwd())}, undefined, 'Fake agent · smoke')`) as { id: string };
+    await read(win, `window.baton.sessionWrite(${JSON.stringify(session.id)}, ${JSON.stringify(`node ${fake}`)} + String.fromCharCode(13))`);
+    await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+    await until(win, `document.querySelectorAll('.queue .row').length >= 2`, 10_000);
+    const agentsRow = `Array.from(document.querySelectorAll('.queue .row')).find(r => r.innerText.includes('Running agents'))`;
+    await mouseClick(agentsRow);
+    const fakeRow = `Array.from(document.querySelectorAll('.agent')).find(r => r.innerText.includes('Fake agent · smoke'))`;
+    // The fixture flickering back in remounts the tab and drops the pane.
+    const showAgents = async () => {
+      if (await read(win, `Boolean(document.querySelector('.detail.agents'))`)) return;
+      await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+      await until(win, agentsRow, 5_000);
+      await mouseClick(agentsRow);
+      await until(win, fakeRow, 10_000);
+    };
+    await until(win, `${fakeRow}?.innerText.includes(':8765')`, 30_000);
+    result['agentsListed'] = await read(win, `Array.from(document.querySelectorAll('.agents-group')).map(g => g.innerText.replace(/\\n/g, ' | '))`);
+    await shot('pane');
+
+    const idleBy = Date.now() + 120_000;
+    while (Date.now() < idleBy && !(await read(win, `Boolean(${fakeRow}?.querySelector('.agent-state.idle'))`))) {
+      await showAgents();
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    result['idleRow'] = await read(win, `${fakeRow}?.innerText.replace(/\\n/g, ' | ')`);
+    result['railIdlePip'] = await read(win, `Boolean(document.querySelector('.rail-pip.idle'))`);
+    await shot('idle');
+
+    await showAgents();
+    await mouseClick(`${fakeRow}?.querySelector('.agents-stop')`);
+    await until(win, `document.querySelector('.agents-confirm')`, 5_000);
+    result['confirm'] = await read(win, `document.querySelector('.agents-confirm')?.innerText.replace(/\\n/g, ' | ')`);
+    await shot('confirm');
+    await mouseClick(`document.querySelector('.agents-confirm .agents-stop.strong')`);
+    await until(win, `${fakeRow}?.innerText.includes('Stopping')`, 5_000);
+    await shot('stopping');
+    const goneBy = Date.now() + 30_000;
+    while (Date.now() < goneBy && (await read(win, `Boolean(${fakeRow})`) || !(await read(win, `Boolean(document.querySelector('.detail.agents'))`)))) {
+      await showAgents().catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    await new Promise((r) => setTimeout(r, 500));
+    result['afterStop'] = await read(win, `Array.from(document.querySelectorAll('.agents-group')).map(g => g.innerText.replace(/\\n/g, ' | '))`);
+    result['sessionStillOpen'] = await read(win, `window.baton.sessions().then(l => l.filter(s => s.id === ${JSON.stringify(session.id)}).map(s => s.running))`);
+    await shot('stopped');
+    console.log('agents36:', JSON.stringify({
+      agentsListed: result['agentsListed'], idleRow: result['idleRow'], railIdlePip: result['railIdlePip'],
+      confirm: result['confirm'], afterStop: result['afterStop'], sessionStillOpen: result['sessionStillOpen']
+    }, null, 2));
+    clearInterval(keepFixture);
+    await read(win, `window.baton.setSetting('agents.idleMinutes', 60)`);
+    // The rest of the seeded run expects the state it set up, not this one.
+    process.exit(0);
+  }
+
   // --- Item 32: ticket <-> pull request cross-links -------------------------
   if (process.env['BATON_SHOT_RELATED']) {
     const prefix = process.env['BATON_SHOT_RELATED'];
@@ -1867,6 +2207,30 @@ export async function smokeUi(
       (await win.webContents.capturePage()).toPNG()
     );
     console.log(`shot: ${process.env['BATON_SHOT_TICKET']}`);
+  }
+
+  if (process.env['BATON_SHOT_QUICK']) {
+    result['quickTicket'] = await shootQuick(win, process.env['BATON_SHOT_QUICK'].replace(/\.png$/, '-ticket.png'));
+  }
+
+  // Both jobs just run, as the Sessions tab lists them, and one opened with
+  // what it read unfolded.
+  if (process.env['BATON_SHOT_QUICK']) {
+    const base = process.env['BATON_SHOT_QUICK'];
+    await read(win, `document.querySelector('.rail-item[aria-label="Sessions"]')?.click()`);
+    await until(win, `document.querySelectorAll('.queue-list .row').length >= 2`, 10_000);
+    const pullRow = `Array.from(document.querySelectorAll('.queue-list button.row')).find(b => b.textContent.includes('Summarize'))`;
+    await read(win, `${pullRow}?.click()`);
+    await until(win, `document.querySelector('.quick-job')`, 5_000);
+    await new Promise((r) => setTimeout(r, 250));
+    await writeFile(base.replace(/\.png$/, '-sessions.png'), (await win.webContents.capturePage()).toPNG());
+    await read(win, `document.querySelector('.quick-job-fold-head')?.click()`);
+    await new Promise((r) => setTimeout(r, 250));
+    await writeFile(base.replace(/\.png$/, '-sessions-read.png'), (await win.webContents.capturePage()).toPNG());
+    result['quickJobs'] = {
+      rows: await read(win, `Array.from(document.querySelectorAll('.queue-list button.row')).map(b => b.innerText.split(String.fromCharCode(10)).join(' | '))`),
+      facts: await read(win, `document.querySelector('.quick-job-facts')?.innerText ?? ''`)
+    };
   }
 
   // The Sentry tab: same detail-pane shape as the ticket pane, plus the two

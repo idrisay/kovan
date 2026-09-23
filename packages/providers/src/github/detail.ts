@@ -303,3 +303,48 @@ export async function fetchPullDetail(
     reviewers: [...pending, ...answered]
   };
 }
+
+/**
+ * A pull request's unified diff, as text — what the Kimi K3 review reads.
+ * The REST endpoint with the diff media type; GraphQL has no diff at all.
+ * Allowed a long timeout: a big PR's diff is megabytes.
+ */
+export async function fetchPullDiff(
+  http: HttpClient,
+  baseUrl: string,
+  token: string,
+  repo: string,
+  number: number
+): Promise<string> {
+  const { bytes } = await http.binary(`${baseUrl.replace(/\/$/, '')}/repos/${repo}/pulls/${number}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3.diff' },
+    timeoutMs: 60_000
+  });
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Posts a review on a pull request — approve, request changes, or a plain
+ * comment. Only ever called from a click the user confirmed; `mutating` so the
+ * HTTP client never dedupes or replays it.
+ */
+export async function submitPullReview(
+  http: HttpClient,
+  baseUrl: string,
+  token: string,
+  repo: string,
+  number: number,
+  event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT',
+  body: string
+): Promise<{ url?: string }> {
+  const review = await http.json<{ html_url?: string }>(
+    `${baseUrl.replace(/\/$/, '')}/repos/${repo}/pulls/${number}/reviews`,
+    {
+      method: 'POST',
+      mutating: true,
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+      body: { event, body }
+    }
+  );
+  return { url: review?.html_url };
+}

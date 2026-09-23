@@ -1,4 +1,6 @@
-import type { JiraIssue, ProviderId, PullSummary, SentryFrame, SentryIssue } from '@baton/core';
+import type {
+  JiraIssue, ProviderId, PullSummary, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport
+} from '@baton/core';
 import type { PullDetail, ReviewComment, ReviewThread, Reviewer } from '@baton/providers';
 import type { AgentRun, RunFile, Runner, RunKind } from '@baton/agent';
 import type {
@@ -60,6 +62,14 @@ export interface Snapshot {
   refreshingProviders: PolledProvider[];
 }
 
+/** One quick-model job's saved result and live progress; see `main/quick.ts`. */
+export interface QuickState {
+  result?: QuickResult;
+  /** Epoch ms the running job started, when one is running. */
+  running?: number;
+  error?: string;
+}
+
 export type StartResult = { ok: true; sessionId: string } | { ok: false; error: string };
 
 /** Everything a run can be started against — see `Subject` in `main/agents.ts`. */
@@ -85,6 +95,34 @@ export interface BatonApi {
   ticketDetail(key: string): Promise<JiraIssue>;
   /** Widens the merged window to `limit` and returns the republished snapshot. */
   loadMoreMerged(limit: number): Promise<Snapshot>;
+
+  quickState(kind: QuickKind, subject: string): Promise<QuickState>;
+  /** Starts the job and returns at once; progress arrives through `onQuick`. */
+  quickRun(kind: QuickKind, subject: string): Promise<void>;
+  quickCancel(kind: QuickKind, subject: string): Promise<void>;
+  quickDismiss(kind: QuickKind, subject: string): Promise<void>;
+  quickTest(model?: string): Promise<{ ok: boolean; ms: number; error?: string }>;
+  onQuick(listener: (kind: QuickKind, subject: string, state: QuickState) => void): () => void;
+  /** Recent Summarize/Condense jobs, newest first — the Sessions tab's "Quick model" list. */
+  quickJobs(): Promise<QuickJob[]>;
+  onQuickJobs(listener: (jobs: QuickJob[]) => void): () => void;
+  /** Closes a job's row, cancelling it first when it is still running. */
+  quickJobRemove(id: string): Promise<void>;
+  /** Posts the saved code review to GitHub as the user's own review. */
+  reviewSubmit(subject: string, event: ReviewEvent): Promise<{ ok: boolean; error?: string }>;
+
+  /** Token usage per session and quick job, newest first; see `main/usage.ts`. */
+  usage(): Promise<UsageRecord[]>;
+  onUsage(listener: (records: UsageRecord[]) => void): () => void;
+  /** Every agent process on this Mac; see `main/running.ts`. */
+  runningAgents(): Promise<AgentsReport>;
+  /** The Running agents pane opened (true) or closed: scan fast, with ports, while open. */
+  runningAgentsWatch(on: boolean): Promise<AgentsReport>;
+  runningAgentsStop(keys: string[], children: boolean): Promise<{ key: string; stopped: boolean; left: number }[]>;
+  runningAgentsForce(key: string): Promise<{ key: string; stopped: boolean; left: number }>;
+  onRunningAgents(listener: (report: AgentsReport) => void): () => void;
+  /** The idle reminder was clicked. */
+  onShowAgents(listener: () => void): () => void;
 
   runners(): Promise<Runner[]>;
   /** Suggested models per runner id — a starting list, not a live query;

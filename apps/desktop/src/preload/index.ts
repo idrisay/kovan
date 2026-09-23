@@ -31,6 +31,46 @@ const api = {
     ipcRenderer.invoke('baton:pull-detail', repo, number),
   ticketDetail: (key: string) => ipcRenderer.invoke('baton:ticket-detail', key),
 
+  // Quick model
+  quickState: (kind: string, subject: string) => ipcRenderer.invoke('baton:quick-state', kind, subject),
+  quickRun: (kind: string, subject: string) => ipcRenderer.invoke('baton:quick-run', kind, subject),
+  quickCancel: (kind: string, subject: string) => ipcRenderer.invoke('baton:quick-cancel', kind, subject),
+  quickDismiss: (kind: string, subject: string) => ipcRenderer.invoke('baton:quick-dismiss', kind, subject),
+  quickTest: (model?: string) => ipcRenderer.invoke('baton:quick-test', model),
+  quickJobs: () => ipcRenderer.invoke('baton:quick-jobs'),
+  quickJobRemove: (id: string) => ipcRenderer.invoke('baton:quick-job-remove', id),
+  reviewSubmit: (subject: string, event: string) => ipcRenderer.invoke('baton:review-submit', subject, event),
+  usage: () => ipcRenderer.invoke('baton:usage'),
+  onUsage: (listener: (records: unknown[]) => void) => {
+    const handler = (_event: unknown, records: unknown[]) => listener(records);
+    ipcRenderer.on('baton:usage', handler);
+    return () => ipcRenderer.removeListener('baton:usage', handler);
+  },
+  runningAgents: () => ipcRenderer.invoke('baton:running-agents'),
+  runningAgentsWatch: (on: boolean) => ipcRenderer.invoke('baton:running-agents-watch', on),
+  runningAgentsStop: (keys: string[], children: boolean) => ipcRenderer.invoke('baton:running-agents-stop', keys, children),
+  runningAgentsForce: (key: string) => ipcRenderer.invoke('baton:running-agents-force', key),
+  onRunningAgents: (listener: (report: unknown) => void) => {
+    const handler = (_event: unknown, report: unknown) => listener(report);
+    ipcRenderer.on('baton:running-agents', handler);
+    return () => ipcRenderer.removeListener('baton:running-agents', handler);
+  },
+  onShowAgents: (listener: () => void) => {
+    const handler = () => listener();
+    ipcRenderer.on('baton:show-agents', handler);
+    return () => ipcRenderer.removeListener('baton:show-agents', handler);
+  },
+  onQuickJobs: (listener: (jobs: unknown[]) => void) => {
+    const handler = (_e: unknown, jobs: unknown[]) => listener(jobs);
+    ipcRenderer.on('baton:quick-jobs', handler);
+    return () => ipcRenderer.removeListener('baton:quick-jobs', handler);
+  },
+  onQuick: (listener: (kind: string, subject: string, state: unknown) => void) => {
+    const handler = (_e: unknown, kind: string, subject: string, state: unknown) => listener(kind, subject, state);
+    ipcRenderer.on('baton:quick', handler);
+    return () => ipcRenderer.removeListener('baton:quick', handler);
+  },
+
   // Agents
   runners: () => ipcRenderer.invoke('baton:runners'),
   knownModels: () => ipcRenderer.invoke('baton:known-models'),

@@ -41,6 +41,8 @@ export interface SessionInfo {
   runnerName: string;
   kind?: RunKind;
   subject?: string;
+  /** The pull request a run was started from, when it was one. */
+  pull?: string;
   startedAt: number;
   running: boolean;
   exitCode?: number;
@@ -84,6 +86,11 @@ export class Sessions {
       .sort((a, b) => b.startedAt - a.startedAt);
   }
 
+  /** Each session's shell process id — what token usage walks down from to find its agents. */
+  processes(): { info: SessionInfo; pid: number }[] {
+    return [...this.sessions.values()].map((session) => ({ info: strip(session), pid: session.pty.pid }));
+  }
+
   /** Replay for a window that opened after the session started. */
   buffer(id: string): string {
     return this.sessions.get(id)?.buffer ?? '';
@@ -103,6 +110,7 @@ export class Sessions {
     env?: Record<string, string>;
     kind?: RunKind;
     subject?: string;
+    pull?: string;
     runDirectory?: string;
   }): Promise<SessionInfo> {
     const id = randomUUID();
@@ -132,6 +140,7 @@ export class Sessions {
       runnerName: options.runnerName,
       kind: options.kind,
       subject: options.subject,
+      pull: options.pull,
       runDirectory: options.runDirectory,
       startedAt: Date.now(),
       running: true,
@@ -227,6 +236,7 @@ export class Sessions {
       env: options.env,
       kind: options.run.kind,
       subject: options.run.subject,
+      pull: options.run.pull || undefined,
       runDirectory: options.run.directory
     });
   }

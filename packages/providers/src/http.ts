@@ -65,7 +65,12 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   body?: unknown;
   signal?: CancelSignal;
-  /** Skip single-flight dedupe. Required for anything with side effects. */
+  /**
+   * Skip single-flight dedupe. Required for anything with side effects. On a
+   * non-GET it also stops replays: a 5xx or a dropped connection may have
+   * landed, and posting a review or a comment twice is worse than one error.
+   * Only a 429, which the server refused unprocessed, is retried.
+   */
   mutating?: boolean;
   /** Overrides DEFAULT_TIMEOUT_MS. */
   timeoutMs?: number;
@@ -138,6 +143,7 @@ export class HttpClient {
 
   private async send(url: string, options: RequestOptions): Promise<Response> {
     let lastError: unknown;
+    const replayUnsafe = Boolean(options.mutating) && (options.method ?? 'GET') !== 'GET';
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       if (options.signal?.aborted) {
@@ -174,7 +180,7 @@ export class HttpClient {
           return response;
         }
 
-        const retryable = response.status === 429 || response.status >= 500;
+        const retryable = response.status === 429 || (response.status >= 500 && !replayUnsafe);
         const body = await response.text().catch(() => '');
 
         if (!retryable || attempt === MAX_ATTEMPTS - 1) {
@@ -201,7 +207,7 @@ export class HttpClient {
           throw new CancelledError();
         }
         lastError = err;
-        if (attempt === MAX_ATTEMPTS - 1) {
+        if (attempt === MAX_ATTEMPTS - 1 || replayUnsafe) {
           break;
         }
         await sleep(backoffDelay(attempt, null), options.signal);

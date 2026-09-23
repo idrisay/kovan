@@ -1,7 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { formatAge, isMerged, pullFlags, ticketKeyInTitle } from '@baton/core';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  formatAge, isMerged, olderCommentCount, pullBasis, pullFlags, reviewBasis, ticketBasis, ticketKeyInTitle,
+  KIMI_REVIEW_FILE,
+  reviewModelName,
+  TICKET_RECENT_COMMENTS
+} from '@baton/core';
 import { States, TONE } from './rows';
 import { Prose } from './Prose';
+import { QuickButton, QuickCard, ReviewDecision, VerdictBadge, useQuick } from './Quick';
+import { SubjectUsage } from './Usage';
 import { RunViewer } from './RunViewer';
 import { Terminal } from './Terminal';
 import { useTerminalFontSize } from './terminalFontSize';
@@ -592,13 +599,19 @@ export function PullPane({
   // pill and the first chip in `States` below it never disagree.
   const primaryFlag = pullFlags(pull)[0]!;
 
+  // Keyed by the pull request itself, not `subject`: a summary is about this
+  // PR's own reviews and checks, even when its title names a ticket.
+  const summary = useQuick('pull-summary', `${pull.repo}#${pull.number}`);
+  const review = useQuick('pull-review', `${pull.repo}#${pull.number}`);
+  const showSummary = [summary.state, review.state].some((q) => Boolean(q.result || q.running || q.error));
+
   const unresolved = detail?.threads.filter((t) => !t.isResolved) ?? [];
   // Whether the left column has anything in it. A PR with no description and
   // no open threads should not leave a blank half: the rail spans instead.
   // Decided here rather than with :empty, which would rest on React never
   // emitting a stray whitespace node between the conditionals.
   const hasReading = Boolean(
-    error || !detail || detail.body || unresolved.length > 0 || detail.comments.length > 0
+    error || !detail || detail.body || unresolved.length > 0 || detail.comments.length > 0 || showSummary
   );
 
   return (
@@ -630,6 +643,16 @@ export function PullPane({
             app exists, and 'Open on GitHub' is the escape hatch. */}
         <div className="detail-actions">
           <RunButtons kinds={kinds} onRun={(kind) => onRun(kind, pull)} />
+          <span className="action-divider" />
+          <QuickButton label="Summarize" runningLabel="Summarizing" state={summary.state} onRun={summary.run} />
+          <QuickButton
+            label="Review with nv-review"
+            runningLabel="nv-review reviewing"
+            state={review.state}
+            onRun={review.run}
+            tooltip="Sends the diff to nv-review (NVIDIA's free API; Kimi K3 unless Settings says otherwise). It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Slow: several minutes."
+          />
+          <span className="action-divider" />
           <button className="ghost" onClick={openQuickTerminal}>
             <TerminalIcon size={13} /> Terminal
           </button>
@@ -647,6 +670,40 @@ export function PullPane({
       */}
       <div className={hasReading ? 'detail-body' : 'detail-body solo'}>
         <div className="detail-main">
+          <QuickCard
+            kind="pull-summary"
+            title={isMerged(pull) ? 'Summary' : "Why it's blocked"}
+            state={summary.state}
+            basisNow={detail ? pullBasis(detail) : undefined}
+            footer="Written by a free quick model from this PR's reviews, threads and checks. It read nothing else and changed nothing."
+            onRun={summary.run}
+            onCancel={summary.cancel}
+            onDismiss={summary.dismiss}
+          />
+
+          <QuickCard
+            kind="pull-review"
+            title="Code review"
+            runningNote="nv-review on NVIDIA's free API is slow: expect several minutes. You can leave this pane."
+            tag={review.state.result ? reviewModelName(review.state.result.model) : 'nv-review'}
+            badge={<VerdictBadge verdict={review.state.result?.verdict} />}
+            state={review.state}
+            basisNow={detail ? reviewBasis(detail) : undefined}
+            footer={`Read the diff, description and open threads through nv-review, and changed nothing. Saved as ${KIMI_REVIEW_FILE} in this PR's History below.`}
+            onRun={review.run}
+            onCancel={review.cancel}
+            onDismiss={review.dismiss}
+          >
+            {(stale) => review.state.result && (
+              <ReviewDecision
+                subject={`${pull.repo}#${pull.number}`}
+                result={review.state.result}
+                stale={stale}
+                onRefresh={review.run}
+              />
+            )}
+          </QuickCard>
+
           {error && <div className="error boxed">{error}</div>}
           {!detail && !error && <p className="quiet">Loading…</p>}
 
@@ -734,8 +791,12 @@ export function PullPane({
             </section>
           )}
 
+          <SubjectUsage subject={`${pull.repo}#${pull.number}`} />
           <LiveSessions subject={subject} sessions={sessions} onOpen={onOpenSession} />
-          <History subject={subject} refreshOn={sessionSignature(sessions, subject)} />
+          <History
+            subject={subject}
+            refreshOn={`${sessionSignature(sessions, subject)}|${review.state.result?.createdAt ?? ''}`}
+          />
         </aside>
       </div>
     </div>
@@ -783,6 +844,15 @@ export function TicketPane({
   const description = detail?.description ?? issue.description;
   const comments = detail?.comments ?? issue.comments;
 
+  // "Condense": the comments before the latest few that ticket.md keeps in full.
+  const condense = useQuick('ticket-condense', issue.key);
+  const older = olderCommentCount(comments.length);
+  const condensed = condense.state.result;
+  const covered = Math.min(condensed?.basis['condensed'] ?? 0, older);
+  const [showOriginals, setShowOriginals] = useState(false);
+  useEffect(() => setShowOriginals(false), [issue.key]);
+  const showCondenseCard = Boolean(condensed || condense.state.running || condense.state.error);
+
   const inlineSession = sessions.find((s) => s.id === activeSession && s.subject === issue.key);
   const [showTerminal, setShowTerminal] = useState(true);
   useEffect(() => {
@@ -819,6 +889,18 @@ export function TicketPane({
         />
         <div className="detail-actions">
           <RunButtons kinds={['implement']} onRun={(kind) => onRun(kind, issue)} />
+          {older > 0 && (
+            <>
+              <span className="action-divider" />
+              <QuickButton
+                label={`Condense ${older} earlier comment${older === 1 ? '' : 's'}`}
+                runningLabel="Condensing"
+                state={condense.state}
+                onRun={condense.run}
+              />
+              <span className="action-divider" />
+            </>
+          )}
           <button className="ghost" onClick={openQuickTerminal}>
             <TerminalIcon size={13} /> Terminal
           </button>
@@ -837,16 +919,44 @@ export function TicketPane({
 
           {comments.length > 0 && (
             <section>
-              <h3>Comments</h3>
-              {comments.map((c, i) => (
-                <CommentCard
-                  key={i}
-                  author={c.author}
-                  when={formatAge(c.created) ?? ''}
-                  body={c.body}
-                  defaultExpanded={i === comments.length - 1}
+              <h3>Comments · {comments.length}</h3>
+              {showCondenseCard && (
+                <QuickCard
+                  kind="ticket-condense"
+                  title="Earlier discussion"
+                  subtitle={condensed ? `${covered} comment${covered === 1 ? '' : 's'}, condensed` : undefined}
+                  state={condense.state}
+                  basisNow={ticketBasis({ key: issue.key, summary: issue.summary, comments })}
+                  footer="Goes into ticket.md for the next agent run, in place of the omitted comments. The originals stay on the ticket."
+                  onRun={condense.run}
+                  onCancel={condense.cancel}
+                  onDismiss={condense.dismiss}
                 />
-              ))}
+              )}
+              {condensed && covered > 0 && (
+                <div className="quick-card-links">
+                  <button type="button" className="link" onClick={() => setShowOriginals((v) => !v)}>
+                    {showOriginals ? 'Hide the originals' : `Show the ${covered} originals`}
+                  </button>
+                </div>
+              )}
+              {comments.map((c, i) =>
+                // Once condensed, the comments it covers fold away behind the
+                // link above — the card already says what they said.
+                condensed && i < covered && !showOriginals ? null : (
+                  <Fragment key={i}>
+                    {condensed && covered > 0 && i === comments.length - TICKET_RECENT_COMMENTS && (
+                      <div className="comments-subhead">Latest {TICKET_RECENT_COMMENTS}, in full</div>
+                    )}
+                    <CommentCard
+                      author={c.author}
+                      when={formatAge(c.created) ?? ''}
+                      body={c.body}
+                      defaultExpanded={i === comments.length - 1}
+                    />
+                  </Fragment>
+                )
+              )}
             </section>
           )}
         </div>
@@ -869,6 +979,7 @@ export function TicketPane({
             </section>
           )}
 
+          <SubjectUsage subject={issue.key} />
           <LiveSessions subject={issue.key} sessions={sessions} onOpen={onOpenSession} />
           <History subject={issue.key} refreshOn={sessionSignature(sessions, issue.key)} />
         </aside>

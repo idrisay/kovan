@@ -20,6 +20,7 @@ import {
   renderPullPrompt,
   renderSentryPrompt,
   ticketKeyInTitle,
+  TICKET_RECENT_COMMENTS,
   type Conventions,
   type JiraIssue,
   type PullSummary,
@@ -32,6 +33,7 @@ import { findClones, runTargets, type RunTarget } from '@baton/git';
 import { HttpClient, JiraClient, SentryClient, type RawSentryFrame } from '@baton/providers';
 import type { DesktopHost } from './host';
 import type { Sessions } from './sessions';
+import type { QuickModel } from './quick';
 
 /**
  * Jira attachments arrive already inlined as base64 data URIs — that is for
@@ -105,7 +107,8 @@ export class Agents {
 
   constructor(
     private readonly host: DesktopHost,
-    private readonly sessions: Sessions
+    private readonly sessions: Sessions,
+    private readonly quick?: QuickModel
   ) {
     this.store = new RunStore(RunStore.rootFor(host.files.stateDir()));
     this.http = new HttpClient(host.log);
@@ -342,9 +345,28 @@ export class Agents {
         // Same cap as "Earlier runs" below: the last N, not the whole
         // history — a long-running ticket's early back-and-forth stops being
         // relevant, but every run against it used to pay to read it again.
-        const recent = subject.issue.comments.slice(-10);
+        const recent = subject.issue.comments.slice(-TICKET_RECENT_COMMENTS);
         const omitted = subject.issue.comments.length - recent.length;
-        if (omitted > 0) {
+        // What "Condense" on the ticket pane made of the omitted ones, if
+        // anybody clicked it. It covers the first `condensed` comments; any
+        // that arrived after it was made are still just counted.
+        const condensed = omitted > 0 ? await this.quick?.result('ticket-condense', subject.issue.key) : undefined;
+        const covered = Math.min(condensed?.basis['condensed'] ?? 0, omitted);
+        if (condensed && covered > 0) {
+          lines.push('### Earlier discussion', '');
+          lines.push(
+            `_(${covered} earlier comment${covered === 1 ? '' : 's'}, condensed by a quick model (${condensed.model}) ` +
+              'and may miss detail — the originals are on the ticket)_',
+            '',
+            condensed.text,
+            ''
+          );
+          if (omitted > covered) {
+            const rest = omitted - covered;
+            lines.push(`_(${rest} further comment${rest === 1 ? '' : 's'} omitted)_`, '');
+          }
+          lines.push(`### Latest ${recent.length}`, '');
+        } else if (omitted > 0) {
           lines.push(`_(${omitted} earlier comment${omitted === 1 ? '' : 's'} omitted)_`, '');
         }
         for (const c of recent) {

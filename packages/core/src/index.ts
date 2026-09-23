@@ -33,3 +33,6 @@ export * from './promptSettings';
 // code is reached through `@baton/core/node` instead, which only the main
 // process imports.
 export * from './prompts';
+export * from './quick';
+export * from './usage';
+export * from './processes';

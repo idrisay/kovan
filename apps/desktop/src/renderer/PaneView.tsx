@@ -2,6 +2,7 @@ import { Fragment, useCallback, useRef, useState } from 'react';
 import { Terminal } from './Terminal';
 import { SessionName, type Selection } from './sessionSubject';
 import { CloseIcon } from './icons';
+import { SessionUsageStrip } from './Usage';
 import type { DropZone, PaneLeaf, PaneSplit, PaneTree } from './paneTree';
 import type { SessionInfo, Snapshot } from './types';
 
@@ -125,6 +126,7 @@ function PaneLeafView({
               <span className="term-cwd">{shown.cwd}</span>
             </div>
             <div className="term-head-actions">
+              <SessionUsageStrip id={shown.id} />
               <button
                 type="button" className="icon-button boxed" aria-label="Close session" title="Close session"
                 onClick={() => void window.baton.sessionClose(shown.id)}
