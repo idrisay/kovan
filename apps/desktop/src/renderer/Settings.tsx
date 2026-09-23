@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import {
-  DEFAULT_IDLE_MINUTES, DEFAULT_PRICES, NV_REVIEW_DEFAULT_MODEL, QUICK_DEFAULT_MODEL, QUICK_DEFAULT_TIMEOUT_SECONDS,
-  type Price, type PriceRule, type ProviderId
+  DEFAULT_IDLE_MINUTES, DEFAULT_PRICES, NV_REVIEW_DEFAULT_MODEL, PRICE_CHECK_RUNNERS, QUICK_DEFAULT_MODEL,
+  QUICK_DEFAULT_TIMEOUT_SECONDS, applyPriceProposals,
+  type Price, type PriceCheckRunner, type PriceProposal, type PriceRule, type ProviderId
 } from '@baton/core';
 import { savePrices, useUsage } from './Usage';
 import type { ThemeChoice } from './types';
 import { FontSizeControl, useTerminalFontSize } from './terminalFontSize';
 import { TestEnvironmentSettings } from './TestEnvironments';
-import { ReadingSizeControl } from './readingSize';
+import { ReadingSizeControl, SidebarSizeControl } from './readingSize';
+import { CloseIcon } from './icons';
 
 interface Field {
   key: string;
@@ -273,7 +275,177 @@ function TokenPriceSettings() {
         </button>
         {custom && <button type="button" className="link" onClick={() => savePrices(undefined)}>Reset to list prices</button>}
       </div>
+      <PriceCheckPanel rules={prices} fields={fields} />
     </>
+  );
+}
+
+const PRICE_CHECK_KEY = 'baton.price-check';
+
+function hostOf(url: string): string {
+  try { return new URL(url).hostname || url; } catch { return url; }
+}
+
+function rememberedCheck(): { runner: PriceCheckRunner; model: string } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PRICE_CHECK_KEY) ?? '{}') as { runner?: string; model?: string };
+    const runner = PRICE_CHECK_RUNNERS.find((r) => r.id === saved.runner)?.id ?? 'claude';
+    return { runner, model: typeof saved.model === 'string' ? saved.model : 'sonnet' };
+  } catch {
+    return { runner: 'claude', model: 'sonnet' };
+  }
+}
+
+/**
+ * "Check prices online": pick who looks (Claude Code, Codex or opencode, and
+ * which model), and it searches the providers' pricing pages for every row in
+ * the table. What comes back is shown beside today's numbers with a tick per
+ * row — changed rows ticked, new ones not — and only "Apply" touches the table.
+ */
+function PriceCheckPanel({ rules, fields }: { rules: PriceRule[]; fields: { key: keyof Price; label: string }[] }) {
+  const [open, setOpen] = useState(false);
+  const [{ runner, model }, setChoice] = useState(rememberedCheck);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string>();
+  const [proposals, setProposals] = useState<PriceProposal[]>();
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+
+  const choose = (next: { runner: PriceCheckRunner; model: string }) => {
+    setChoice(next);
+    try { localStorage.setItem(PRICE_CHECK_KEY, JSON.stringify(next)); } catch { /* a preference */ }
+  };
+
+  const currentFor = (match: string) => rules.find((r) => r.match.toLowerCase() === match.toLowerCase());
+  const changed = (p: PriceProposal) => {
+    const now = currentFor(p.match);
+    return !now || fields.some((f) => now[f.key] !== p[f.key]);
+  };
+
+  async function check() {
+    setRunning(true);
+    setError(undefined);
+    setProposals(undefined);
+    const result = await window.baton.priceCheck(runner, model, rules);
+    setRunning(false);
+    if ('error' in result) {
+      setError(result.error);
+      return;
+    }
+    setProposals(result.proposals);
+    setPicked(new Set(result.proposals.filter((p) => !p.added && changed(p)).map((p) => p.match)));
+  }
+
+  function apply() {
+    if (!proposals) return;
+    savePrices(applyPriceProposals(rules, proposals.filter((p) => picked.has(p.match))));
+    setProposals(undefined);
+  }
+
+  if (!open) {
+    return (
+      <div className="quick-test-row">
+        <button type="button" className="ghost" onClick={() => setOpen(true)}>Check prices online…</button>
+      </div>
+    );
+  }
+
+  const defaultModel = PRICE_CHECK_RUNNERS.find((r) => r.id === runner)?.defaultModel;
+  return (
+    <div className="price-check">
+      <div className="price-check-form">
+        <label>
+          <span>Search with</span>
+          <select
+            value={runner} disabled={running}
+            onChange={(e) => {
+              const next = e.target.value as PriceCheckRunner;
+              choose({ runner: next, model: PRICE_CHECK_RUNNERS.find((r) => r.id === next)?.defaultModel ?? '' });
+            }}
+          >
+            {PRICE_CHECK_RUNNERS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>Model</span>
+          <input
+            type="text" value={model} disabled={running}
+            placeholder={defaultModel || 'its default'}
+            onChange={(e) => choose({ runner, model: e.target.value })}
+          />
+        </label>
+        {running ? (
+          <>
+            <span className="settings-note price-check-status">Searching pricing pages… this can take a minute or two.</span>
+            <button type="button" className="link" onClick={() => void window.baton.priceCheckCancel()}>Cancel</button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="ghost" onClick={() => void check()}>Check</button>
+            <button type="button" className="link" onClick={() => { setOpen(false); setProposals(undefined); setError(undefined); }}>Close</button>
+          </>
+        )}
+      </div>
+      <p className="settings-note">
+        Runs headless with only web search and web fetch allowed, and spends that model's tokens. Nothing changes
+        until you apply what it found.
+      </p>
+      {error && <p className="error boxed">{error}</p>}
+      {proposals && (
+        <>
+          <div className="price-table-wrap">
+            <table className="price-table price-check-table">
+              <thead>
+                <tr><th /><th>Model name contains</th>{fields.map((f) => <th key={f.key}>{f.label}</th>)}<th>Source</th></tr>
+              </thead>
+              <tbody>
+                {proposals.map((p) => {
+                  const now = currentFor(p.match);
+                  return (
+                    <tr key={p.match} className={changed(p) ? '' : 'same'}>
+                      <td className="checkbox-row">
+                        <input
+                          type="checkbox" aria-label={`Apply ${p.match}`}
+                          checked={picked.has(p.match)}
+                          onChange={(e) => {
+                            const next = new Set(picked);
+                            if (e.target.checked) next.add(p.match); else next.delete(p.match);
+                            setPicked(next);
+                          }}
+                        />
+                      </td>
+                      <td>{p.match}{p.added && <span className="price-check-new">new</span>}</td>
+                      {fields.map((f) => (
+                        <td key={f.key}>
+                          {now && now[f.key] !== p[f.key] ? (
+                            <><s>{now[f.key]}</s> <strong>{p[f.key]}</strong></>
+                          ) : (
+                            p[f.key]
+                          )}
+                        </td>
+                      ))}
+                      <td>
+                        {p.source && (
+                          <button type="button" className="link" onClick={() => void window.baton.openExternal(p.source!)}>
+                            {hostOf(p.source)}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="quick-test-row">
+            <button type="button" className="ghost" disabled={picked.size === 0} onClick={apply}>
+              Apply {picked.size} {picked.size === 1 ? 'row' : 'rows'}
+            </button>
+            <button type="button" className="link" onClick={() => setProposals(undefined)}>Discard</button>
+            {proposals.every((p) => !changed(p)) && <span className="settings-note">Every price already matches.</span>}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -381,8 +553,8 @@ export function Settings({
       <div className="sheet settings" onClick={(e) => e.stopPropagation()}>
         <header className="sheet-head">
           <h2>Settings</h2>
-          <button className="ghost" onClick={onClose}>
-            Done
+          <button type="button" className="icon-button boxed" aria-label="Close" title="Close" onClick={onClose}>
+            <CloseIcon size={14} />
           </button>
         </header>
 
@@ -429,6 +601,11 @@ export function Settings({
                   <span>Ticket and pull request text size</span>
                   <ReadingSizeControl />
                 </label>
+                <label>
+                  <span>Sidebar text size</span>
+                  <SidebarSizeControl />
+                </label>
+                <p className="settings-note">⌘+ and ⌘− resize whichever of the three you last clicked in: the sidebar, the ticket or pull request, or a terminal.</p>
 
                 <h3>General</h3>
                 <label className="checkbox-row">

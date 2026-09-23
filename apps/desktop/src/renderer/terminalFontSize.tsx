@@ -29,24 +29,19 @@ function write(px: number) {
 const clamp = (px: number) => Math.min(MAX, Math.max(MIN, px));
 
 /**
- * A step taken anywhere in this window (Settings' own stepper, or another
- * terminal's, since the control now lives in only one place but several
- * `useTerminalFontSize()` instances are mounted at once — one per docked
- * terminal, one for the Sessions tab, one for Settings). A plain window
- * event, not React state lifted somewhere shared: every instance already
- * needs to react to the *other* cross-window case, Cmd+=/Cmd+- arriving over
- * IPC from main, so this reuses that same "apply a step" path instead of
- * adding a second, different way instances stay in sync.
+ * A step taken anywhere in this window — Settings' own stepper, or Cmd+=/Cmd+-
+ * routed here by `zoomTarget.ts` — while several `useTerminalFontSize()`
+ * instances are mounted at once (one per docked terminal, one for the
+ * Sessions tab, one for Settings). A plain window event, so every instance
+ * applies the same step without lifting state somewhere shared.
  */
 const LOCAL_STEP_EVENT = 'baton:terminal-font-local-step';
 
 /**
- * The current terminal font size, plus a stepper. Cmd+=/Cmd+- (intercepted in
- * main — see the note in `main/index.ts` on `before-input-event`, which is
- * what used to just zoom the whole window) and every mounted copy of this
- * hook's own stepper all drive the exact same state, so every terminal in
- * the app and Settings' own control move together regardless of which one
- * you used to change it.
+ * The current terminal font size, plus a stepper. Cmd+=/Cmd+- (when a terminal
+ * is the zoom target) and every mounted copy of this hook's own stepper all
+ * drive the exact same state, so every terminal in the app and Settings' own
+ * control move together regardless of which one you used to change it.
  */
 export function useTerminalFontSize(): [number, (step: number) => void] {
   const [size, setSize] = useState(read);
@@ -62,21 +57,20 @@ export function useTerminalFontSize(): [number, (step: number) => void] {
   useEffect(() => {
     const onLocalStep = (event: Event) => applyStep((event as CustomEvent<number>).detail);
     window.addEventListener(LOCAL_STEP_EVENT, onLocalStep);
-    const offIpc = window.baton.onFontSizeStep(applyStep);
-    return () => {
-      window.removeEventListener(LOCAL_STEP_EVENT, onLocalStep);
-      offIpc();
-    };
+    return () => window.removeEventListener(LOCAL_STEP_EVENT, onLocalStep);
   }, [applyStep]);
 
   // Dispatched rather than applied directly: the listener above (registered
   // by every instance, including this one) is the single place a step is
   // actually applied, so a click here cannot double-apply on top of it.
-  const bump = useCallback((step: number) => {
-    window.dispatchEvent(new CustomEvent(LOCAL_STEP_EVENT, { detail: step }));
-  }, []);
+  const bump = useCallback(stepTerminalFont, []);
 
   return [size, bump];
+}
+
+/** One step for every terminal — what Cmd+=/Cmd+- sends when a terminal is the zoom target (see `zoomTarget.ts`). */
+export function stepTerminalFont(step: number) {
+  window.dispatchEvent(new CustomEvent(LOCAL_STEP_EVENT, { detail: step }));
 }
 
 export function FontSizeControl({ size, onBump }: { size: number; onBump: (step: number) => void }) {

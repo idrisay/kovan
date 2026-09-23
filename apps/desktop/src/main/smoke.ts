@@ -562,14 +562,14 @@ const read = (win: BrowserWindow, expression: string) =>
 async function shootQuick(
   win: BrowserWindow, file: string, label = '', timeoutMs = 180_000
 ): Promise<Record<string, unknown>> {
-  const button = `Array.from(document.querySelectorAll('.detail-actions button.quick')).find(b => b.textContent.includes(${JSON.stringify(label)}))`;
+  const button = `Array.from(document.querySelectorAll('.detail-actions button.quick-run')).find(b => b.textContent.includes(${JSON.stringify(label)}))`;
   await read(win, `${button}?.click()`);
   await until(win, `document.querySelector('.quick-card')`, 10_000);
   await new Promise((r) => setTimeout(r, 1200));
   await writeFile(file.replace(/\.png$/, '-running.png'), (await win.webContents.capturePage()).toPNG());
   await until(
     win,
-    `!Array.from(document.querySelectorAll('.detail-actions button.quick')).some(b => b.disabled)`,
+    `!Array.from(document.querySelectorAll('.detail-actions button.quick-run')).some(b => b.disabled)`,
     timeoutMs
   );
   await new Promise((r) => setTimeout(r, 300));
@@ -578,7 +578,7 @@ async function shootQuick(
   await writeFile(file, (await win.webContents.capturePage()).toPNG());
   console.log(`shot: ${file}`);
   return {
-    button: await read(win, `document.querySelector('.detail-actions button.quick')?.textContent ?? ''`),
+    button: await read(win, `document.querySelector('.detail-actions button.quick-run')?.textContent ?? ''`),
     card: await read(win, `document.querySelector('.quick-card')?.innerText ?? ''`)
   };
 }
@@ -622,6 +622,163 @@ export async function smokeUi(
   if (shot) {
     await writeFile(shot, (await win.webContents.capturePage()).toPNG());
     console.log(`shot: ${shot}`);
+  }
+
+  // --- Items 49–52, 55: sidebar size, ⌘F, rail collapse, sheet close ------
+  if (process.env['BATON_SHOT_ITEMS_49']) {
+    const prefix = process.env['BATON_SHOT_ITEMS_49'];
+    const snap = async (name: string) => {
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+    const key = async (keyCode: string) => {
+      win.webContents.focus();
+      win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers: ['meta'] });
+      win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers: ['meta'] });
+      await new Promise((r) => setTimeout(r, 300));
+    };
+    const report: Record<string, unknown> = {};
+
+    // ⌘+ after clicking in the sidebar sizes the sidebar, not the terminal.
+    await read(win, `document.querySelector('.queue-list').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`);
+    const terminalBefore = await read(win, `localStorage.getItem('baton.terminal-font-size')`);
+    await key('=');
+    await key('=');
+    report['sidebarZoom'] = await read(win, `getComputedStyle(document.querySelector('.queue-head')).zoom`);
+    report['queueWidthUnchanged'] = await read(win, `document.querySelector('.queue').getBoundingClientRect().width`);
+    report['terminalUntouched'] = terminalBefore === (await read(win, `localStorage.getItem('baton.terminal-font-size')`));
+    await snap('sidebar-120');
+    await key('-');
+    await key('-');
+    report['sidebarZoomBack'] = await read(win, `getComputedStyle(document.querySelector('.queue-head')).zoom`);
+
+    // ⌘F lands in the filter.
+    await read(win, `document.activeElement?.blur()`);
+    await key('f');
+    report['cmdFFocusesFilter'] = await read(win, `document.activeElement?.id === 'q'`);
+
+    // The active rail icon folds the sidebar away, and brings it back.
+    await read(win, `document.querySelector('.rail-item.active')?.click()`);
+    await new Promise((r) => setTimeout(r, 150));
+    report['collapsed'] = await read(win, `getComputedStyle(document.querySelector('.queue')).display === 'none'`);
+    await snap('collapsed');
+    await key('f');
+    report['cmdFReopens'] = await read(win, `getComputedStyle(document.querySelector('.queue')).display !== 'none' && document.activeElement?.id === 'q'`);
+
+    // Settings closes with an ✕, and Token prices offers the online check.
+    await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);
+    await until(win, `document.querySelector('.settings-nav')`, 5_000);
+    report['closeIsIcon'] = await read(win, `Boolean(document.querySelector('.sheet-head button[aria-label="Close"] svg'))`);
+    await read(win, `Array.from(document.querySelectorAll('.settings button')).find(b => b.textContent.includes('Check prices online'))?.click()`);
+    await new Promise((r) => setTimeout(r, 150));
+    await read(win, `document.querySelector('.price-check')?.scrollIntoView({ block: 'center' })`);
+    report['priceCheckPanel'] = await read(win, `document.querySelector('.price-check select')?.value`);
+    await snap('prices');
+    await read(win, `document.querySelector('.sheet-head .icon-button')?.scrollIntoView()`);
+    await snap('settings-head');
+    await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+    await until(win, `!document.querySelector('.settings-nav')`, 5_000);
+    console.log('items49:', JSON.stringify(report));
+  }
+
+  // --- Items 46, 47, 57: reviewer picker, quick model tag, model dropdown ---
+  if (process.env['BATON_SHOT_ITEMS_46']) {
+    const prefix = process.env['BATON_SHOT_ITEMS_46'];
+    const snap = async (name: string) => {
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+    const report: Record<string, unknown> = {};
+    await read(win, `document.querySelector('.rows .row')?.click()`);
+    await until(win, `document.querySelector('.detail-side')`, 10_000);
+    await until(win, `document.querySelector('.reviewer-input')`, 10_000);
+
+    // 46: focus the picker, see the candidates, request one.
+    await read(win, `document.querySelector('.reviewer-input').focus()`);
+    await until(win, `document.querySelector('.reviewer-option')`, 5_000);
+    report['candidates'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-option-name')).map(n => n.textContent)`);
+    await new Promise((r) => setTimeout(r, 150));
+    await snap('reviewers');
+    await read(win, `document.querySelector('.reviewer-option')?.click()`);
+    await until(win, `document.querySelector('.reviewer-asked')`, 5_000);
+    report['asked'] = await read(win, `document.querySelector('.reviewer-asked')?.textContent`);
+    report['history'] = (await read(win, `window.baton.settings()`) as Record<string, unknown>)['reviewers.history'];
+
+    // 47: the tags name their models; the picker lists opencode's.
+    report['tags'] = await read(win, `Array.from(document.querySelectorAll('.quick-model')).map(b => b.textContent)`);
+    await read(win, `document.querySelector('.detail-actions')?.scrollIntoView({ block: 'start' })`);
+    await read(win, `document.querySelector('.quick-model')?.click()`);
+    await until(win, `document.querySelector('.quick-model-list button')`, 5_000);
+    await new Promise((r) => setTimeout(r, 150));
+    report['pickerModels'] = await read(win, `Array.from(document.querySelectorAll('.quick-model-list .quick-model-id')).map(n => n.textContent)`);
+    await snap('quick-model');
+    await read(win, `Array.from(document.querySelectorAll('.quick-model-field select option')).map(o => o.value).includes('openai') && (() => {
+      const sel = document.querySelector('.quick-model-field select');
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, 'openai');
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await new Promise((r) => setTimeout(r, 100));
+    await read(win, `document.querySelector('.quick-model-list button')?.click()`);
+    await new Promise((r) => setTimeout(r, 300));
+    report['tagAfterPick'] = await read(win, `document.querySelector('.quick-model')?.textContent`);
+    report['savedQuickModels'] = (await read(win, `window.baton.settings()`) as Record<string, unknown>)['quick.models'];
+
+    // 57: the run sheet's dropdown and its ↻.
+    await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
+    await until(win, `document.querySelector('.model-field select')`, 5_000);
+    report['modelOptionsBefore'] = await read(win, `Array.from(document.querySelectorAll('.model-field select option')).map(o => o.textContent)`);
+    await read(win, `document.querySelector('.model-field .icon-button')?.click()`);
+    await until(win, `Array.from(document.querySelectorAll('.model-field select option')).some(o => o.textContent.includes('new'))`, 10_000);
+    report['modelOptionsAfter'] = await read(win, `Array.from(document.querySelectorAll('.model-field select option')).map(o => o.textContent)`);
+    report['modelNote'] = await read(win, `document.querySelector('.model-field-note')?.textContent`);
+    await snap('run-model');
+    await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+
+    // 58: more than one folder. Two scratch folders stand in for two clones.
+    const folders = process.env['BATON_SMOKE_FOLDERS']?.split(',') ?? [];
+    await read(win, `window.baton.setSetting('repos.folders', ${JSON.stringify(folders)})`);
+    await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
+    await until(win, `document.querySelector('.folder-button:not(:disabled)')`, 10_000);
+    await until(win, `!document.querySelector('.folder-button-text')?.textContent.startsWith('Choose')`, 5_000);
+    await read(win, `document.querySelector('.folder-button')?.click()`);
+    await until(win, `document.querySelector('.folder-option')`, 5_000);
+    await read(win, `Array.from(document.querySelectorAll('.folder-option input')).find(i => !i.checked)?.click()`);
+    await new Promise((r) => setTimeout(r, 150));
+    report['folderSummary'] = await read(win, `document.querySelector('.folder-button-text')?.textContent`);
+    report['folderNote'] = await read(win, `document.querySelector('.folder-field .model-field-note')?.textContent`);
+    report['folderRows'] = await read(win, `Array.from(document.querySelectorAll('.folder-option')).map(r => r.innerText.replace(/\\s+/g, ' '))`);
+    report['agentLoadedLater'] = await until(win, `document.querySelector('.run-controls select')?.value`, 15_000).then(() => true, () => false);
+    report['agentValue'] = await read(win, `document.querySelector('.run-controls select')?.value`);
+    await snap('folders');
+    await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+    console.log('items46:', JSON.stringify(report));
+  }
+
+  if (process.env['BATON_SHOT_ITEM_59']) {
+    const prefix = process.env['BATON_SHOT_ITEM_59'];
+    const snap = async (name: string) => {
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+    const report: Record<string, unknown> = {};
+    const toggle = `document.querySelector('.detail-main .section-toggle')`;
+    await read(win, `document.querySelector('.rows .row')?.click()`);
+    await until(win, toggle, 10_000);
+    await snap('open');
+    await read(win, `${toggle}.click()`);
+    await new Promise((r) => setTimeout(r, 150));
+    report['collapsedHasProse'] = await read(win, `!!document.querySelector('.collapsible .prose')`);
+    report['expanded'] = await read(win, `${toggle}.getAttribute('aria-expanded')`);
+    await snap('collapsed');
+    // Another PR keeps its own state; coming back keeps this one folded.
+    await read(win, `document.querySelectorAll('.rows .row')[1]?.click()`);
+    await new Promise((r) => setTimeout(r, 600));
+    report['otherExpanded'] = await read(win, `${toggle}?.getAttribute('aria-expanded') ?? 'no description'`);
+    await read(win, `document.querySelector('.rows .row')?.click()`);
+    await until(win, toggle, 10_000);
+    report['backExpanded'] = await read(win, `${toggle}.getAttribute('aria-expanded')`);
+    report['stored'] = await read(win, `localStorage.getItem('baton.collapsed-descriptions')`);
+    console.log('item59:', JSON.stringify(report));
   }
 
   if (process.env['BATON_SHOT_PULL_FILTER']) {
@@ -740,12 +897,12 @@ export async function smokeUi(
     const modelField = () =>
       read(
         win,
-        `(() => { const i = document.querySelector('.run-controls input[list]');
-          return i ? { value: i.value, placeholder: i.placeholder } : null; })()`
+        `(() => { const i = document.querySelector('.model-field select, .model-field input');
+          return i ? { value: i.value, placeholder: i.placeholder || i.options?.[0]?.text } : null; })()`
       );
     const options = await read(
       win,
-      `Array.from(document.querySelectorAll('#run-model-options option')).map(o => o.value)`
+      `Array.from(document.querySelectorAll('.model-field select option')).map(o => o.value).filter(v => v && v !== '__other__')`
     );
     const before = await modelField();
 
@@ -759,15 +916,15 @@ export async function smokeUi(
     // remember anything, only one actually started does.
     await read(
       win,
-      `(() => { const i = document.querySelector('.run-controls input[list]');
+      `(() => { const i = document.querySelector('.model-field select');
         if (!i) return;
-        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
         setter.call(i, 'opus');
-        i.dispatchEvent(new Event('input', { bubbles: true }));
+        i.dispatchEvent(new Event('change', { bubbles: true }));
        })()`
     );
     const afterTyping = await modelField();
-    await read(win, `document.querySelector('.sheet-head .ghost')?.click()`);
+    await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
     await new Promise((r) => setTimeout(r, 100));
     const forgottenAfterCancel = (
       await read(win, `window.baton.settings()`) as { 'runner.lastModel'?: Record<string, string> }
@@ -783,10 +940,10 @@ export async function smokeUi(
     await until(win, `document.querySelector('.run-controls select')?.value`, 5_000);
     await read(
       win,
-      `(() => { const i = document.querySelector('.run-controls input[list]');
-        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      `(() => { const i = document.querySelector('.model-field select');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
         setter.call(i, 'sonnet');
-        i.dispatchEvent(new Event('input', { bubbles: true }));
+        i.dispatchEvent(new Event('change', { bubbles: true }));
        })()`
     );
     await until(win, `document.querySelector('.sheet-foot .primary:not(:disabled)')`, 10_000);
@@ -802,7 +959,7 @@ export async function smokeUi(
     await until(win, `document.querySelector('.run-controls select')?.value`, 5_000);
     await new Promise((r) => setTimeout(r, 150));
     const prefilled = await modelField();
-    await read(win, `document.querySelector('.sheet-head .ghost')?.click()`);
+    await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
 
     console.log(
       'runModelRemembered:',
@@ -1164,7 +1321,7 @@ export async function smokeUi(
       stored: await read(win, `localStorage.getItem('baton.terminal-font-size')`)
     };
     await shot('font');
-    await read(win, `document.querySelector('.sheet-head .ghost')?.click()`);
+    await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
     await new Promise((r) => setTimeout(r, 200));
 
     // ...and the same state from the keyboard. ⌘+ is intercepted in main so
@@ -1670,7 +1827,7 @@ export async function smokeUi(
         `document.querySelectorAll('.run-controls select')[1]?.value ?? ''`
       )
     };
-    await read(win, `document.querySelector('.sheet-head .ghost')?.click()`);
+    await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
     await new Promise((r) => setTimeout(r, 120));
 
     if (process.env['BATON_SHOT_MERGED']) {
@@ -1827,7 +1984,7 @@ export async function smokeUi(
   if (process.env['BATON_SHOT_KIMI']) {
     const file = process.env['BATON_SHOT_KIMI'];
     await read(win, `document.querySelector('.detail-scroll').scrollTo(0, 0)`);
-    await read(win, `Array.from(document.querySelectorAll('.detail-actions button.quick')).find(b => b.textContent.includes('Kimi'))?.click()`);
+    await read(win, `Array.from(document.querySelectorAll('.detail-actions button.quick-run')).find(b => b.textContent.includes('nv-review'))?.click()`);
     await new Promise((r) => setTimeout(r, 1500));
     await writeFile(file.replace(/\.png$/, '-running.png'), (await win.webContents.capturePage()).toPNG());
     const cardOf = `Array.from(document.querySelectorAll('.quick-card')).find(c => c.innerText.startsWith('Kimi K3 review'))`;
@@ -1988,7 +2145,7 @@ export async function smokeUi(
     await read(win, `document.querySelector('[aria-label="Larger reading text"]')?.click()`);
     const readingSize = await read(win, `document.querySelector('[aria-label="Ticket and pull request text size"] .font-size-value')?.textContent`);
     await shot('settings-general');
-    await read(win, `Array.from(document.querySelectorAll('.sheet-head button')).find(b => b.textContent.trim() === 'Done')?.click()`);
+    await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
 
     // A merged pull request, so "Check it shipped" is offered.
     await read(win, `document.querySelector('[aria-label="Pull requests"]')?.click()`);
@@ -2523,7 +2680,7 @@ export async function smokeUi(
     console.log(`shot: ${process.env['BATON_SHOT_SETTINGS_SAVE']}`);
   }
 
-  await read(win, `document.querySelector('.sheet-head .ghost')?.click()`);
+  await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
   await until(win, `!document.querySelector('.settings-nav')`, 5_000);
 
   // Back to Tickets, so nothing below assumes Sentry is still the active view.

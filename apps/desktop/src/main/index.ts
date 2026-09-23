@@ -23,7 +23,8 @@ import type { ChangeKind } from '@baton/git';
 import { BatonTray } from './tray';
 import { Activity } from './notify';
 import {
-  CREDENTIAL_FIELDS, Credentials, HttpClient, JiraClient, fetchPullDetail, fetchPullDiff, submitPullReview
+  CREDENTIAL_FIELDS, Credentials, HttpClient, JiraClient, fetchPullDetail, fetchPullDiff, fetchReviewerCandidates,
+  requestPullReviewers, submitPullReview
 } from '@baton/providers';
 import { adoptImportedTokens } from './adopt';
 import {
@@ -33,12 +34,13 @@ import {
 import { Sessions } from './sessions';
 import { Agents } from './agents';
 import type { TestEnvironmentSave, TestSelection } from './testEnvironments';
-import { KNOWN_MODELS } from '@baton/agent';
 import { Workspaces } from './workspace';
 import { QuickModel } from './quick';
+import { PriceCheck } from './priceCheck';
+import { ModelSearch } from './modelSearch';
 import { Usage } from './usage';
 import { RunningAgents } from './running';
-import { ticketKeyInTitle, type QuickKind, type ReviewEvent } from '@baton/core';
+import { ticketKeyInTitle, type PriceCheckRunner, type PriceRule, type QuickKind, type ReviewEvent } from '@baton/core';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -128,6 +130,43 @@ async function postPullReview(repo: string, number: number, event: ReviewEvent, 
     throw new Error('GitHub is not connected');
   }
   return submitPullReview(detailHttp, host.config.get('github.baseUrl', 'https://api.github.com'), token, repo, number, event, body);
+}
+
+/**
+ * Who can be asked to review on a repo, most-asked first. "Most asked" is
+ * Baton's own count of the requests you made through it, per repo — kept in
+ * settings, so the people you always pick float to the top.
+ */
+type ReviewHistory = Record<string, Record<string, number>>;
+
+async function loadReviewerCandidates(repo: string) {
+  const counts = host.config.get<ReviewHistory>('reviewers.history', {})[repo] ?? {};
+  let found: { people: string[]; teams: { slug: string; name: string }[] };
+  if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+    found = { people: ['sara-k', 'mehmet-b', 'lena-t', 'someone'], teams: [{ slug: 'frontend-team', name: 'Frontend team' }] };
+  } else {
+    const token = await host.secrets.get('github');
+    if (!token) throw new Error('GitHub is not connected');
+    found = await fetchReviewerCandidates(detailHttp, host.config.get('github.baseUrl', 'https://api.github.com'), token, repo);
+  }
+  const people = [...new Set([...Object.keys(counts), ...found.people])]
+    .map((login) => ({ login, count: counts[login] ?? 0 }))
+    .sort((a, b) => b.count - a.count || a.login.localeCompare(b.login));
+  return { people, teams: found.teams };
+}
+
+/** Requests reviews as the user. Only from a click in the Reviewers picker. */
+async function requestReviewers(repo: string, number: number, people: string[], teams: string[]) {
+  // A smoke run must never post anything, anywhere.
+  if (!(process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA'])) {
+    const token = await host.secrets.get('github');
+    if (!token) throw new Error('GitHub is not connected');
+    await requestPullReviewers(detailHttp, host.config.get('github.baseUrl', 'https://api.github.com'), token, repo, number, people, teams);
+  }
+  const history = host.config.get<ReviewHistory>('reviewers.history', {});
+  const counts = { ...(history[repo] ?? {}) };
+  for (const login of people) counts[login] = (counts[login] ?? 0) + 1;
+  await host.config.set('reviewers.history', { ...history, [repo]: counts });
 }
 
 async function loadTicket(key: string) {
@@ -347,6 +386,9 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('baton:pull-detail', (_event, repo: string, number: number) => loadPullDetail(repo, number));
+  ipcMain.handle('baton:reviewer-candidates', (_event, repo: string) => loadReviewerCandidates(repo));
+  ipcMain.handle('baton:reviewers-request', (_event, repo: string, number: number, people: string[], teams: string[]) =>
+    requestReviewers(repo, number, people, teams));
   ipcMain.handle('baton:ticket-detail', (_event, key: string) => loadTicket(key));
 
   // --- Quick model ----------------------------------------------------------
@@ -363,6 +405,15 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('baton:quick-jobs', () => quick.listJobs());
   ipcMain.handle('baton:quick-job-remove', (_event, id: string) => quick.removeJob(id));
+  ipcMain.handle('baton:quick-model', (_event, kind: QuickKind) => quick.modelFor(kind));
+  ipcMain.handle('baton:quick-model-set', (_event, kind: QuickKind, model: string) => quick.setModelFor(kind, model));
+  ipcMain.handle('baton:quick-models-available', () => quick.available());
+  // Settings → Token prices → Check prices online. Proposals only: the
+  // renderer shows them and the user picks what to apply.
+  const priceCheck = new PriceCheck();
+  ipcMain.handle('baton:price-check', (_event, runner: PriceCheckRunner, model: string, rules: PriceRule[]) =>
+    priceCheck.run(runner, model, rules));
+  ipcMain.handle('baton:price-check-cancel', () => priceCheck.cancel());
   ipcMain.handle('baton:quick-state', (_event, kind: QuickKind, subject: string) => quick.state(kind, subject));
   ipcMain.handle('baton:quick-run', (_event, kind: QuickKind, subject: string) => quick.run(kind, subject));
   ipcMain.handle('baton:quick-cancel', (_event, kind: QuickKind, subject: string) => quick.cancel(kind, subject));
@@ -395,7 +446,11 @@ app.whenReady().then(async () => {
 
   // --- Agents ---------------------------------------------------------------
   ipcMain.handle('baton:runners', () => agents.runners());
-  ipcMain.handle('baton:known-models', () => KNOWN_MODELS);
+  // The run sheet's Model dropdown, and its ↻. Searching only adds names.
+  const modelSearch = new ModelSearch(host, () => quick.available(true));
+  ipcMain.handle('baton:known-models', () => modelSearch.lists());
+  ipcMain.handle('baton:models-search', (_event, command: string) => modelSearch.search(command));
+  ipcMain.handle('baton:models-search-cancel', () => modelSearch.cancel());
   ipcMain.handle('baton:run-targets', (_event, force?: boolean) => agents.targets(force));
   ipcMain.handle('baton:build-prompt', (_event, kind, subject, test?: TestSelection) =>
     agents.buildPrompt(kind, subject, test)

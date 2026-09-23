@@ -31,6 +31,7 @@ import {
   condenseInput,
   olderCommentCount,
   pullBasis,
+  parseOpencodeModels,
   pullReviewPrompt,
   pullSummaryInput,
   reviewBasis,
@@ -109,8 +110,58 @@ export class QuickModel {
     this.jobsListener = listener;
   }
 
-  model(): string {
-    return this.host.config.get('quick.model', '') || QUICK_DEFAULT_MODEL;
+  /**
+   * The opencode model a kind runs on: its own pick from the button's model
+   * tag (`quick.models`), else Settings' one quick model, else the default.
+   */
+  model(kind?: QuickKind): string {
+    const own = kind ? this.host.config.get<Partial<Record<QuickKind, string>>>('quick.models', {})[kind] : undefined;
+    return own || this.host.config.get('quick.model', '') || QUICK_DEFAULT_MODEL;
+  }
+
+  /** What the button's tag shows and its picker edits — nv-review's model for the review. */
+  modelFor(kind: QuickKind): string {
+    return kind === 'pull-review' ? this.reviewModel() : this.model(kind);
+  }
+
+  async setModelFor(kind: QuickKind, model: string): Promise<void> {
+    const value = model.trim();
+    if (kind === 'pull-review') {
+      await this.host.config.set('review.nvModel', value);
+      return;
+    }
+    const all = this.host.config.get<Partial<Record<QuickKind, string>>>('quick.models', {});
+    await this.host.config.set('quick.models', { ...all, [kind]: value });
+  }
+
+  private listed?: Promise<string[]>;
+
+  /**
+   * Every model opencode can run, as `provider/model` — `opencode models`,
+   * asked once per launch when a picker first opens, never before.
+   */
+  available(fresh = false): Promise<string[]> {
+    if (fresh) this.listed = undefined;
+    this.listed ??= (async () => {
+      if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+        return [QUICK_DEFAULT_MODEL, 'opencode/grok-code-fast-free', 'anthropic/claude-haiku-4-5', 'openai/gpt-5-mini'];
+      }
+      const opencode = await shellEnvironment.which('opencode');
+      if (!opencode) return [];
+      const env = { ...(await shellEnvironment.environment()), OPENCODE_CONFIG_CONTENT: QUICK_OPENCODE_CONFIG };
+      const stdout = await new Promise<string>((resolve) => {
+        const child = spawn(opencode, ['models'], { env, stdio: ['ignore', 'pipe', 'ignore'] });
+        let out = '';
+        child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')));
+        const timer = setTimeout(() => child.kill('SIGTERM'), 30_000);
+        child.on('close', () => { clearTimeout(timer); resolve(out); });
+        child.on('error', () => { clearTimeout(timer); resolve(''); });
+      });
+      return parseOpencodeModels(stdout);
+    })();
+    // A failed or empty listing is asked again next time rather than cached.
+    void this.listed.then((list) => { if (list.length === 0) this.listed = undefined; });
+    return this.listed;
   }
 
   /** The NVIDIA model `nv-review` is told to use — its `NV_MODEL`. */
@@ -208,7 +259,7 @@ export class QuickModel {
     const live: Live = {
       job: {
         id: randomUUID(), kind, subject, status: 'running', startedAt: Date.now(),
-        model: kind === 'pull-review' ? `${this.reviewModel()} (nv-review)` : this.model()
+        model: kind === 'pull-review' ? `${this.reviewModel()} (nv-review)` : this.model(kind)
       }
     };
     this.live.set(key, live);

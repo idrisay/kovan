@@ -135,6 +135,50 @@ function CommentCard({
   );
 }
 
+const COLLAPSED_KEY = 'baton.collapsed-descriptions';
+
+function collapsedSubjects(): string[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * A description that can fold away, like GitHub's, so a long PR body doesn't
+ * push the conversation off screen. Remembered per PR or ticket rather than
+ * once for all: collapsing one long description shouldn't hide the next one
+ * you haven't read yet.
+ */
+function DescriptionSection({ subject, children }: { subject: string; children: React.ReactNode }) {
+  const [collapsed, setCollapsed] = useState(() => collapsedSubjects().includes(subject));
+  useEffect(() => setCollapsed(collapsedSubjects().includes(subject)), [subject]);
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    try {
+      // Newest last, and capped, so the list can't grow forever.
+      const list = collapsedSubjects().filter((s) => s !== subject);
+      if (next) list.push(subject);
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify(list.slice(-300)));
+    } catch { /* the fold still works for this visit */ }
+  };
+  return (
+    <section className={collapsed ? 'collapsible collapsed' : 'collapsible'}>
+      <h3>
+        <button type="button" className="section-toggle" aria-expanded={!collapsed} onClick={toggle}>
+          <ChevronIcon size={10} open={!collapsed} />
+          Description
+          {collapsed && <span className="section-toggle-hint">Show</span>}
+        </button>
+      </h3>
+      {!collapsed && children}
+    </section>
+  );
+}
+
 /** An unresolved review thread as one card — the file/line it is pinned to
  *  where a plain comment would show a review-state badge, every reply in the
  *  thread folded in together rather than as separate cards of their own. */
@@ -167,13 +211,18 @@ const REVIEW_STATE: Record<NonNullable<ReviewComment['reviewState']>, { label: s
   commented: { label: 'Reviewed', tone: 'waiting' }
 };
 
-function Reviewers({ reviewers }: { reviewers: Reviewer[] }) {
-  if (reviewers.length === 0) {
+function Reviewers({ reviewers, request }: {
+  reviewers: Reviewer[];
+  /** Present on an open pull request: the picker for asking more people. */
+  request?: { repo: string; number: number; author: string; onRequested: () => void };
+}) {
+  if (reviewers.length === 0 && !request) {
     return null;
   }
   return (
     <section>
       <h3>Reviewers</h3>
+      {reviewers.length === 0 && <p className="quiet reviewers-none">Nobody asked yet.</p>}
       <ul className="reviewers">
         {reviewers.map((reviewer) => {
           const turn = TURN[reviewer.turn];
@@ -193,7 +242,113 @@ function Reviewers({ reviewers }: { reviewers: Reviewer[] }) {
           );
         })}
       </ul>
+      {request && <ReviewerPicker {...request} taken={reviewers.map((r) => r.login)} />}
     </section>
+  );
+}
+
+type Candidates = Awaited<ReturnType<typeof window.baton.reviewerCandidates>>;
+
+/**
+ * "Add a reviewer…": the repo's collaborators and teams, the people you've
+ * asked most through Baton first. Picking one requests them on GitHub at
+ * once — GitHub does the notifying. Loaded on first focus, not on opening
+ * the pull request, so a PR you only read costs no extra call.
+ */
+function ReviewerPicker({ repo, number, author, taken, onRequested }: {
+  repo: string; number: number; author: string; taken: string[]; onRequested: () => void;
+}) {
+  const [candidates, setCandidates] = useState<Candidates>();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState<string>();
+  const [error, setError] = useState('');
+  const [asked, setAsked] = useState<string[]>([]);
+
+  useEffect(() => {
+    setCandidates(undefined);
+    setAsked([]);
+    setError('');
+  }, [repo, number]);
+
+  function load() {
+    setOpen(true);
+    if (candidates) return;
+    window.baton.reviewerCandidates(repo).then(setCandidates).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }
+
+  async function ask(person?: string, team?: string) {
+    const who = person ?? team!;
+    setBusy(who);
+    setError('');
+    try {
+      await window.baton.requestReviewers(repo, number, person ? [person] : [], team ? [team] : []);
+      setAsked((list) => [...list, who]);
+      setQuery('');
+      setOpen(false);
+      onRequested();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  const skip = new Set([...taken, ...asked, author].map((l) => l.toLowerCase()));
+  const q = query.trim().toLowerCase();
+  const people = (candidates?.people ?? []).filter((p) => !skip.has(p.login.toLowerCase()) && p.login.toLowerCase().includes(q));
+  const usual = people.filter((p) => p.count > 0);
+  const others = people.filter((p) => p.count === 0);
+  const teams = (candidates?.teams ?? []).filter((t) => !skip.has(t.slug.toLowerCase()) && `${t.slug} ${t.name}`.toLowerCase().includes(q));
+  const Person = ({ login, count }: { login: string; count: number }) => (
+    <button type="button" role="option" aria-selected={false} className="reviewer-option" disabled={Boolean(busy)} onMouseDown={(e) => e.preventDefault()} onClick={() => void ask(login)}>
+      <span className="reviewer-avatar">{login.slice(0, 2).toUpperCase()}</span>
+      <span className="reviewer-option-name">{login}</span>
+      {busy === login ? <span className="reviewer-option-meta">requesting…</span>
+        : count > 0 && <span className="reviewer-option-meta">{count} {count === 1 ? 'PR' : 'PRs'}</span>}
+    </button>
+  );
+
+  return (
+    <div className="reviewer-picker">
+      {asked.length > 0 && <p className="reviewer-asked">Requested {asked.join(', ')}. GitHub has notified them.</p>}
+      <input
+        type="text" className="reviewer-input" placeholder="Add a reviewer…" aria-label="Add a reviewer"
+        value={query}
+        onFocus={load}
+        onBlur={() => setOpen(false)}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { setOpen(false); (e.target as HTMLInputElement).blur(); }
+          if (e.key === 'Enter') {
+            const first = usual[0] ?? others[0];
+            if (first) void ask(first.login);
+            else if (teams[0]) void ask(undefined, teams[0].slug);
+          }
+        }}
+      />
+      {open && (
+        <div className="menu reviewer-menu" role="listbox">
+          {!candidates && !error && <p className="menu-empty">Loading who can review…</p>}
+          {candidates && usual.length + others.length + teams.length === 0 && (
+            <p className="menu-empty">{q ? 'Nobody matches.' : 'Nobody else can be asked on this repository.'}</p>
+          )}
+          {usual.length > 0 && <div className="menu-head">Your usual reviewers</div>}
+          {usual.map((p) => <Person key={p.login} {...p} />)}
+          {others.length > 0 && <div className="menu-head">{usual.length > 0 ? 'Everyone else' : 'People'}</div>}
+          {others.slice(0, 30).map((p) => <Person key={p.login} {...p} />)}
+          {teams.length > 0 && <div className="menu-head">Teams</div>}
+          {teams.map((t) => (
+            <button key={t.slug} type="button" role="option" aria-selected={false} className="reviewer-option" disabled={Boolean(busy)} onMouseDown={(e) => e.preventDefault()} onClick={() => void ask(undefined, t.slug)}>
+              <span className="reviewer-avatar team">{t.name.slice(0, 2).toUpperCase()}</span>
+              <span className="reviewer-option-name">{t.name}</span>
+              <span className="reviewer-option-meta">{busy === t.slug ? 'requesting…' : 'whole team'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {error && <p className="error">{error}</p>}
+    </div>
   );
 }
 
@@ -559,14 +714,18 @@ export function PullPane({
   const [detail, setDetail] = useState<PullDetail>();
   const [error, setError] = useState('');
 
+  const [detailVersion, setDetailVersion] = useState(0);
   useEffect(() => {
-    setDetail(undefined);
+    // A reload after requesting a reviewer keeps what is on screen until the
+    // new answer lands, rather than blanking the pane.
+    if (detailVersion === 0) setDetail(undefined);
     setError('');
     window.baton
       .pullDetail(pull.repo, pull.number)
       .then(setDetail)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, [pull.repo, pull.number]);
+  }, [pull.repo, pull.number, detailVersion]);
+  useEffect(() => setDetailVersion(0), [pull.repo, pull.number]);
 
   // Yours or theirs decides what you can do with it: you unblock your own and
   // review other people's. Merged work can only be one thing — there is
@@ -644,13 +803,14 @@ export function PullPane({
         <div className="detail-actions">
           <RunButtons kinds={kinds} onRun={(kind) => onRun(kind, pull)} />
           <span className="action-divider" />
-          <QuickButton label="Summarize" runningLabel="Summarizing" state={summary.state} onRun={summary.run} />
+          <QuickButton kind="pull-summary" label="Summarize" runningLabel="Summarizing" state={summary.state} onRun={summary.run} />
           <QuickButton
+            kind="pull-review"
             label="Review with nv-review"
             runningLabel="nv-review reviewing"
             state={review.state}
             onRun={review.run}
-            tooltip="Sends the diff to nv-review (NVIDIA's free API; Kimi K3 unless Settings says otherwise). It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Slow: several minutes."
+            tooltip="Sends the diff to nv-review (NVIDIA's free API; the model is on the button's tag). It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Slow: several minutes."
           />
           <span className="action-divider" />
           <button className="ghost" onClick={openQuickTerminal}>
@@ -708,10 +868,9 @@ export function PullPane({
           {!detail && !error && <p className="quiet">Loading…</p>}
 
           {detail?.body && (
-            <section>
-              <h3>Description</h3>
+            <DescriptionSection subject={`${pull.repo}#${pull.number}`}>
               <Prose text={detail.body} />
-            </section>
+            </DescriptionSection>
           )}
 
           {unresolved.length > 0 && (
@@ -749,7 +908,15 @@ export function PullPane({
         </div>
 
         <aside className="detail-side">
-          {detail && <Reviewers reviewers={detail.reviewers} />}
+          {detail && (
+            <Reviewers
+              reviewers={detail.reviewers}
+              request={isMerged(pull) ? undefined : {
+                repo: pull.repo, number: pull.number, author: pull.author,
+                onRequested: () => setDetailVersion((v) => v + 1)
+              }}
+            />
+          )}
 
           {detail && detail.checks.length > 0 && (
             <section>
@@ -893,6 +1060,7 @@ export function TicketPane({
             <>
               <span className="action-divider" />
               <QuickButton
+                kind="ticket-condense"
                 label={`Condense ${older} earlier comment${older === 1 ? '' : 's'}`}
                 runningLabel="Condensing"
                 state={condense.state}
@@ -912,10 +1080,9 @@ export function TicketPane({
 
       <div className="detail-body">
         <div className="detail-main">
-          <section>
-            <h3>Description</h3>
+          <DescriptionSection subject={issue.key}>
             <Prose text={description} />
-          </section>
+          </DescriptionSection>
 
           {comments.length > 0 && (
             <section>

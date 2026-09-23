@@ -29,6 +29,9 @@ const api = {
   // Detail
   pullDetail: (repo: string, number: number) =>
     ipcRenderer.invoke('baton:pull-detail', repo, number),
+  reviewerCandidates: (repo: string) => ipcRenderer.invoke('baton:reviewer-candidates', repo),
+  requestReviewers: (repo: string, number: number, people: string[], teams: string[]) =>
+    ipcRenderer.invoke('baton:reviewers-request', repo, number, people, teams),
   ticketDetail: (key: string) => ipcRenderer.invoke('baton:ticket-detail', key),
 
   // Quick model
@@ -39,6 +42,12 @@ const api = {
   quickTest: (model?: string) => ipcRenderer.invoke('baton:quick-test', model),
   quickJobs: () => ipcRenderer.invoke('baton:quick-jobs'),
   quickJobRemove: (id: string) => ipcRenderer.invoke('baton:quick-job-remove', id),
+  quickModel: (kind: string) => ipcRenderer.invoke('baton:quick-model', kind),
+  quickModelSet: (kind: string, model: string) => ipcRenderer.invoke('baton:quick-model-set', kind, model),
+  quickModelsAvailable: () => ipcRenderer.invoke('baton:quick-models-available'),
+  priceCheck: (runner: string, model: string, rules: unknown[]) =>
+    ipcRenderer.invoke('baton:price-check', runner, model, rules),
+  priceCheckCancel: () => ipcRenderer.invoke('baton:price-check-cancel'),
   reviewSubmit: (subject: string, event: string) => ipcRenderer.invoke('baton:review-submit', subject, event),
   usage: () => ipcRenderer.invoke('baton:usage'),
   onUsage: (listener: (records: unknown[]) => void) => {
@@ -74,6 +83,8 @@ const api = {
   // Agents
   runners: () => ipcRenderer.invoke('baton:runners'),
   knownModels: () => ipcRenderer.invoke('baton:known-models'),
+  modelsSearch: (command: string) => ipcRenderer.invoke('baton:models-search', command),
+  modelsSearchCancel: () => ipcRenderer.invoke('baton:models-search-cancel'),
   runTargets: (force?: boolean) => ipcRenderer.invoke('baton:run-targets', force),
   buildPrompt: (kind: string, subject: unknown, test?: unknown) =>
     ipcRenderer.invoke('baton:build-prompt', kind, subject, test),

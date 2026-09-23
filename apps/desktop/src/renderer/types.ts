@@ -1,5 +1,5 @@
 import type {
-  JiraIssue, ProviderId, PullSummary, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport
+  JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport
 } from '@baton/core';
 import type { PullDetail, ReviewComment, ReviewThread, Reviewer } from '@baton/providers';
 import type { AgentRun, RunFile, Runner, RunKind } from '@baton/agent';
@@ -10,12 +10,14 @@ import type {
   Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
 } from '../main/workspace';
 import type { TestEnvironmentSave, TestEnvironmentState, TestSelection } from '../main/testEnvironments';
+import type { ModelList } from '../main/modelSearch';
 
 export type {
   PullDetail, ReviewComment, ReviewThread, Reviewer, AgentRun, RunFile, Runner, RunKind, RunTarget,
   JiraIssue, PullSummary, SentryIssue, SentryFrame
 };
 export type { TestEnvironmentSave, TestEnvironmentState, TestSelection };
+export type { ModelList };
 export type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus,
   Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
@@ -94,6 +96,9 @@ export interface BatonApi {
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
 
   pullDetail(repo: string, number: number): Promise<PullDetail>;
+  /** People (most requested through Baton first) and teams who can review on this repo. */
+  reviewerCandidates(repo: string): Promise<{ people: { login: string; count: number }[]; teams: { slug: string; name: string }[] }>;
+  requestReviewers(repo: string, number: number, people: string[], teams: string[]): Promise<void>;
   ticketDetail(key: string): Promise<JiraIssue>;
   /** Widens the merged window to `limit` and returns the republished snapshot. */
   loadMoreMerged(limit: number): Promise<Snapshot>;
@@ -110,6 +115,15 @@ export interface BatonApi {
   onQuickJobs(listener: (jobs: QuickJob[]) => void): () => void;
   /** Closes a job's row, cancelling it first when it is still running. */
   quickJobRemove(id: string): Promise<void>;
+  /** The model a quick action runs on (nv-review's for the review). */
+  quickModel(kind: QuickKind): Promise<string>;
+  /** Remembers a model for one quick action; empty goes back to Settings' default. */
+  quickModelSet(kind: QuickKind, model: string): Promise<void>;
+  /** `provider/model` for everything opencode can run. Asked on a picker's first open. */
+  quickModelsAvailable(): Promise<string[]>;
+  /** A web-searching model looks up today's list prices for these rows. Proposals only — nothing is saved. */
+  priceCheck(runner: PriceCheckRunner, model: string, rules: PriceRule[]): Promise<{ proposals: PriceProposal[] } | { error: string }>;
+  priceCheckCancel(): Promise<void>;
   /** Posts the saved code review to GitHub as the user's own review. */
   reviewSubmit(subject: string, event: ReviewEvent): Promise<{ ok: boolean; error?: string }>;
 
@@ -127,9 +141,12 @@ export interface BatonApi {
   onShowAgents(listener: () => void): () => void;
 
   runners(): Promise<Runner[]>;
-  /** Suggested models per runner id — a starting list, not a live query;
-   *  see the note on `KNOWN_MODELS` in `@baton/agent`. */
-  knownModels(): Promise<Record<string, string[]>>;
+  /** The run sheet's model list per agent family: built-in suggestions plus
+   *  whatever the last ↻ search found (see `main/modelSearch.ts`). */
+  knownModels(): Promise<Record<ModelFamily, ModelList>>;
+  /** ↻ in the run sheet: looks up the models this agent's CLI takes today, and adds them. */
+  modelsSearch(command: string): Promise<ModelList | { error: string }>;
+  modelsSearchCancel(): Promise<void>;
   runTargets(force?: boolean): Promise<RunTarget[]>;
   buildPrompt(kind: RunKind, subject: Subject, test?: TestSelection): Promise<string>;
   /** Environments and test accounts. Passwords never come back — only which are saved. */
@@ -138,7 +155,7 @@ export interface BatonApi {
   defaultCwd(repo?: string): Promise<string | undefined>;
   startAgent(
     request: {
-      kind: RunKind; subjectId: string; runnerId: string; cwd?: string; prompt?: string; model?: string;
+      kind: RunKind; subjectId: string; runnerId: string; cwd?: string; extraCwds?: string[]; prompt?: string; model?: string;
       test?: TestSelection;
     },
     subject: Subject

@@ -299,11 +299,20 @@ export async function shellLine(
     case 'executable': {
       if (!runner.command) return undefined;
       const executable = await shellEnvironment.which(runner.command);
-      if (!executable) return undefined;
-      // The absolute path rather than the bare name, so this runs the same
-      // program the direct spawn would and a same-named shell function cannot
-      // quietly take its place.
-      words.push(quote(executable));
+      if (executable) {
+        // The absolute path rather than the bare name, so this runs the same
+        // program the direct spawn would and a same-named shell function cannot
+        // quietly take its place.
+        words.push(quote(executable));
+        break;
+      }
+      // The environment probe can miss a PATH entry the interactive shell
+      // has; the session types into that same interactive shell, so if it
+      // knows the command, the checked bare name reaches it.
+      if (!isSafeCommandName(runner.command)) return undefined;
+      const kind = (await shellEnvironment.describe([runner.command])).get(runner.command);
+      if (!kind || kind === 'none') return undefined;
+      words.push(runner.command);
       break;
     }
     case 'shellFunction':

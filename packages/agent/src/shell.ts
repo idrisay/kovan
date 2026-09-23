@@ -84,40 +84,30 @@ export class ShellEnvironment {
   private readonly described = new Map<string, CommandKind>();
 
   /**
-   * The environment a login shell produces.
+   * The environment an interactive login shell produces — the same one a
+   * session's terminal runs in.
    *
-   * `-l -c` and a marker line: rc files print banners, version managers print
-   * warnings, and everything before the marker is somebody's `.zshrc` being
-   * chatty. stdin is /dev/null so an interactive-ish rc cannot sit waiting.
+   * `-i` as well as `-l`, because zsh reads `.zshrc` only when interactive,
+   * and `.zshrc` is where installers put their PATH line: Claude Code's own
+   * installer writes `export PATH="$HOME/.local/bin:$PATH"` there. Probing
+   * with `-l` alone left `~/.local/bin` off the PATH, so `claude` was
+   * "not on your PATH" to Baton while `describe` (interactive) and every
+   * terminal found it. A plain `-l` probe stays as the fallback for an rc that
+   * will not run non-attached.
+   *
+   * A marker line: rc files print banners, version managers print warnings,
+   * and everything before the marker is somebody's `.zshrc` being chatty.
    */
   async environment(): Promise<Record<string, string>> {
     if (this.env) {
       return this.env;
     }
-    try {
-      const { stdout } = await run(loginShell(), ['-l', '-c', `echo ${MARKER}; printenv`], {
-        maxBuffer: 4 * 1024 * 1024,
-        timeout: 10_000
-      });
-      const lines = stdout.split('\n');
-      // `endsWith` rather than `===`: rc output with no trailing newline leaves
-      // the marker glued to the end of a banner.
-      const start = lines.findLastIndex((line) => line.endsWith(MARKER));
-      const parsed: Record<string, string> = {};
-      if (start >= 0) {
-        for (const line of lines.slice(start + 1)) {
-          const eq = line.indexOf('=');
-          if (eq > 0) {
-            parsed[line.slice(0, eq)] = line.slice(eq + 1);
-          }
-        }
-      }
-      this.env = withoutInheritedClaudeSession(
-        Object.keys(parsed).length > 0 ? parsed : ({ ...process.env } as Record<string, string>)
-      );
-    } catch {
-      this.env = withoutInheritedClaudeSession({ ...process.env } as Record<string, string>);
-    }
+    const parsed =
+      (await probe(['-i', '-l', '-c', `echo ${MARKER}; printenv`])) ??
+      (await probe(['-l', '-c', `echo ${MARKER}; printenv`]));
+    this.env = withoutInheritedClaudeSession(
+      parsed ?? ({ ...process.env } as Record<string, string>)
+    );
     return this.env;
   }
 
@@ -232,6 +222,31 @@ export class ShellEnvironment {
     } catch {
       return [];
     }
+  }
+}
+
+/** `printenv` after the marker, parsed — undefined when the shell failed or printed nothing. */
+async function probe(args: string[]): Promise<Record<string, string> | undefined> {
+  try {
+    const { stdout } = await run(loginShell(), args, {
+      maxBuffer: 4 * 1024 * 1024,
+      timeout: 10_000
+    });
+    const lines = stdout.split('\n');
+    // `endsWith` rather than `===`: rc output with no trailing newline leaves
+    // the marker glued to the end of a banner.
+    const start = lines.findLastIndex((line) => line.endsWith(MARKER));
+    if (start < 0) return undefined;
+    const parsed: Record<string, string> = {};
+    for (const line of lines.slice(start + 1)) {
+      const eq = line.indexOf('=');
+      if (eq > 0) {
+        parsed[line.slice(0, eq)] = line.slice(eq + 1);
+      }
+    }
+    return parsed['PATH'] ? parsed : undefined;
+  } catch {
+    return undefined;
   }
 }
 

@@ -36,4 +36,7 @@ export * from './prompts';
 export * from './testAccounts';
 export * from './quick';
 export * from './usage';
+export * from './priceCheck';
+export * from './modelSearch';
+export * from './folders';
 export * from './processes';

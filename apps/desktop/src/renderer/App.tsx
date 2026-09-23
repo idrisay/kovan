@@ -22,7 +22,7 @@ import {
 import { PaneView, type DragHandlers, type DragState } from './PaneView';
 import {
   PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon, SentryIcon, AgentsIcon,
-  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon
+  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon, CloseIcon
 } from './icons';
 
 type ViewId = 'pulls' | 'tickets' | 'sentry' | 'workspace' | 'sessions' | 'agents';
@@ -443,6 +443,14 @@ function PullFilterMenu({
   );
 }
 
+/** How long ago a refresh finished — seconds under a minute, since that is where it lives. */
+function freshness(at: number, now: number): string {
+  const seconds = Math.max(0, Math.floor((now - at) / 1000));
+  if (seconds < 10) return 'just now';
+  if (seconds < 60) return `${Math.floor(seconds / 10) * 10}s ago`;
+  return `${formatAge(new Date(at).toISOString(), now)} ago`;
+}
+
 /**
  * The "just now" stamp in the titlebar, turned into a menu.
  *
@@ -459,6 +467,14 @@ function RefreshMenu({
   onRefreshProvider: (id: PolledProvider) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // The poller refreshes every minute, so a minute-grained age read "just now"
+  // forever — and nothing re-rendered it between refreshes anyway. A ticking
+  // clock and seconds make it say how fresh the data actually is.
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -476,9 +492,10 @@ function RefreshMenu({
         className="stamp"
         aria-label="Refresh"
         aria-expanded={open}
+        title={`Updated at ${new Date(snapshot.at).toLocaleTimeString()} · checks again every minute`}
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
       >
-        {snapshot.refreshing ? 'refreshing' : formatAge(new Date(snapshot.at).toISOString())}
+        {snapshot.refreshing ? 'refreshing' : freshness(snapshot.at, now)}
       </button>
       {open && (
         <div className="menu stamp-menu" role="menu" onClick={(e) => e.stopPropagation()}>
@@ -498,7 +515,7 @@ function RefreshMenu({
               <div key={id} className="menu-refresh-row">
                 <span className="menu-refresh-label">{label}</span>
                 <span className="menu-refresh-age">
-                  {busy ? 'refreshing' : at ? formatAge(new Date(at).toISOString()) : 'never'}
+                  {busy ? 'refreshing' : at ? freshness(at, now) : 'never'}
                 </span>
                 <button
                   type="button" className="icon-button" aria-label={`Refresh ${label}`}
@@ -593,6 +610,36 @@ function StatusBar({
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY);
   const [view, setView] = useState<ViewId>('pulls');
+  // Clicking the rail icon of the view already open folds its sidebar away,
+  // the way VS Code's activity bar does. Going to any other view — by the rail
+  // or by opening a session, ticket or pull request from somewhere — brings it
+  // back, since that view's list is what you went there for.
+  const [queueHidden, setQueueHidden] = useState(false);
+  useEffect(() => setQueueHidden(false), [view]);
+
+  // Cmd+F puts you in the sidebar's filter — what the ⌘F badge in it promises.
+  // Left alone inside the code editor, which has its own find, and on views
+  // with no filter.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== 'f') return;
+      if (event.target instanceof Element && event.target.closest('.cm-editor')) return;
+      if (!document.getElementById('q')) return;
+      event.preventDefault();
+      setQueueHidden(false);
+      // After the sidebar is back in layout: a display:none input takes no focus.
+      requestAnimationFrame(() => {
+        const input = document.getElementById('q');
+        if (input instanceof HTMLInputElement) {
+          input.focus();
+          input.select();
+        }
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [connecting, setConnecting] = useState(false);
   const [selected, setSelected] = useState<Selection>({});
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -917,7 +964,7 @@ export function App() {
       {nothingConnected && !connecting ? (
         <Empty onConnect={() => setConnecting(true)} />
       ) : (
-        <div className="body">
+        <div className={queueHidden ? 'body queue-hidden' : 'body'}>
           <nav className="rail" aria-label="Sections">
             {VIEWS.map((v) => {
               const Icon = v.icon;
@@ -928,8 +975,10 @@ export function App() {
                   type="button"
                   aria-label={v.label}
                   aria-current={v.id === view ? 'page' : undefined}
+                  aria-expanded={v.id === view ? !queueHidden : undefined}
+                  title={v.id === view ? (queueHidden ? `Show ${v.label}` : `Hide ${v.label}`) : v.label}
                   className={v.id === view ? 'rail-item active' : 'rail-item'}
-                  onClick={() => setView(v.id)}
+                  onClick={() => (v.id === view ? setQueueHidden((hidden) => !hidden) : setView(v.id))}
                 >
                   <Icon />
                   {v.id === 'pulls' && n > 0 && <span className="rail-pip" />}
@@ -1288,10 +1337,47 @@ function SessionRow({
             className="row-title"
           />
           <SessionUsageChip id={session.id} />
+          {!editing && <SessionCloseButton session={session} />}
           <span className="row-age">{formatAge(new Date(session.startedAt).toISOString())}</span>
         </span>
       </div>
     </li>
+  );
+}
+
+/**
+ * The row's own close, shown on hover. An exited session just goes. A running
+ * one would take its agent (and whatever it had spent) down with it, so the
+ * first click only arms it — the icon turns red and says so — and a second
+ * click within three seconds closes it.
+ */
+function SessionCloseButton({ session }: { session: SessionInfo }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return undefined;
+    const timer = setTimeout(() => setArmed(false), 3_000);
+    return () => clearTimeout(timer);
+  }, [armed]);
+
+  const label = !session.running
+    ? 'Close session'
+    : armed ? 'Click again to stop the agent and close' : 'Stop and close session';
+  return (
+    <button
+      type="button"
+      className={armed ? 'icon-button session-close armed' : 'icon-button session-close'}
+      aria-label={label} title={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (session.running && !armed) {
+          setArmed(true);
+          return;
+        }
+        void window.baton.sessionClose(session.id);
+      }}
+    >
+      <CloseIcon size={10} />
+    </button>
   );
 }
 

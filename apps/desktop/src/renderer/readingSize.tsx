@@ -2,70 +2,97 @@ import { useCallback, useEffect, useState } from 'react';
 import { MinusIcon, PlusIcon } from './icons';
 
 /**
- * How big a pull request's, ticket's or Sentry error's own text reads — the
- * description, comments, review threads, everything in the detail pane —
- * independently of the terminal's font size and of the app's chrome.
+ * A remembered zoom for one region of the window, as a CSS variable on :root.
  *
- * A zoom on the detail column rather than a font-size variable: that pane
- * sets dozens of sizes (headings, code, chips, avatars, line heights) and
- * scaling only the text would leave them out of proportion. A preference,
- * so it lives in localStorage like the terminal size and the sidebar width.
+ * Two regions have one: the reading pane (a pull request's, ticket's or
+ * Sentry error's own text — description, comments, review threads) and the
+ * sidebar (the queue, the sessions list, the workspace explorer). Each is
+ * independent of the terminal's font size and of the other.
+ *
+ * A zoom rather than a font-size variable: both regions set dozens of sizes
+ * (headings, code, chips, avatars, line heights) and scaling only the text
+ * would leave them out of proportion. A preference, so it lives in
+ * localStorage like the terminal size and the sidebar width.
  */
-const KEY = 'baton.reading-size';
 const MIN = 80;
 const MAX = 160;
 const STEP = 10;
 const DEFAULT = 100;
-const CHANGED = 'baton:reading-size';
 
-function read(): number {
+interface Scale {
+  key: string;
+  variable: string;
+  event: string;
+}
+
+const READING: Scale = { key: 'baton.reading-size', variable: '--reading-zoom', event: 'baton:reading-size' };
+const SIDEBAR: Scale = { key: 'baton.sidebar-size', variable: '--sidebar-zoom', event: 'baton:sidebar-size' };
+
+function read(scale: Scale): number {
   try {
-    const raw = Number(localStorage.getItem(KEY));
+    const raw = Number(localStorage.getItem(scale.key));
     return Number.isFinite(raw) && raw >= MIN && raw <= MAX ? raw : DEFAULT;
   } catch {
     return DEFAULT;
   }
 }
 
-function apply(percent: number) {
-  document.documentElement.style.setProperty('--reading-zoom', String(percent / 100));
+function apply(scale: Scale, percent: number) {
+  document.documentElement.style.setProperty(scale.variable, String(percent / 100));
 }
 
-/** Before the first render, so a detail pane never paints at 100% and then jumps. */
+function step(scale: Scale, direction: number) {
+  const next = Math.min(MAX, Math.max(MIN, read(scale) + direction * STEP));
+  try { localStorage.setItem(scale.key, String(next)); } catch { /* a preference, not a requirement */ }
+  apply(scale, next);
+  window.dispatchEvent(new CustomEvent(scale.event, { detail: next }));
+}
+
+/** Before the first render, so neither region paints at 100% and then jumps. */
 export function restoreReadingSize() {
-  apply(read());
+  apply(READING, read(READING));
+  apply(SIDEBAR, read(SIDEBAR));
 }
 
-export function useReadingSize(): [number, (step: number) => void] {
-  const [percent, setPercent] = useState(read);
+export const stepReadingSize = (direction: number) => step(READING, direction);
+export const stepSidebarSize = (direction: number) => step(SIDEBAR, direction);
+
+function useScale(scale: Scale): [number, (direction: number) => void] {
+  const [percent, setPercent] = useState(() => read(scale));
 
   useEffect(() => {
     const onChange = (event: Event) => setPercent((event as CustomEvent<number>).detail);
-    window.addEventListener(CHANGED, onChange);
-    return () => window.removeEventListener(CHANGED, onChange);
-  }, []);
+    window.addEventListener(scale.event, onChange);
+    return () => window.removeEventListener(scale.event, onChange);
+  }, [scale]);
 
-  const bump = useCallback((direction: number) => {
-    const next = Math.min(MAX, Math.max(MIN, read() + direction * STEP));
-    try { localStorage.setItem(KEY, String(next)); } catch { /* a preference, not a requirement */ }
-    apply(next);
-    window.dispatchEvent(new CustomEvent(CHANGED, { detail: next }));
-  }, []);
-
+  const bump = useCallback((direction: number) => step(scale, direction), [scale]);
   return [percent, bump];
 }
 
-export function ReadingSizeControl() {
-  const [percent, bump] = useReadingSize();
+export const useReadingSize = () => useScale(READING);
+export const useSidebarSize = () => useScale(SIDEBAR);
+
+function ScaleControl({ label, noun, value, onBump }: { label: string; noun: string; value: number; onBump: (direction: number) => void }) {
   return (
-    <div className="font-size-control" role="group" aria-label="Ticket and pull request text size">
-      <button type="button" className="icon-button" aria-label="Smaller reading text" disabled={percent <= MIN} onClick={() => bump(-1)}>
+    <div className="font-size-control" role="group" aria-label={label}>
+      <button type="button" className="icon-button" aria-label={`Smaller ${noun}`} disabled={value <= MIN} onClick={() => onBump(-1)}>
         <MinusIcon />
       </button>
-      <span className="font-size-value">{percent}%</span>
-      <button type="button" className="icon-button" aria-label="Larger reading text" disabled={percent >= MAX} onClick={() => bump(1)}>
+      <span className="font-size-value">{value}%</span>
+      <button type="button" className="icon-button" aria-label={`Larger ${noun}`} disabled={value >= MAX} onClick={() => onBump(1)}>
         <PlusIcon />
       </button>
     </div>
   );
+}
+
+export function ReadingSizeControl() {
+  const [percent, bump] = useReadingSize();
+  return <ScaleControl label="Ticket and pull request text size" noun="reading text" value={percent} onBump={bump} />;
+}
+
+export function SidebarSizeControl() {
+  const [percent, bump] = useSidebarSize();
+  return <ScaleControl label="Sidebar text size" noun="sidebar text" value={percent} onBump={bump} />;
 }

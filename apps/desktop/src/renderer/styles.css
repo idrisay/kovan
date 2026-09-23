@@ -311,6 +311,13 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
   border-right: 1px solid var(--hair);
   display: flex; flex-direction: column; min-height: 0;
 }
+/* Sidebar text size (Settings, or Cmd+=/Cmd+- after clicking in here). On the
+   children, not the column: zoom on .queue itself would scale its width too,
+   and the drag handle owns that. */
+.queue > * { zoom: var(--sidebar-zoom, 1); }
+/* Clicking the active rail icon again folds the sidebar away, VS Code-style. */
+.body.queue-hidden > .queue,
+.body.queue-hidden > .queue + .resizer { display: none; }
 .queue-head { padding: 12px 12px 10px; flex: none; }
 .queue-title-row { display: flex; align-items: center; gap: 8px; }
 .queue-head h1 {
@@ -452,6 +459,13 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
 /* The hover-only rename / open icons take no room until they show, or a one-
    line name loses ~56px of itself to two invisible buttons. */
 .row.one-line .icon-button.rename, .row.one-line .icon-button.open-link { display: none; }
+/* A session row's close: no space taken until the row is hovered, like rename. */
+.icon-button.session-close { display: none; flex: none; width: 20px; height: 20px; opacity: 0.55; }
+.row.one-line:hover .icon-button.session-close,
+.row.one-line:focus-within .icon-button.session-close,
+.icon-button.session-close.armed { display: grid; }
+.icon-button.session-close:hover { opacity: 1; }
+.icon-button.session-close.armed { opacity: 1; color: var(--running); background: rgba(208, 160, 90, 0.14); }
 .row.one-line:hover .icon-button.rename, .row.one-line:hover .icon-button.open-link,
 .row.one-line:focus-within .icon-button.rename, .row.one-line:focus-within .icon-button.open-link { display: grid; }
 .priority-tag {
@@ -823,6 +837,22 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .reviewer-turn { flex: none; font-size: 11px; color: var(--meta); }
+.reviewers-none { margin: 0 0 6px; font-size: 11.5px; }
+/* "Add a reviewer…": an input, and its menu hanging under it. */
+.reviewer-picker { position: relative; margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.reviewer-input {
+  width: 100%; padding: 6px 9px; border-radius: 7px;
+  background: var(--rail); border: 1px solid var(--hair-strong);
+  color: var(--body); font-size: 12px;
+}
+.reviewer-input::placeholder { color: var(--dim); }
+.reviewer-input:focus { outline: none; border-color: var(--clay); }
+.reviewer-menu { left: 0; right: 0; top: 34px; max-height: 320px; overflow-y: auto; }
+.reviewer-option .reviewer-avatar { width: 20px; height: 20px; font-size: 8.5px; }
+.reviewer-option .reviewer-avatar.team { border-radius: 5px; }
+.reviewer-option-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reviewer-option-meta { flex: none; font-family: var(--mono); font-size: 10px; color: var(--dim); }
+.reviewer-asked { margin: 0; font-size: 11.5px; color: var(--pass); }
 .reviewer-turn:has(.dot.waiting) { color: var(--waiting); }
 .reviewer-turn:has(.dot.fail) { color: var(--blocked-bright); }
 .reviewer-turn:has(.dot.pass) { color: var(--pass); }
@@ -1040,6 +1070,30 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .lightbox-nav.next { right: 16px; }
 
 .run-controls label { flex: 1; }
+/* Model: a dropdown (or free text) with ↻ beside it, and one line of state under. */
+.model-field-row { display: flex; align-items: center; gap: 6px; }
+.model-field-row select, .model-field-row input { flex: 1; min-width: 0; }
+.model-field-note { font-size: 10.5px; color: var(--dim); text-transform: none; letter-spacing: 0; }
+.model-field-note.error { color: var(--blocked-bright); }
+/* Folder(s): a select-looking button opening a checklist of watched clones. */
+.folder-field { flex: 1; display: flex; flex-direction: column; gap: 5px; margin-bottom: 11px; min-width: 0; }
+.run-field-label { color: var(--muted); font-size: 11.5px; }
+.folder-field .menu-host { position: relative; display: block; }
+.folder-button {
+  width: 100%; display: flex; align-items: center; text-align: left;
+  background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 8px;
+  padding: 7px 28px 7px 10px; color: var(--prose); font: inherit; font-size: 12.5px; position: relative;
+}
+.folder-button::after { content: '▾'; position: absolute; right: 10px; color: var(--dim); font-size: 10px; }
+.folder-button:disabled { color: var(--dim); }
+.folder-button-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-menu { left: 0; right: 0; max-height: 300px; overflow-y: auto; }
+.folder-option { display: flex; align-items: center; gap: 8px; padding: 5px 9px; font-size: 12px; }
+.folder-option label { display: block; margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--body); cursor: pointer; }
+/* Not the run sheet's text-input look, which `.run-controls input` would otherwise give it. */
+.folder-option input[type='checkbox'] { width: 14px; height: 14px; padding: 0; border-radius: 3px; }
+.folder-main { flex: none; font-family: var(--mono); font-size: 10px; color: var(--clay-bright); }
+.folder-option .link { flex: none; width: auto; padding: 0; font-size: 11px; }
 .prompt-label textarea {
   font-family: var(--mono); font-size: 11.5px; line-height: 1.6;
   resize: vertical; min-height: 240px;
@@ -1681,6 +1735,25 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
   padding: 1px 5px; border-radius: 4px;
   background: rgba(124, 160, 212, 0.18); color: #9dbbe4;
 }
+.quick-tag.paid { background: rgba(217, 119, 87, 0.14); color: var(--clay-bright); text-transform: none; letter-spacing: 0; font-family: var(--mono); }
+/* One pill, two buttons: the label runs it, the model tag picks the model. */
+.quick-split { position: relative; display: inline-flex; }
+.quick-split .quick-run { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right-style: none; }
+.quick-split .quick-model {
+  border-top-left-radius: 0; border-bottom-left-radius: 0; padding-left: 8px; gap: 5px;
+  border-left: 1px solid rgba(124, 160, 212, 0.3);
+}
+.quick-model-name { font-family: var(--mono); font-size: 11px; font-weight: 400; }
+.quick-model-menu { left: 0; right: auto; min-width: 300px; gap: 6px; padding: 6px 6px 8px; }
+.quick-model-field { display: flex; align-items: center; gap: 8px; margin: 0 9px; font-size: 11.5px; color: var(--meta); }
+.quick-model-field select { flex: 1; }
+.quick-model-list { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; }
+.quick-model-id { flex: 1; min-width: 0; font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quick-model-other { display: flex; gap: 6px; margin: 0 6px; }
+.quick-model-other input { flex: 1; min-width: 0; width: auto; padding: 5px 8px; font-family: var(--mono); font-size: 11.5px; }
+.quick-model-other input:focus, .quick-model-field select:focus { outline: none; border-color: rgba(217, 119, 87, 0.5); }
+.quick-model-field select { padding: 5px 8px; }
+.quick-model-menu .menu-empty { margin: 2px 9px 0; }
 .detail-actions .action-divider { width: 1px; height: 20px; background: var(--hair-strong); margin: 0 2px; }
 
 .detail section.quick-card {
@@ -1779,6 +1852,20 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .price-table td { padding: 3px 4px; }
 .price-table input { width: 72px; }
 .price-table td:first-child input { width: 120px; }
+.price-check { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--hair); border-radius: 8px; }
+.price-check-form { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px; }
+.price-check-form label { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.price-check-form input { width: 180px; }
+.price-check-status { margin: 0; align-self: center; }
+.price-check-form > .link { padding-block: 7px; }
+.price-check-table td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.price-check-table tr.same { color: var(--dim); }
+.price-check-table s { color: var(--dim); }
+.price-check-table strong { color: var(--clay-bright); font-weight: 600; }
+.price-check-new {
+  margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 10px;
+  color: var(--clay-bright); background: rgba(217, 119, 87, 0.12);
+}
 
 /* --- Review decision (#34) --------------------------------------------------- */
 .review-verdict {
@@ -1884,7 +1971,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .agent-error { font-size: 12px; color: var(--blocked-bright); }
 
 /* --- Environments and test accounts (Settings, and the run sheet's picker) --- */
-.provider select, .run-test-env select {
+.provider select, .run-test-env select, .quick-model-field select, .quick-model-other input {
   background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 8px;
   padding: 7px 8px; color: var(--prose); font: inherit; font-size: 12.5px; width: 100%;
 }
@@ -1925,3 +2012,20 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .run-test-accounts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 10px; }
 .run-test-accounts .checkbox-row { display: flex; align-items: center; gap: 7px; margin: 0; }
 .run-test-env .settings-note { margin: 8px 0 0; }
+
+/* A section heading that folds its section (the description), GitHub-style.
+   The whole heading is the target, like the conversation cards' headers. */
+.section-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin: 0 0 0 -16px; padding: 2px 6px 2px 0;
+  background: none; border: 0; border-radius: 4px; cursor: pointer;
+  font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit;
+}
+.section-toggle svg { width: 10px; color: var(--dim); }
+.section-toggle:hover, .section-toggle:hover svg { color: var(--title); }
+.section-toggle:focus-visible { outline: 1px solid var(--clay); outline-offset: 2px; }
+.section-toggle-hint {
+  margin-left: 4px; font-weight: 500; letter-spacing: 0; text-transform: none;
+  color: var(--dim);
+}
+.collapsible.collapsed h3 { margin-bottom: 0; }

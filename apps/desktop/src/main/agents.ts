@@ -26,7 +26,9 @@ import {
   type JiraIssue,
   type PullSummary,
   type SentryFrame,
-  type SentryIssue
+  type SentryIssue,
+  extraDirArgs,
+  foldersPromptSection
 } from '@baton/core';
 import { isAppFrame, resolveFrame } from '@baton/core/node';
 import { RunStore, available, type RunKind, type Runner } from '@baton/agent';
@@ -83,6 +85,11 @@ export interface StartRequest {
   runnerId: string;
   /** Working directory. Defaults to the best guess for the subject. */
   cwd?: string;
+  /**
+   * More folders the work spans, beside `cwd`. Opened to the agent with
+   * `--add-dir` where its CLI has it, and named in the prompt either way.
+   */
+  extraCwds?: string[];
   /** Lets the user edit the prompt before it is sent. */
   prompt?: string;
   /**
@@ -113,6 +120,8 @@ export class Agents {
   private readonly store: RunStore;
   private readonly http: HttpClient;
   private cachedTargets?: RunTarget[];
+  /** The folder list `cachedTargets` was found from; a change rescans. */
+  private cachedFor?: string;
 
   readonly testEnvironments: TestEnvironments;
 
@@ -132,10 +141,19 @@ export class Agents {
 
   /** Where a run can be started, from the watched folders and their clones. */
   async targets(force = false): Promise<RunTarget[]> {
-    if (this.cachedTargets && !force) {
+    // The folders from Settings and every folder added in the Workspace tab.
+    // Only `repos.folders` used to count, and nothing in the app writes it
+    // any more — so a run sheet opened with an empty Folder list even though
+    // the Workspace tab had the clones right there.
+    const folders = [...new Set([
+      ...this.host.config.get('repos.folders', [] as string[]),
+      ...this.host.config.get<{ folders?: string[] }[]>('workspaces', []).flatMap((w) => w.folders ?? [])
+    ])];
+    const key = folders.join('\n');
+    if (this.cachedTargets && !force && key === this.cachedFor) {
       return this.cachedTargets;
     }
-    const folders = this.host.config.get('repos.folders', [] as string[]);
+    this.cachedFor = key;
     this.cachedTargets = runTargets(await findClones(folders), folders);
     return this.cachedTargets;
   }
@@ -267,7 +285,7 @@ export class Agents {
       return { ok: false, error: `No runner "${request.runnerId}". It may have been uninstalled.` };
     }
 
-    const prompt = request.prompt ?? (await this.buildPrompt(request.kind, subject, request.test));
+    const basePrompt = request.prompt ?? (await this.buildPrompt(request.kind, subject, request.test));
     const cwd = request.cwd ?? (await this.defaultCwd(subject.pull?.repo));
     if (!cwd) {
       return {
@@ -275,6 +293,14 @@ export class Agents {
         error: 'No folder to run in. Add a watched folder in Connections first.'
       };
     }
+    // Only folders Baton itself offered — the renderer's list is a request,
+    // and these paths end up as command-line arguments.
+    const targets = await this.targets();
+    const folderOf = (p: string) => targets.find((t) => t.path === p) ?? { label: path.basename(p), path: p };
+    const extras = [...new Set(request.extraCwds ?? [])]
+      .filter((p) => p !== cwd && targets.some((t) => t.path === p))
+      .map(folderOf);
+    const prompt = basePrompt + foldersPromptSection(folderOf(cwd), extras);
 
     const subjectId = this.subjectFor(subject.pull, subject.issue, subject.sentry?.issue);
     const run = await this.store.begin({
@@ -296,7 +322,7 @@ export class Agents {
     };
 
     const result = await this.sessions.run({
-      runner: this.runnerFor(runner, request.kind, request.model),
+      runner: withExtraDirs(this.runnerFor(runner, request.kind, request.model), extras.map((f) => f.path)),
       prompt,
       cwd,
       title: `${request.kind} · ${subjectId}`,
@@ -307,7 +333,7 @@ export class Agents {
     if ('error' in result) {
       return { ok: false, error: result.error };
     }
-    this.host.log.info(`started ${request.kind} on ${subjectId} in ${cwd}`);
+    this.host.log.info(`started ${request.kind} on ${subjectId} in ${cwd}${extras.length ? ` (+${extras.length} more)` : ''}`);
     return { ok: true, sessionId: result.id };
   }
 
@@ -486,4 +512,10 @@ export class Agents {
       description
     );
   }
+}
+
+/** The runner with `--add-dir=<path>` per extra folder, when its CLI takes it. */
+function withExtraDirs(runner: Runner, paths: string[]): Runner {
+  const args = extraDirArgs(runner.command, paths);
+  return args.length ? { ...runner, leadingArgs: [...runner.leadingArgs, ...args] } : runner;
 }

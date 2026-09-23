@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { CloseIcon } from './icons';
 import { Prose } from './Prose';
 import { highlightLines } from './languages';
 import type { AgentRun, RunFile, RunKind } from './types';
@@ -121,8 +122,8 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
       <div className="sheet run-viewer" onClick={(e) => e.stopPropagation()}>
         <header className="sheet-head">
           <h2>{RUN_KIND_LABEL[run.kind]}</h2>
-          <button className="ghost" onClick={onClose}>
-            Done
+          <button type="button" className="icon-button boxed" aria-label="Close" title="Close" onClick={onClose}>
+            <CloseIcon size={14} />
           </button>
         </header>
         <p className="subject">
