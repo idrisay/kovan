@@ -21,18 +21,22 @@ import {
 } from './paneTree';
 import { PaneView, type DragHandlers, type DragState } from './PaneView';
 import {
-  PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon, SentryIcon,
+  PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon, SentryIcon, AgentsIcon,
   RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon
 } from './icons';
 
-type ViewId = 'pulls' | 'tickets' | 'sentry' | 'workspace' | 'sessions';
+type ViewId = 'pulls' | 'tickets' | 'sentry' | 'workspace' | 'sessions' | 'agents';
 
 const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JSX.Element }[] = [
   { id: 'pulls', label: 'Pull requests', icon: PullRequestIcon },
   { id: 'tickets', label: 'Tickets', icon: TicketIcon },
   { id: 'sentry', label: 'Sentry errors', icon: SentryIcon },
   { id: 'workspace', label: 'Workspace', icon: WorkspaceIcon },
-  { id: 'sessions', label: 'Sessions', icon: TerminalIcon }
+  { id: 'sessions', label: 'Sessions', icon: TerminalIcon },
+  // Running agents and token usage used to sit on top of the Sessions list;
+  // they are about the whole Mac and the whole month, not the terminal you
+  // are about to pick, so they get their own tab and Sessions stays a list.
+  { id: 'agents', label: 'Agents and usage', icon: AgentsIcon }
 ];
 
 const EMPTY: Snapshot = {
@@ -608,11 +612,10 @@ export function App() {
   const [theme, setThemeState] = useState<ThemeChoice>('system');
   const [fontSize] = useTerminalFontSize();
   const idleCount = idleAgents(useRunningAgents()).length;
-  const [openAgents, setOpenAgents] = useState(false);
-  const agentsOpened = useCallback(() => setOpenAgents(false), []);
+  const [agentsPane, setAgentsPane] = useState<AgentsPaneId>('agents');
   useEffect(() => window.baton.onShowAgents(() => {
-    setView('sessions');
-    setOpenAgents(true);
+    setView('agents');
+    setAgentsPane('agents');
   }), []);
 
   // Seeded once from disk, then applied — and re-applied live if "System" is
@@ -698,7 +701,8 @@ export function App() {
     tickets: snapshot.tickets.length,
     sentry: snapshot.sentryIssues.length,
     workspace: 0,
-    sessions: sessions.filter((s) => s.running).length
+    sessions: sessions.filter((s) => s.running).length,
+    agents: 0
   }), [snapshot, sessions]);
 
   /** Opening a terminal anywhere lands you in the session that just started. */
@@ -929,25 +933,14 @@ export function App() {
                 >
                   <Icon />
                   {v.id === 'pulls' && n > 0 && <span className="rail-pip" />}
-                  {v.id === 'sessions' && idleCount > 0 ? (
+                  {v.id === 'sessions' && n > 0 && <span className="rail-pip live" />}
+                  {v.id === 'agents' && idleCount > 0 && (
                     <span className="rail-pip idle" title={`${idleCount} idle agent${idleCount === 1 ? '' : 's'}`} />
-                  ) : v.id === 'sessions' && n > 0 && <span className="rail-pip live" />}
+                  )}
                 </button>
               );
             })}
             <span className="rail-spacer" />
-            <button
-              type="button" aria-label="Open a terminal" className="rail-item"
-              onClick={() => openTerminal()}
-            >
-              <TerminalIcon size={18} />
-            </button>
-            <button
-              type="button" aria-label="Refresh" className="rail-item"
-              disabled={snapshot.refreshing} onClick={refresh}
-            >
-              <RefreshIcon />
-            </button>
             <button
               type="button" aria-label="Settings" className="rail-item"
               onClick={() => setConnecting(true)}
@@ -962,7 +955,12 @@ export function App() {
               targets={targets} onOpen={openTerminal}
               snapshot={snapshot} onOpenSubject={openSubject} onRename={renameSession}
               fontSize={fontSize}
-              openAgents={openAgents} onAgentsOpened={agentsOpened}
+            />
+          ) : view === 'agents' ? (
+            <AgentsView
+              pane={agentsPane} onPane={setAgentsPane}
+              snapshot={snapshot} onOpenSubject={openSubject}
+              onOpenSession={(id) => { setActiveSession(id); setView('sessions'); }}
             />
           ) : view === 'workspace' ? (
             <WorkspaceView onTerminal={openTerminal} />
@@ -1251,10 +1249,13 @@ function SessionRow({
   drag: DragHandlers;
 }) {
   const [editing, setEditing] = useState(false);
-  // The ticket or pull request's own title under the session's name, so a
-  // row says what the work is, not just its key.
+  // The ticket or pull request's own title, in the row's tooltip, so a row
+  // still says what the work is when its name is only a key.
   const match = session.subject ? findSubject(session.subject, snapshot) : undefined;
   const about = match?.pull?.title ?? match?.issue?.summary ?? match?.sentry?.title;
+  const stateText = session.running
+    ? (session.attention ? 'waiting for you' : session.runnerName)
+    : `exited ${session.exitCode ?? ''}`;
 
   // A div, not a button: the name inside it carries a link to the ticket and
   // a rename control of its own, and HTML will not nest those in a button —
@@ -1264,9 +1265,10 @@ function SessionRow({
   return (
     <li>
       <div
-        className={selected ? 'row selected' : 'row'}
+        className={selected ? 'row one-line selected' : 'row one-line'}
         role="button"
         tabIndex={0}
+        title={about ? `${about}\n${stateText}` : stateText}
         {...(editing ? {} : drag.handlers(session.id, onSelect))}
         onKeyDown={(e) => {
           if (editing || (e.key !== 'Enter' && e.key !== ' ')) return;
@@ -1274,24 +1276,17 @@ function SessionRow({
           onSelect();
         }}
       >
+        {/* One line per session: the dot carries the state (amber, not green,
+            the moment the agent rings the bell and goes quiet on you — see
+            `attention` in main/sessions.ts), the ticket or PR title and the
+            state in words move to the tooltip. */}
         <span className="row-top">
+          <span className={session.running ? (session.attention ? 'dot running' : 'dot live') : 'dot'} />
           <SessionName
             session={session} snapshot={snapshot} onOpenSubject={onOpenSubject}
             editing={editing} onEdit={setEditing} onRename={onRename}
             className="row-title"
           />
-        </span>
-        {about && <span className="row-about" title={about}>{about}</span>}
-        <span className="row-state">
-          <span className="state">
-            {/* Amber, not green, the moment the agent rings the bell and goes
-                quiet on you — see `attention` in main/sessions.ts. */}
-            <span className={session.running ? (session.attention ? 'dot running' : 'dot live') : 'dot'} />
-            {session.running
-              ? (session.attention ? 'waiting for you' : session.runnerName)
-              : `exited ${session.exitCode ?? ''}`}
-          </span>
-          <span className="spacer" />
           <SessionUsageChip id={session.id} />
           <span className="row-age">{formatAge(new Date(session.startedAt).toISOString())}</span>
         </span>
@@ -1300,14 +1295,50 @@ function SessionRow({
   );
 }
 
-/** `selectedJob`'s value when the Usage overview, not a job, has the pane. */
-const USAGE_PANE = 'usage';
-/** …and when the Running agents pane has it. */
-const AGENTS_PANE = 'agents';
+type AgentsPaneId = 'agents' | 'usage';
+
+/**
+ * Everything about agents as a whole rather than one terminal: what is
+ * running anywhere on the Mac, and what it has all cost. Same two-row sidebar
+ * shape the Sessions tab used to carry these in, now on its own.
+ */
+function AgentsView({
+  pane, onPane, snapshot, onOpenSubject, onOpenSession
+}: {
+  pane: AgentsPaneId;
+  onPane: (pane: AgentsPaneId) => void;
+  snapshot: Snapshot;
+  onOpenSubject: (match: Selection) => void;
+  onOpenSession: (id: string) => void;
+}) {
+  return (
+    <>
+      <aside className="queue" aria-label="Agents and usage">
+        <div className="queue-head">
+          <div className="queue-title-row">
+            <h1>Agents</h1>
+          </div>
+        </div>
+        <div className="queue-list">
+          <RunningAgentsRow selected={pane === 'agents'} onSelect={() => onPane('agents')} />
+          <UsageRow selected={pane === 'usage'} onSelect={() => onPane('usage')} />
+        </div>
+      </aside>
+      <Resizer />
+      <main className="pane term-pane">
+        {pane === 'usage' ? (
+          <UsageOverview snapshot={snapshot} onOpenSubject={onOpenSubject} />
+        ) : (
+          <RunningAgentsPane snapshot={snapshot} onOpenSubject={onOpenSubject} onOpenSession={onOpenSession} />
+        )}
+      </main>
+    </>
+  );
+}
 
 function Sessions({
   sessions, active, onSelect, targets, onOpen, snapshot, onOpenSubject, onRename,
-  fontSize, openAgents, onAgentsOpened
+  fontSize
 }: {
   sessions: SessionInfo[];
   active?: string;
@@ -1318,9 +1349,6 @@ function Sessions({
   onOpenSubject: (match: Selection) => void;
   onRename: (id: string, title: string) => void;
   fontSize: number;
-  /** The idle reminder was clicked: show Running agents. */
-  openAgents: boolean;
-  onAgentsOpened: () => void;
 }) {
   // The tree and which leaf a plain click lands on live in one state object
   // on purpose: StrictMode invokes a `useState` updater function twice to
@@ -1336,20 +1364,12 @@ function Sessions({
   const jobs = useQuickJobs();
   const [jobsOpen, setJobsOpen] = useState(true);
   const [selectedJob, setSelectedJob] = useState<string>();
-  // The Usage overview takes the main pane the same way a job does.
-  const showUsage = selectedJob === USAGE_PANE;
-  const showAgents = selectedJob === AGENTS_PANE;
-  const job = selectedJob && !showUsage && !showAgents ? jobs.find((j) => j.id === selectedJob) : undefined;
+  const job = selectedJob ? jobs.find((j) => j.id === selectedJob) : undefined;
   const selectSession = useCallback((id: string) => {
     setSelectedJob(undefined);
     onSelect(id);
   }, [onSelect]);
   useEffect(() => setSelectedJob(undefined), [active]);
-  useEffect(() => {
-    if (!openAgents) return;
-    setSelectedJob(AGENTS_PANE);
-    onAgentsOpened();
-  }, [openAgents, onAgentsOpened]);
   const dragRef = useRef<{ sessionId: string; startX: number; startY: number; dragging: boolean } | null>(null);
 
   // A session opened or focused from anywhere else in the app (a click here,
@@ -1483,8 +1503,6 @@ function Sessions({
           </div>
         </div>
         <div className="queue-list">
-          <UsageRow selected={showUsage} onSelect={() => setSelectedJob(USAGE_PANE)} />
-          <RunningAgentsRow selected={showAgents} onSelect={() => setSelectedJob(AGENTS_PANE)} />
           {sessions.length === 0 ? (
             <p className="quiet">
               {jobs.length > 0
@@ -1497,7 +1515,7 @@ function Sessions({
                 <SessionRow
                   key={s.id}
                   session={s}
-                  selected={s.id === active && !job && !showUsage && !showAgents}
+                  selected={s.id === active && !job}
                   snapshot={snapshot}
                   onSelect={() => selectSession(s.id)}
                   onOpenSubject={onOpenSubject}
@@ -1535,11 +1553,7 @@ function Sessions({
       </aside>
       <Resizer />
       <main className="pane term-pane">
-        {showUsage ? (
-          <UsageOverview snapshot={snapshot} onOpenSubject={onOpenSubject} />
-        ) : showAgents ? (
-          <RunningAgentsPane snapshot={snapshot} onOpenSubject={onOpenSubject} onOpenSession={selectSession} />
-        ) : job ? (
+        {job ? (
           <QuickJobView job={job} snapshot={snapshot} onOpenSubject={onOpenSubject} />
         ) : pane.tree ? (
           <PaneView

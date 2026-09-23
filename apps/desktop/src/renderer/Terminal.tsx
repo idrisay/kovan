@@ -130,5 +130,15 @@ export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; font
     }
   }, [fontSize, sessionId]);
 
-  return <div className="term" ref={host} />;
+  // Two boxes, not one: FitAddon sizes the grid from its host's computed
+  // `height`/`width`, and under the app-wide `box-sizing: border-box` those
+  // include the host's own padding — so padding on the host made the grid
+  // one row taller (and a few columns wider) than what is visible, and
+  // `overflow: hidden` cropped the bottom line. The padding lives on the
+  // outer box; the host xterm measures has none.
+  return (
+    <div className="term">
+      <div className="term-host" ref={host} />
+    </div>
+  );
 }

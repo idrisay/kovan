@@ -89,14 +89,22 @@ export function RefreshIcon({ size = 18 }: Props) {
   );
 }
 
+/** A cog. It used to be a circle with eight rays, which read as a sun — the
+ *  theme toggle — not as Settings. */
 export function SettingsIcon({ size = 18 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
       <circle cx="12" cy="12" r="3" />
-      <path d="M12 4v2.4" /><path d="M12 17.6V20" />
-      <path d="M4 12h2.4" /><path d="M17.6 12H20" />
-      <path d="m6.4 6.4 1.7 1.7" /><path d="m15.9 15.9 1.7 1.7" />
-      <path d="m17.6 6.4-1.7 1.7" /><path d="m8.1 15.9-1.7 1.7" />
+    </svg>
+  );
+}
+
+/** A pulse line: agents running anywhere on the Mac, and what they cost. */
+export function AgentsIcon({ size = 19 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M3 12h3.5l2.5-6.5 5 13 2.5-6.5H21" />
     </svg>
   );
 }

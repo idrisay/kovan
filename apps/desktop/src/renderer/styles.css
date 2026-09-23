@@ -443,6 +443,17 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
   font-size: 11px; color: var(--meta);
 }
 .row-age { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+/* Sessions and quick-model jobs: one line each — state dot, name, cost, age —
+   so a long list of running work reads at a glance. */
+.row.one-line { padding: 6px 10px; }
+.row.one-line .row-top { align-items: center; }
+.row.one-line .row-top > .dot { flex: none; }
+.row.one-line .row-age { flex: none; }
+/* The hover-only rename / open icons take no room until they show, or a one-
+   line name loses ~56px of itself to two invisible buttons. */
+.row.one-line .icon-button.rename, .row.one-line .icon-button.open-link { display: none; }
+.row.one-line:hover .icon-button.rename, .row.one-line:hover .icon-button.open-link,
+.row.one-line:focus-within .icon-button.rename, .row.one-line:focus-within .icon-button.open-link { display: grid; }
 .priority-tag {
   font-size: 9.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
   color: var(--muted); background: rgba(255, 255, 255, 0.05);
@@ -1050,7 +1061,8 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .term-cwd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.term { flex: 1; min-width: 0; min-height: 0; overflow: hidden; padding: 8px 10px; }
+.term { flex: 1; min-width: 0; min-height: 0; overflow: hidden; padding: 8px 10px; display: flex; }
+.term-host { flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 
 /* Nothing selected, because what was selected is closed. Says which of the
    two ways out you have rather than leaving a dead terminal on screen. */

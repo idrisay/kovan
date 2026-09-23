@@ -86,9 +86,10 @@ export function QuickJobRow({
   return (
     <li>
       <div
-        className={selected ? 'row selected' : 'row'}
+        className={selected ? 'row one-line selected' : 'row one-line'}
         role="button"
         tabIndex={0}
+        title={statusText(job, now)}
         onClick={onSelect}
         onKeyDown={(e) => {
           if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
@@ -96,7 +97,10 @@ export function QuickJobRow({
           onSelect();
         }}
       >
+        {/* One line, the same as a session row: the dot is the status, the
+            status in words is the tooltip. */}
         <span className="row-top">
+          <span className={STATUS_DOT[job.status]} />
           <span className="row-title">{QUICK_KIND_LABEL[job.kind]} · {job.subject}</span>
           <span className="quick-job-actions">
             {match && (
@@ -125,13 +129,6 @@ export function QuickJobRow({
               <CloseIcon size={10} />
             </button>
           </span>
-        </span>
-        <span className="row-state">
-          <span className="state">
-            <span className={STATUS_DOT[job.status]} />
-            {statusText(job, now)}
-          </span>
-          <span className="spacer" />
           <span className="row-age">{formatAge(new Date(job.startedAt).toISOString())}</span>
         </span>
       </div>

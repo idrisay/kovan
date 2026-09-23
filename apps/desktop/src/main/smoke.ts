@@ -1213,8 +1213,8 @@ export async function smokeUi(
         win,
         `(() => Array.from(document.querySelectorAll('.queue-list .row')).map(r => ({
           title: r.querySelector('.row-title')?.textContent ?? '',
-          dot: r.querySelector('.row-state .dot')?.className ?? '',
-          label: r.querySelector('.row-state .state')?.textContent ?? ''
+          dot: r.querySelector('.row-top > .dot')?.className ?? '',
+          label: r.getAttribute('title') ?? ''
         })))()`
       )
     };
@@ -1915,7 +1915,7 @@ export async function smokeUi(
     await read(win, `document.querySelector('.rail-usage')?.scrollIntoView({ block: 'center' })`);
     await shot('pull-rail');
 
-    await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+    await read(win, `document.querySelector('[aria-label="Agents and usage"]')?.click()`);
     await until(win, `Array.from(document.querySelectorAll('.row-title')).some(t => t.textContent === 'Token usage')`, 5_000);
     await read(win, `Array.from(document.querySelectorAll('.row')).find(r => r.innerText.startsWith('Token usage'))?.click()`);
     await until(win, `document.querySelector('.detail.usage')`, 5_000);
@@ -1926,6 +1926,65 @@ export async function smokeUi(
     await shot('overview-bottom');
     await read(win, `document.querySelector('[aria-label="Pull requests"]')?.click()`);
     await new Promise((r) => setTimeout(r, 400));
+  }
+
+  // --- Items 37–41: a simpler Sessions tab, a leaner rail, a fitted terminal --
+  if (process.env['BATON_SHOT_LAYOUT']) {
+    const prefix = process.env['BATON_SHOT_LAYOUT'];
+    const shot = async (name: string) => {
+      win.webContents.invalidate();
+      await new Promise((r) => setTimeout(r, 400));
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+    win.show();
+    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    await new Promise((r) => setTimeout(r, 300));
+    const cwd = JSON.stringify(process.cwd());
+    await read(win, `window.baton.openTerminal(${cwd}, 'acme/web#42', 'review · acme/web#42')`);
+    await read(win, `window.baton.openTerminal(${cwd}, 'ACME-2393', 'implement · ACME-2393')`);
+    await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+    await until(win, `document.querySelector('.term-pane .term .xterm-rows')`, 10_000);
+    // Fill the screen so the bottom row has something on it to be cut off.
+    const sessionId = await read(win, `window.baton.sessions().then(s => s[s.length - 1].id)`) as string;
+    await read(win, `window.baton.sessionWrite(${JSON.stringify(sessionId)}, 'for i in $(seq 1 200); do echo line $i; done; echo LAST-LINE-VISIBLE\\r')`);
+    await new Promise((r) => setTimeout(r, 1500));
+    await shot('sessions');
+
+    const layout = await read(
+      win,
+      `(() => {
+        const host = document.querySelector('.term-pane .term-host');
+        const screen = host?.querySelector('.xterm-screen');
+        const h = host?.getBoundingClientRect();
+        const x = screen?.getBoundingClientRect();
+        const rows = Array.from(document.querySelectorAll('.queue-list .row'));
+        return {
+          railButtons: Array.from(document.querySelectorAll('.rail button')).map(b => b.getAttribute('aria-label')),
+          sessionsListHasUsage: /Token usage|Running agents/.test(document.querySelector('.queue-list')?.innerText ?? ''),
+          rowHeights: rows.map(r => Math.round(r.getBoundingClientRect().height)),
+          rowsOneLine: rows.every(r => r.classList.contains('one-line') && !r.querySelector('.row-state, .row-about')),
+          terminal: h && x ? {
+            hostBottom: Math.round(h.bottom), screenBottom: Math.round(x.bottom),
+            hostRight: Math.round(h.right), screenRight: Math.round(x.right),
+            fitsVertically: x.bottom <= h.bottom + 0.5, fitsHorizontally: x.right <= h.right + 0.5
+          } : null
+        };
+      })()`
+    );
+
+    await read(win, `document.querySelector('[aria-label="Agents and usage"]')?.click()`);
+    await until(win, `document.querySelector('.queue[aria-label="Agents and usage"]')`, 5_000);
+    await new Promise((r) => setTimeout(r, 600));
+    await shot('agents');
+    const agents = await read(win, `document.querySelector('.queue[aria-label="Agents and usage"] .queue-list')?.innerText ?? ''`);
+    await read(win, `Array.from(document.querySelectorAll('.queue-list .row')).find(r => r.innerText.includes('Token usage'))?.click()`);
+    await new Promise((r) => setTimeout(r, 600));
+    await shot('usage');
+    const usagePane = await read(win, `document.querySelector('main.pane')?.innerText.slice(0, 80) ?? ''`);
+    await read(win, `document.querySelector('.rail [aria-label="Settings"]')?.scrollIntoView()`);
+    await shot('rail');
+    console.log(JSON.stringify({ layout, agents, usagePane }, null, 2));
   }
 
   // --- Item 35: Sessions tab — open links, terminal names, quick-job controls --
@@ -1972,6 +2031,14 @@ export async function smokeUi(
     await shot('list');
 
     const rowWith = (text: string) => `Array.from(document.querySelectorAll('.queue .row')).find(r => r.innerText.includes(${JSON.stringify(text)}))`;
+    // Hover the row first, as a real pointer does: one-line rows keep the open
+    // icon out of the layout until then.
+    const rowRect = await read(win, `(() => { const r = ${rowWith('Terminal — acme/web#42')}?.getBoundingClientRect(); return r ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null; })()`) as { x: number; y: number } | null;
+    if (rowRect) {
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: rowRect.x, y: rowRect.y });
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    result['openLinkHover'] = await read(win, `(() => { const b = ${rowWith('Terminal — acme/web#42')}?.querySelector('.open-link'); return b ? { display: getComputedStyle(b).display, w: b.getBoundingClientRect().width, rowHover: b.closest('.row').matches(':hover') } : null; })()`);
     await mouseClick(`${rowWith('Terminal — acme/web#42')}?.querySelector('.open-link')`);
     result['openLinkLanded'] = await read(win, `({
       view: document.querySelector('.rail-item[aria-current="page"]')?.getAttribute('aria-label'),
@@ -1982,8 +2049,9 @@ export async function smokeUi(
     await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
     await until(win, `${rowWith('Summarize · acme/web#118')}`, 5_000);
     await mouseClick(`${rowWith('Summarize · acme/web#118')}?.querySelector('[aria-label="Cancel"]')`);
-    await until(win, `${rowWith('Summarize · acme/web#118')}?.innerText.includes('cancelled')`, 10_000);
-    result['quickAfterCancel'] = await read(win, `${rowWith('Summarize · acme/web#118')}?.innerText ?? 'gone'`);
+    await until(win, `${rowWith('Summarize · acme/web#118')}?.title.includes('cancelled')`, 10_000);
+    // One-line rows: the status in words is the row's tooltip.
+    result['quickAfterCancel'] = await read(win, `${rowWith('Summarize · acme/web#118')}?.title ?? 'gone'`);
     await shot('quick-cancelled');
     await mouseClick(`${rowWith('Summarize · acme/web#118')}?.querySelector('[aria-label="Close"]')`);
     await new Promise((r) => setTimeout(r, 500));
@@ -2029,7 +2097,7 @@ export async function smokeUi(
 
     const session = await read(win, `window.baton.openTerminal(${JSON.stringify(process.cwd())}, undefined, 'Fake agent · smoke')`) as { id: string };
     await read(win, `window.baton.sessionWrite(${JSON.stringify(session.id)}, ${JSON.stringify(`node ${fake}`)} + String.fromCharCode(13))`);
-    await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+    await read(win, `document.querySelector('[aria-label="Agents and usage"]')?.click()`);
     await until(win, `document.querySelectorAll('.queue .row').length >= 2`, 10_000);
     const agentsRow = `Array.from(document.querySelectorAll('.queue .row')).find(r => r.innerText.includes('Running agents'))`;
     await mouseClick(agentsRow);
@@ -2037,7 +2105,7 @@ export async function smokeUi(
     // The fixture flickering back in remounts the tab and drops the pane.
     const showAgents = async () => {
       if (await read(win, `Boolean(document.querySelector('.detail.agents'))`)) return;
-      await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
+      await read(win, `document.querySelector('[aria-label="Agents and usage"]')?.click()`);
       await until(win, agentsRow, 5_000);
       await mouseClick(agentsRow);
       await until(win, fakeRow, 10_000);
