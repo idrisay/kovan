@@ -26,6 +26,8 @@ export interface TestSelection {
   environmentId?: string;
   /** Unset means every account on the environment. */
   accountIds?: string[];
+  /** A URL typed into the run sheet for this run only — a different port, a preview deploy. */
+  site?: string;
 }
 
 /**
@@ -130,9 +132,11 @@ export class TestEnvironments {
     const { environments, accounts, defaultEnvironment } = await this.state();
     const environment = environments.find((e) => e.id === (selection.environmentId ?? defaultEnvironment));
     if (!environment) return undefined;
+    const site = selection.site?.trim();
+    const effective = site ? { ...environment, site } : environment;
     const onEnv = accounts.filter((a) => a.environmentId === environment.id);
     const chosen = selection.accountIds ? onEnv.filter((a) => selection.accountIds!.includes(a.id)) : onEnv;
-    return { environment, accounts: chosen };
+    return { environment: effective, accounts: chosen };
   }
 
   /**

@@ -2013,6 +2013,20 @@ export async function smokeUi(
     await until(win, `!document.querySelector('.prompt-label textarea')?.value.includes('Parent')`, 10_000);
     const localPrompt = await read(win, `document.querySelector('.prompt-label textarea').value`) as string;
     await shot('verify-local');
+    // Item 45: the URL is an input; typing a different one rewrites this run's prompt.
+    await read(win, `(() => {
+      const input = document.querySelector('.run-test-env-site');
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      set.call(input, 'http://localhost:5173');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await until(win, `document.querySelector('.prompt-label textarea')?.value.includes('The site is http://localhost:5173')`, 10_000);
+    const typedSite = {
+      inPrompt: await read(win, `document.querySelector('.prompt-label textarea').value.includes('The site is http://localhost:5173')`),
+      saveOffered: await read(win, `Array.from(document.querySelectorAll('.run-test-env .link')).some(b => b.textContent.includes('Save as default'))`),
+      stillSaved: await read(win, `window.baton.testEnvironments().then(s => s.environments.find(e => e.id === 'local').site)`)
+    };
+    await shot('verify-typed-site');
     await read(win, `Array.from(document.querySelectorAll('.sheet-head button')).find(b => b.textContent.trim() === 'Cancel')?.click()`);
     await read(win, `document.querySelector('[aria-label="Smaller reading text"]')`);
 
@@ -2024,7 +2038,7 @@ export async function smokeUi(
         legacyAccount: legacy ? `${legacy.environmentId} ${legacy.username}` : null,
         legacyPasswordCarried: legacy ? migrated.savedPasswords.includes(`testAccount.${legacy.id}.password`) : false
       },
-      settingsView, readingSize, zoom, hasVerify,
+      settingsView, readingSize, zoom, hasVerify, typedSite,
       devPrompt: pick(devPrompt, /live on \w+|Sign in as [^\n]*/g),
       localPrompt: pick(localPrompt, /live on \w+|\d\. [^\n]*/g),
       // Usernames and passwords, not the site URL, which is meant to be there.

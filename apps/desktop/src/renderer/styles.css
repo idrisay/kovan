@@ -1916,9 +1916,12 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .run-test-env-head .env-picker { margin: 0; }
 .run-test-env-label { color: var(--muted); font-size: 11.5px; }
 .run-test-env-site {
-  font-family: var(--mono); font-size: 10.5px; color: var(--dim);
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+  flex: 1; min-width: 160px;
+  background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 8px;
+  padding: 6px 9px; color: var(--prose); font-family: var(--mono); font-size: 11.5px;
 }
+.run-test-env-site:focus { outline: none; border-color: rgba(217, 119, 87, 0.5); }
+.run-test-env-site::placeholder { color: var(--dim); }
 .run-test-accounts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 10px; }
 .run-test-accounts .checkbox-row { display: flex; align-items: center; gap: 7px; margin: 0; }
 .run-test-env .settings-note { margin: 8px 0 0; }

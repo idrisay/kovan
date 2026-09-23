@@ -76,4 +76,12 @@ describe('test environments', () => {
     expect(secrets[accountPasswordKey('a1')]).toBeUndefined();
     expect(secrets[accountPasswordKey('a2')]).toBe('p2');
   });
+
+  it('uses a URL typed into the run sheet for that run only', async () => {
+    const envs = new TestEnvironments(fakeHost({}, {}));
+    const typed = await envs.resolve({ environmentId: 'local', site: ' http://localhost:5173 ' });
+    expect(typed?.environment.site).toBe('http://localhost:5173');
+    const saved = await envs.resolve({ environmentId: 'local' });
+    expect(saved?.environment.site).toBe('http://localhost:3000');
+  });
 });

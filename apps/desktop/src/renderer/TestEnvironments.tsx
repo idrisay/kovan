@@ -273,6 +273,10 @@ export function TestEnvironmentPicker({
   const [state, setState] = useState<TestEnvironmentState>();
   const [environmentId, setEnvironmentId] = useState('');
   const [unticked, setUnticked] = useState<Set<string>>(new Set());
+  // The URL as typed for this run; `site` is what the prompt was last built with.
+  const [siteDraft, setSiteDraft] = useState('');
+  const [site, setSite] = useState('');
+  const [savingSite, setSavingSite] = useState(false);
   const required = kind === 'verify';
 
   useEffect(() => {
@@ -290,15 +294,45 @@ export function TestEnvironmentPicker({
 
   const accounts = state?.accounts.filter((a) => a.environmentId === environmentId) ?? [];
   const accountKey = accounts.map((a) => a.id).join(',');
+  const savedSite = state?.environments.find((e) => e.id === environmentId)?.site ?? '';
+
+  // A fresh environment starts from its saved URL.
+  useEffect(() => {
+    setSiteDraft(savedSite);
+    setSite(savedSite);
+  }, [environmentId, savedSite]);
+
+  // Typing is debounced into the prompt rather than rebuilding it per keystroke.
+  useEffect(() => {
+    if (siteDraft === site) return undefined;
+    const timer = setTimeout(() => setSite(siteDraft), 400);
+    return () => clearTimeout(timer);
+  }, [siteDraft, site]);
+
+  async function saveSite() {
+    if (!state) return;
+    setSavingSite(true);
+    try {
+      setState(await window.baton.testEnvironmentsSave({
+        environments: state.environments.map((e) => (e.id === environmentId ? { ...e, site: siteDraft.trim() } : e)),
+        accounts: state.accounts,
+        defaultEnvironment: state.defaultEnvironment,
+        passwords: {}
+      }));
+    } finally {
+      setSavingSite(false);
+    }
+  }
 
   useEffect(() => {
     if (!state) return;
     if (!environmentId) { onChange(undefined); return; }
     const chosen = accounts.filter((a) => !unticked.has(a.id)).map((a) => a.id);
-    onChange({ environmentId, accountIds: chosen });
+    const override = site.trim() && site.trim() !== savedSite ? site.trim() : undefined;
+    onChange({ environmentId, accountIds: chosen, site: override });
     // `accounts` is derived from these; `onChange` is the parent's setter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, environmentId, accountKey, unticked]);
+  }, [state, environmentId, accountKey, unticked, site, savedSite]);
 
   if (!state) return null;
   if (state.environments.length === 0) {
@@ -330,7 +364,27 @@ export function TestEnvironmentPicker({
             </button>
           ))}
         </div>
-        {environment && <span className="run-test-env-site" title={environment.site}>{environment.site || 'no URL set'}</span>}
+        {environment && (
+          <input
+            className="run-test-env-site"
+            aria-label={`${environment.name} URL for this run`}
+            value={siteDraft}
+            placeholder="https://… — no URL set"
+            spellCheck={false}
+            onChange={(e) => setSiteDraft(e.target.value)}
+            onBlur={() => setSite(siteDraft)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setSite(siteDraft); } }}
+          />
+        )}
+        {environment && siteDraft.trim() !== savedSite && siteDraft.trim() && (
+          <button
+            type="button" className="link" disabled={savingSite}
+            title={`Keep ${siteDraft.trim()} as ${environment.name}'s URL`}
+            onClick={() => void saveSite()}
+          >
+            {savingSite ? 'Saving…' : 'Save as default'}
+          </button>
+        )}
       </div>
       {environment && (
         accounts.length === 0 ? (
