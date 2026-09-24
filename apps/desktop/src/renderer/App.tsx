@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useMenuDismiss } from './menuDismiss';
 import { DEFAULT_PULL_SORT, formatAge, isBlocked, PULL_SORTS, sortPulls, type PullSort } from '@baton/core';
 import type {
   JiraIssue, PolledProvider, PullSummary, RunKind, RunTarget, SentryFrame, SentryIssue,
@@ -156,9 +157,10 @@ function ticketFacetValues(tickets: readonly JiraIssue[]): Record<TicketFacetKey
  * exactly as the text filter left it.
  */
 function TicketFilterMenu({
-  values, active, onToggle, onClear
+  values, tickets, active, onToggle, onClear
 }: {
   values: Record<TicketFacetKey, string[]>;
+  tickets: readonly JiraIssue[];
   active: TicketFilters;
   onToggle: (facet: TicketFacetKey, value: string) => void;
   onClear: () => void;
@@ -166,13 +168,28 @@ function TicketFilterMenu({
   const [open, setOpen] = useState(false);
   const count = TICKET_FACETS.reduce((n, f) => n + active[f.key].size, 0);
 
-  // Any click outside closes the menu, same as the workspace overflow menu.
+  // Status offers every status of the projects' workflows, not only the ones
+  // a loaded ticket happens to be in right now — otherwise a status with
+  // nobody in it ("In Development") looks like it does not exist. Asked from
+  // Jira the first time the menu opens; main keeps it for an hour.
+  const [projectStatuses, setProjectStatuses] = useState<string[]>();
   useEffect(() => {
-    if (!open) return undefined;
-    const close = () => setOpen(false);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [open]);
+    if (!open || projectStatuses) return;
+    void window.baton.ticketStatuses().then((list) => setProjectStatuses(list.map((s) => s.name)));
+  }, [open, projectStatuses]);
+  const statusCount = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of tickets) counts.set(t.status, (counts.get(t.status) ?? 0) + 1);
+    return counts;
+  }, [tickets]);
+  const options = (facet: TicketFacetKey): string[] => {
+    if (facet !== 'status' || !projectStatuses?.length) return values[facet];
+    const extra = values.status.filter((s) => !projectStatuses.includes(s));
+    return [...projectStatuses, ...extra];
+  };
+
+  // Any click outside closes the menu, same as the workspace overflow menu.
+  useMenuDismiss(open, () => setOpen(false));
 
   return (
     <div className="filter-menu-host">
@@ -188,21 +205,25 @@ function TicketFilterMenu({
       {open && (
         <div className="menu filter-menu" role="menu" onClick={(e) => e.stopPropagation()}>
           {TICKET_FACETS.map((facet) => {
-            const options = values[facet.key];
-            if (options.length === 0) return null;
+            const list = options(facet.key);
+            if (list.length === 0) return null;
             return (
               <div key={facet.key} className="filter-group">
                 <p className="menu-head">{facet.label}</p>
-                {options.map((value) => (
-                  <label key={value} className="filter-option">
-                    <input
-                      type="checkbox"
-                      checked={active[facet.key].has(value)}
-                      onChange={() => onToggle(facet.key, value)}
-                    />
-                    {value}
-                  </label>
-                ))}
+                {list.map((value) => {
+                  const n = facet.key === 'status' ? statusCount.get(value) ?? 0 : undefined;
+                  return (
+                    <label key={value} className={n === 0 ? 'filter-option unused' : 'filter-option'}>
+                      <input
+                        type="checkbox"
+                        checked={active[facet.key].has(value)}
+                        onChange={() => onToggle(facet.key, value)}
+                      />
+                      <span className="filter-option-name">{value}</span>
+                      {n !== undefined && <span className="filter-option-count">{n}</span>}
+                    </label>
+                  );
+                })}
               </div>
             );
           })}
@@ -263,12 +284,7 @@ function TicketSortMenu({
 }) {
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = () => setOpen(false);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [open]);
+  useMenuDismiss(open, () => setOpen(false));
 
   return (
     <div className="menu-host">
@@ -311,12 +327,7 @@ function PullSortMenu({
 }) {
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = () => setOpen(false);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [open]);
+  useMenuDismiss(open, () => setOpen(false));
 
   return (
     <div className="menu-host">
@@ -390,12 +401,7 @@ function PullFilterMenu({
   const [open, setOpen] = useState(false);
   const count = PULL_FACETS.reduce((n, f) => n + active[f.key].size, 0);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = () => setOpen(false);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [open]);
+  useMenuDismiss(open, () => setOpen(false));
 
   return (
     <div className="filter-menu-host">
@@ -476,12 +482,7 @@ function RefreshMenu({
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = () => setOpen(false);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [open]);
+  useMenuDismiss(open, () => setOpen(false));
 
   const rows = REFRESHABLE.filter((p) => snapshot.connected.includes(p.id));
 
@@ -643,6 +644,9 @@ export function App() {
   const [connecting, setConnecting] = useState(false);
   const [selected, setSelected] = useState<Selection>({});
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  // Until main has answered once, an empty list means "not asked yet", not
+  // "no sessions" — the saved split layout must not be pruned against it.
+  const [sessionsReady, setSessionsReady] = useState(false);
   const [targets, setTargets] = useState<RunTarget[]>([]);
   const [activeSession, setActiveSession] = useState<string>();
   const [runSheet, setRunSheet] = useState<
@@ -734,7 +738,7 @@ export function App() {
 
   useEffect(() => {
     void window.baton.snapshot().then(accept);
-    void window.baton.sessions().then(setSessions);
+    void window.baton.sessions().then((list) => { setSessions(list); setSessionsReady(true); });
     void window.baton.runTargets().then(setTargets);
     const offSnapshot = window.baton.onSnapshot(accept);
     const offSessions = window.baton.onSessions(setSessions);
@@ -1000,7 +1004,7 @@ export function App() {
 
           {view === 'sessions' ? (
             <Sessions
-              sessions={sessions} active={activeSession} onSelect={setActiveSession}
+              sessions={sessions} sessionsReady={sessionsReady} active={activeSession} onSelect={setActiveSession}
               targets={targets} onOpen={openTerminal}
               snapshot={snapshot} onOpenSubject={openSubject} onRename={renameSession}
               fontSize={fontSize}
@@ -1023,6 +1027,7 @@ export function App() {
                       <>
                         <TicketFilterMenu
                           values={ticketFacets}
+                          tickets={snapshot.tickets}
                           active={ticketFilters}
                           onToggle={toggleTicketFilter}
                           onClear={clearTicketFilters}
@@ -1253,12 +1258,7 @@ function NewSessionMenu({
 }) {
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = () => setOpen(false);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [open]);
+  useMenuDismiss(open, () => setOpen(false));
 
   return (
     <div className="new-session-host">
@@ -1287,7 +1287,7 @@ function NewSessionMenu({
 }
 
 function SessionRow({
-  session, selected, snapshot, onSelect, onOpenSubject, onRename, drag
+  session, selected, snapshot, onSelect, onOpenSubject, onRename, drag, onMove
 }: {
   session: SessionInfo;
   selected: boolean;
@@ -1296,8 +1296,13 @@ function SessionRow({
   onOpenSubject: (match: Selection) => void;
   onRename: (id: string, title: string) => void;
   drag: DragHandlers;
+  /** ⌥↑ / ⌥↓: the keyboard way to reorder, beside dragging. */
+  onMove: (delta: -1 | 1) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const drop = drag.state?.reorder?.targetId === session.id && drag.state.sessionId !== session.id
+    ? (drag.state.reorder.after ? ' drop-after' : ' drop-before')
+    : '';
   // The ticket or pull request's own title, in the row's tooltip, so a row
   // still says what the work is when its name is only a key.
   const match = session.subject ? findSubject(session.subject, snapshot) : undefined;
@@ -1314,13 +1319,20 @@ function SessionRow({
   return (
     <li>
       <div
-        className={selected ? 'row one-line selected' : 'row one-line'}
+        className={`${selected ? 'row one-line selected' : 'row one-line'}${drop}`}
+        data-session-row={session.id}
         role="button"
         tabIndex={0}
         title={about ? `${about}\n${stateText}` : stateText}
         {...(editing ? {} : drag.handlers(session.id, onSelect))}
         onKeyDown={(e) => {
-          if (editing || (e.key !== 'Enter' && e.key !== ' ')) return;
+          if (editing) return;
+          if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+            e.preventDefault();
+            onMove(e.key === 'ArrowUp' ? -1 : 1);
+            return;
+          }
+          if (e.key !== 'Enter' && e.key !== ' ') return;
           e.preventDefault();
           onSelect();
         }}
@@ -1347,37 +1359,69 @@ function SessionRow({
 
 /**
  * The row's own close, shown on hover. An exited session just goes. A running
- * one would take its agent (and whatever it had spent) down with it, so the
- * first click only arms it — the icon turns red and says so — and a second
- * click within three seconds closes it.
+ * one would take its agent (and whatever it had spent) down with it, so it
+ * asks first, in a small popover by the button that says what will stop.
+ *
+ * It used to arm instead: the first click turned the icon amber and only a
+ * second click closed. That read as a close button that doesn't work on the
+ * first click, which is what it looked like to anyone who didn't notice the
+ * colour change.
  */
 function SessionCloseButton({ session }: { session: SessionInfo }) {
-  const [armed, setArmed] = useState(false);
-  useEffect(() => {
-    if (!armed) return undefined;
-    const timer = setTimeout(() => setArmed(false), 3_000);
-    return () => clearTimeout(timer);
-  }, [armed]);
+  const [asking, setAsking] = useState(false);
+  const [place, setPlace] = useState<{ top: number; right: number }>();
+  const button = useRef<HTMLButtonElement>(null);
+  useMenuDismiss(asking, () => setAsking(false));
+  // Placed after render, from the button as it is then: fixed to the window,
+  // because the sidebar list scrolls and would clip a popover inside it, and
+  // measured once the open state has made the button visible.
+  useLayoutEffect(() => {
+    if (!asking || !button.current) { setPlace(undefined); return; }
+    const box = button.current.getBoundingClientRect();
+    const below = box.bottom + 130 < window.innerHeight;
+    setPlace({ top: below ? box.bottom + 4 : box.top - 124, right: window.innerWidth - box.right });
+  }, [asking]);
+  const confirm = asking ? place : undefined;
 
-  const label = !session.running
-    ? 'Close session'
-    : armed ? 'Click again to stop the agent and close' : 'Stop and close session';
+  const shell = session.runnerName === 'Shell';
+  const label = !session.running ? 'Close session' : shell ? 'Close terminal' : `Stop ${session.runnerName} and close`;
   return (
-    <button
-      type="button"
-      className={armed ? 'icon-button session-close armed' : 'icon-button session-close'}
-      aria-label={label} title={label}
-      onClick={(e) => {
-        e.stopPropagation();
-        if (session.running && !armed) {
-          setArmed(true);
-          return;
-        }
-        void window.baton.sessionClose(session.id);
-      }}
-    >
-      <CloseIcon size={10} />
-    </button>
+    <>
+      <button
+        type="button"
+        ref={button}
+        className={asking ? 'icon-button session-close armed' : 'icon-button session-close'}
+        aria-label={label} title={label} aria-haspopup={session.running ? 'dialog' : undefined}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!session.running) {
+            void window.baton.sessionClose(session.id);
+            return;
+          }
+          setAsking((v) => !v);
+        }}
+      >
+        <CloseIcon size={10} />
+      </button>
+      {confirm && (
+        <div
+          className="menu confirm session-close-confirm" role="alertdialog" aria-label={label}
+          style={{ position: 'fixed', top: confirm.top, right: confirm.right, left: 'auto' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p>
+            {shell
+              ? 'Close this terminal? Anything still running in it stops.'
+              : <>Stop <strong>{session.runnerName}</strong> and close this session? The agent stops where it is.</>}
+          </p>
+          <button type="button" className="menu-warn" onClick={() => { setAsking(false); void window.baton.sessionClose(session.id); }}>
+            {shell ? 'Close terminal' : 'Stop and close'}
+          </button>
+          {/* Focus lands on Cancel: Enter straight after the click must not stop an agent. */}
+          <button type="button" autoFocus onClick={() => setAsking(false)}>Cancel</button>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1422,11 +1466,58 @@ function AgentsView({
   );
 }
 
+/**
+ * The Sessions tab's split layout, kept outside the component. It used to be
+ * the component's own state, so going to another tab and back threw away a
+ * side-by-side layout and every session came back as tabs in one pane. Kept
+ * in localStorage too, since the sessions outlive the window: reopened, it
+ * finds the same terminals in the same places, as VS Code does.
+ */
+const PANE_KEY = 'baton.session-panes';
+type PaneState = { tree?: PaneTree; focusedLeafId?: string };
+let savedPane: PaneState | undefined;
+
+function loadPane(): PaneState {
+  if (savedPane) return savedPane;
+  try {
+    const stored = JSON.parse(localStorage.getItem(PANE_KEY) ?? '{}') as PaneState;
+    savedPane = stored && typeof stored === 'object' ? stored : {};
+  } catch {
+    savedPane = {};
+  }
+  return savedPane;
+}
+
+function savePane(pane: PaneState): void {
+  savedPane = pane;
+  try {
+    localStorage.setItem(PANE_KEY, JSON.stringify(pane));
+  } catch { /* the layout still holds for this window */ }
+}
+
+const ORDER_KEY = 'baton.session-order';
+
+function loadSessionOrder(): string[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(ORDER_KEY) ?? '[]');
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSessionOrder(ids: string[]): void {
+  try {
+    localStorage.setItem(ORDER_KEY, JSON.stringify(ids));
+  } catch { /* the order still holds until the window closes */ }
+}
+
 function Sessions({
-  sessions, active, onSelect, targets, onOpen, snapshot, onOpenSubject, onRename,
+  sessions, sessionsReady, active, onSelect, targets, onOpen, snapshot, onOpenSubject, onRename,
   fontSize
 }: {
   sessions: SessionInfo[];
+  sessionsReady: boolean;
   active?: string;
   onSelect: (id: string) => void;
   targets: RunTarget[];
@@ -1443,7 +1534,8 @@ function Sessions({
   // silently applied twice. Keeping the pane and its focus together means
   // every updater below just computes a value and returns it; nothing that
   // touches other state ever runs from inside one.
-  const [pane, setPane] = useState<{ tree?: PaneTree; focusedLeafId?: string }>({});
+  const [pane, setPane] = useState<PaneState>(loadPane);
+  useEffect(() => savePane(pane), [pane]);
   const [dragState, setDragState] = useState<DragState>();
   // A quick-model job shown in the main pane instead of the terminals. Any
   // session being selected — here or from anywhere else — takes the pane back.
@@ -1473,9 +1565,10 @@ function Sessions({
   // terminal or a completed run — cannot go on holding a tab, the same
   // "not just left stale" fix as item 26's placeholder.
   useEffect(() => {
+    if (!sessionsReady) return;
     const live = new Set(sessions.map((s) => s.id));
     setPane((current) => ({ ...current, tree: pruneTree(current.tree, live) }));
-  }, [sessions]);
+  }, [sessions, sessionsReady]);
 
   const focusTab = useCallback((leafId: string, sessionId: string) => {
     setPane((current) => (
@@ -1493,6 +1586,24 @@ function Sessions({
       { ...current, tree: current.tree ? resizeSplit(current.tree, splitId, index, delta) : current.tree }
     ));
   }, []);
+
+  // The sidebar's order, as the user dragged it. New sessions (not in the
+  // saved order yet) go on top, newest first, as they always have.
+  const [order, setOrder] = useState<string[]>(loadSessionOrder);
+  const ordered = useMemo(() => {
+    const rank = new Map(order.map((id, i) => [id, i]));
+    const fresh = sessions.filter((s) => !rank.has(s.id));
+    const known = sessions.filter((s) => rank.has(s.id)).sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
+    return [...fresh, ...known];
+  }, [sessions, order]);
+  const moveInOrder = useCallback((id: string, targetId: string, after: boolean) => {
+    const ids = ordered.map((s) => s.id).filter((x) => x !== id);
+    const at = ids.indexOf(targetId);
+    if (at < 0) return;
+    ids.splice(after ? at + 1 : at, 0, id);
+    setOrder(ids);
+    saveSessionOrder(ids);
+  }, [ordered]);
 
   /**
    * Every draggable thing in the tab (a sidebar row, a tab in a pane) spreads
@@ -1542,7 +1653,15 @@ function Sessions({
               : (dyN < 0 ? 'top' : 'bottom');
           hover = { leafId: leafEl.dataset['paneLeaf']!, zone };
         }
-        setDragState({ sessionId, x: event.clientX, y: event.clientY, hover });
+        // Over another row of the sidebar list: reorder, above or below it
+        // by which half of the row the pointer is in.
+        const rowEl = (el?.closest('[data-session-row]') ?? null) as HTMLElement | null;
+        let reorder: DragState['reorder'];
+        if (rowEl && !leafEl) {
+          const rect = rowEl.getBoundingClientRect();
+          reorder = { targetId: rowEl.dataset['sessionRow']!, after: event.clientY > rect.top + rect.height / 2 };
+        }
+        setDragState({ sessionId, x: event.clientX, y: event.clientY, hover, reorder });
       },
       onPointerUp: (event: React.PointerEvent) => {
         const state = dragRef.current;
@@ -1562,7 +1681,10 @@ function Sessions({
         // — no need for the callback form, which is exactly the shape
         // StrictMode's double-invoke is there to catch a side effect hiding in.
         const hover = dragState?.hover;
-        if (hover) {
+        const reorder = dragState?.reorder;
+        if (reorder && reorder.targetId !== sessionId) {
+          moveInOrder(sessionId, reorder.targetId, reorder.after);
+        } else if (hover) {
           setPane((current) => (
             current.tree
               ? { tree: moveSession(current.tree, sessionId, hover.leafId, hover.zone), focusedLeafId: hover.leafId }
@@ -1577,7 +1699,7 @@ function Sessions({
         setDragState(undefined);
       }
     })
-  }), [dragState, selectSession]);
+  }), [dragState, selectSession, moveInOrder]);
 
   return (
     <>
@@ -1597,7 +1719,7 @@ function Sessions({
             </p>
           ) : (
             <ul className="rows">
-              {sessions.map((s) => (
+              {ordered.map((s, i) => (
                 <SessionRow
                   key={s.id}
                   session={s}
@@ -1607,6 +1729,10 @@ function Sessions({
                   onOpenSubject={onOpenSubject}
                   onRename={onRename}
                   drag={drag}
+                  onMove={(delta) => {
+                    const target = ordered[i + delta];
+                    if (target) moveInOrder(s.id, target.id, delta > 0);
+                  }}
                 />
               ))}
             </ul>

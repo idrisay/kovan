@@ -46,6 +46,9 @@ export interface SessionInfo {
   runDirectory?: string;
   /** Set while the session is idle on your reply — see `Sessions.write()` in main. */
   attention: boolean;
+  /** The title the program running in a plain terminal set — see `SessionInfo.task` in main. */
+  task?: string;
+  renamed?: boolean;
 }
 
 export interface Snapshot {
@@ -146,6 +149,14 @@ export interface BatonApi {
   knownModels(): Promise<Record<ModelFamily, ModelList>>;
   /** ↻ in the run sheet: looks up the models this agent's CLI takes today, and adds them. */
   modelsSearch(command: string): Promise<ModelList | { error: string }>;
+  /** Every status of the loaded tickets' Jira projects, To Do → Done. */
+  ticketStatuses(): Promise<{ name: string; category: string }[]>;
+  /** The clipboard's image saved as a PNG; '' when it holds none. */
+  clipboardImagePath(): Promise<string>;
+  /** Puts text on the clipboard, through main so it works whatever has focus. */
+  copyText(text: string): Promise<void>;
+  /** Where a dropped file lives on disk; '' for one that has no path. */
+  pathForFile(file: File): string;
   modelsSearchCancel(): Promise<void>;
   runTargets(force?: boolean): Promise<RunTarget[]>;
   buildPrompt(kind: RunKind, subject: Subject, test?: TestSelection): Promise<string>;

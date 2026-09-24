@@ -19,6 +19,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMenuDismiss } from './menuDismiss';
 import { Editor, formatBytes, statusFor } from './Editor';
 import { Diff } from './Diff';
 import { Resizer } from './Resizer';
@@ -584,12 +585,7 @@ function WorkspaceRow({
 
   // Any click outside closes the menu. Captured on the document rather than a
   // backdrop element so it does not sit over the rest of the explorer.
-  useEffect(() => {
-    if (!menu) return undefined;
-    const close = () => setMenu(false);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [menu]);
+  useMenuDismiss(menu, () => setMenu(false));
 
   if (renaming) {
     return (
@@ -886,37 +882,41 @@ function ChangeList({
 
   return (
     <>
-      {revertible.length > 1 && (
-        <div className="change-list-head">
-          <div className="menu-host">
-            <button
-              className="link small" disabled={busy}
-              onClick={() => confirm(revertible, 'all')}
-            >
-              Revert all ({revertible.length})
-            </button>
-            {pending?.key === 'all' && (
-              <RevertConfirm pending={pending} busy={busy} onCancel={() => setPending(undefined)} onConfirm={run} />
-            )}
-          </div>
-        </div>
-      )}
-      {groups.map((group) => {
+      {groups.map((group, index) => {
         const open = !shut.has(group.id);
         return (
           <div key={group.id}>
-            <button
-              className="change-group" aria-expanded={open}
-              onClick={() => setShut((s) => {
-                const n = new Set(s);
-                if (n.has(group.id)) n.delete(group.id); else n.add(group.id);
-                return n;
-              })}
-            >
-              <ChevronIcon open={open} size={11} />
-              <span>{group.label}</span>
-              <span className={`group-count ${group.tone}`}>{group.rows.length}</span>
-            </button>
+            <div className="change-group-row">
+              <button
+                className="change-group" aria-expanded={open}
+                onClick={() => setShut((s) => {
+                  const n = new Set(s);
+                  if (n.has(group.id)) n.delete(group.id); else n.add(group.id);
+                  return n;
+                })}
+              >
+                <ChevronIcon open={open} size={11} />
+                <span>{group.label}</span>
+                <span className={`group-count ${group.tone}`}>{group.rows.length}</span>
+              </button>
+              {/* Revert all sits in the first group's header, the way VS Code's
+                  Source Control puts it, rather than on a line of its own. */}
+              {index === 0 && revertible.length > 1 && (
+                <div className="menu-host">
+                  <button
+                    type="button" className="icon-button revert revert-all" disabled={busy}
+                    aria-label={`Revert all ${revertible.length} changes in ${repo.name}`}
+                    title={`Revert all ${revertible.length} changes`}
+                    onClick={(e) => { e.stopPropagation(); confirm(revertible, 'all'); }}
+                  >
+                    <RevertIcon />
+                  </button>
+                  {pending?.key === 'all' && (
+                    <RevertConfirm pending={pending} busy={busy} onCancel={() => setPending(undefined)} onConfirm={run} />
+                  )}
+                </div>
+              )}
+            </div>
             {open && (
               <ul className="rows changes">
                 {group.rows.map((change) => {
@@ -984,10 +984,11 @@ function RevertConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  useEffect(() => {
-    document.addEventListener('click', onCancel);
-    return () => document.removeEventListener('click', onCancel);
-  }, [onCancel]);
+  // Closes on a click outside, Escape, or another menu opening. The opening
+  // click has to stop at its button: "Revert all" let it through, the
+  // confirmation's own outside-click listener caught that same click, and it
+  // closed as it opened, which is why Revert all never did anything.
+  useMenuDismiss(true, onCancel);
 
   const parts: string[] = [];
   if (pending.tracked > 0) {
@@ -999,7 +1000,7 @@ function RevertConfirm({
 
   return (
     <div className="menu confirm" role="menu" onClick={(e) => e.stopPropagation()}>
-      <p>{parts.join(' and ')}?</p>
+      <p>{sentence(parts.join(' and '))}?</p>
       <div className="confirm-actions">
         <button onClick={onCancel}>Cancel</button>
         <button className="menu-warn" disabled={busy} onClick={onConfirm}>
@@ -1008,6 +1009,10 @@ function RevertConfirm({
       </div>
     </div>
   );
+}
+
+function sentence(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function Skeleton({ rows = 3, label, inline = false }: {

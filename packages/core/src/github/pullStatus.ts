@@ -34,6 +34,8 @@ export interface PullSummary {
    * what shipped this morning.
    */
   mergedAt?: string;
+  /** The branch it merges from — where a ticket key usually is (`fix/ACME-2409-…`). */
+  headRef?: string;
 }
 
 export type PullFlagId =
@@ -342,6 +344,7 @@ export interface ApiPullNode {
   createdAt: string;
   updatedAt: string;
   mergedAt?: string | null;
+  headRefName?: string | null;
   additions: number;
   deletions: number;
   mergeable?: string | null;
@@ -384,7 +387,8 @@ export function summaryFromApi(node: ApiPullNode): PullSummary {
     // Left off rather than set to undefined: the field is optional, and an
     // explicit `mergedAt: undefined` survives a structuredClone over IPC as a
     // present key, which `'mergedAt' in pull` would then believe.
-    ...(node.mergedAt ? { mergedAt: node.mergedAt } : {})
+    ...(node.mergedAt ? { mergedAt: node.mergedAt } : {}),
+    ...(node.headRefName ? { headRef: node.headRefName } : {})
   };
 }
 
@@ -530,4 +534,15 @@ export function rollUpChecks(
     return 'pending';
   }
   return states.includes('success') ? 'success' : 'neutral';
+}
+
+/**
+ * Whether a pull request belongs to a ticket: the key in its title or in its
+ * branch name, as a whole key (ACME-24 is not ACME-240) and in any case —
+ * branches are usually lower-case (`fix/acme-2409-…`).
+ */
+export function pullMentionsTicket(pull: Pick<PullSummary, 'title' | 'headRef'>, key: string): boolean {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`(^|[^A-Za-z0-9])${escaped}(?![0-9])`, 'i');
+  return pattern.test(pull.title) || pattern.test(pull.headRef ?? '');
 }

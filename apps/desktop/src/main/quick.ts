@@ -24,6 +24,8 @@ import {
   KIMI_REVIEW_FILE,
   KIMI_REVIEW_TIMEOUT_SECONDS,
   NV_REVIEW_DEFAULT_MODEL,
+  NV_REVIEW_SUFFIX,
+  isNvReviewModel,
   PULL_SUMMARY_INSTRUCTION,
   QUICK_DEFAULT_MODEL,
   QUICK_DEFAULT_TIMEOUT_SECONDS,
@@ -119,17 +121,28 @@ export class QuickModel {
     return own || this.host.config.get('quick.model', '') || QUICK_DEFAULT_MODEL;
   }
 
-  /** What the button's tag shows and its picker edits — nv-review's model for the review. */
+  /**
+   * What the button's tag shows and its picker edits. The review runs either
+   * through `nv-review` (`moonshotai/kimi-k3 (nv-review)`, see
+   * `NV_REVIEW_SUFFIX`) or on any opencode model, like Summarize.
+   */
   modelFor(kind: QuickKind): string {
-    return kind === 'pull-review' ? this.reviewModel() : this.model(kind);
+    if (kind !== 'pull-review') return this.model(kind);
+    if (this.host.config.get<string>('review.runner', 'nv-review') === 'opencode') {
+      return this.host.config.get<Partial<Record<QuickKind, string>>>('quick.models', {})['pull-review'] || QUICK_DEFAULT_MODEL;
+    }
+    return `${this.reviewModel()}${NV_REVIEW_SUFFIX}`;
   }
 
   async setModelFor(kind: QuickKind, model: string): Promise<void> {
     const value = model.trim();
-    if (kind === 'pull-review') {
-      await this.host.config.set('review.nvModel', value);
+    if (!value) return;
+    if (kind === 'pull-review' && isNvReviewModel(value)) {
+      await this.host.config.set('review.runner', 'nv-review');
+      await this.host.config.set('review.nvModel', value.slice(0, -NV_REVIEW_SUFFIX.length).trim());
       return;
     }
+    if (kind === 'pull-review') await this.host.config.set('review.runner', 'opencode');
     const all = this.host.config.get<Partial<Record<QuickKind, string>>>('quick.models', {});
     await this.host.config.set('quick.models', { ...all, [kind]: value });
   }
@@ -259,7 +272,7 @@ export class QuickModel {
     const live: Live = {
       job: {
         id: randomUUID(), kind, subject, status: 'running', startedAt: Date.now(),
-        model: kind === 'pull-review' ? `${this.reviewModel()} (nv-review)` : this.model(kind)
+        model: this.modelFor(kind)
       }
     };
     this.live.set(key, live);
@@ -368,7 +381,7 @@ export class QuickModel {
     live.job = { ...live.job, input: this.forLog(prompt) };
     void this.recordJob(live.job);
 
-    const answer = await this.nvReview(prompt, live);
+    const answer = isNvReviewModel(model) ? await this.nvReview(prompt, live) : await this.opencodeReview(model, prompt, live);
     const { text, verdict } = splitVerdict(answer);
     live.job = { ...live.job, answer, refused: [] };
 
@@ -412,7 +425,8 @@ export class QuickModel {
       if (changed) {
         return { ok: false, error: 'New changes were pushed since this review ran. Refresh the review before submitting it.' };
       }
-      const posted = await this.sources.submitReview(repo, number, event, reviewSubmissionBody(result.text, reviewModelName(result.model)));
+      const via = isNvReviewModel(result.model) ? 'nv-review' : 'opencode';
+      const posted = await this.sources.submitReview(repo, number, event, reviewSubmissionBody(result.text, reviewModelName(result.model), via));
       saved['pull-review'] = { ...result, submitted: { event, at: new Date().toISOString(), url: posted.url } };
       await this.save(subject, saved);
       this.host.log.info(`review on ${subject} submitted as ${event}`);
@@ -431,6 +445,22 @@ export class QuickModel {
     return material.length > STORED_INPUT_LIMIT
       ? `${material.slice(0, STORED_INPUT_LIMIT)}\n\n… (${material.length - STORED_INPUT_LIMIT} more characters not kept in the log)`
       : material;
+  }
+
+  /**
+   * The review on an opencode model: the whole review prompt goes in as the
+   * attached file, the same way Summarize sends its material. Given the
+   * review's own long limit, not the quick model's 90 seconds: a review reads
+   * a whole diff.
+   */
+  private async opencodeReview(model: string, prompt: string, live: Live): Promise<string> {
+    const output = await this.ask(
+      model, prompt,
+      'The attached file is a code review request. Do exactly what it asks, in the format it asks for.',
+      live, KIMI_REVIEW_TIMEOUT_SECONDS * 1000
+    );
+    if (!output.text) throw new Error(output.error || `${reviewModelName(model)} returned nothing.`);
+    return output.text.trim();
   }
 
   /**
@@ -478,7 +508,7 @@ export class QuickModel {
    * One `opencode run` in an empty temp folder, material attached as a file.
    * See `@baton/agent`'s `quick.ts` for why the tools are "ask", not "deny".
    */
-  private async ask(model: string, material: string, instruction: string, live?: Live): Promise<QuickOutput> {
+  private async ask(model: string, material: string, instruction: string, live?: Live, timeoutMs = this.timeoutMs()): Promise<QuickOutput> {
     const opencode = await shellEnvironment.which('opencode');
     if (!opencode) {
       throw new Error('opencode is not installed, or not on your login shell\'s PATH.');
@@ -499,8 +529,8 @@ export class QuickModel {
         child.stderr.on('data', (chunk: Buffer) => (err += chunk.toString('utf8')));
         const timer = setTimeout(() => {
           child.kill('SIGTERM');
-          reject(new Error(`The quick model did not answer within ${Math.round(this.timeoutMs() / 1000)}s.`));
-        }, this.timeoutMs());
+          reject(new Error(`The quick model did not answer within ${Math.round(timeoutMs / 1000)}s.`));
+        }, timeoutMs);
         child.on('error', (e) => {
           clearTimeout(timer);
           reject(e);

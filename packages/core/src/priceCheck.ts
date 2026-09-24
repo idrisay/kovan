@@ -112,7 +112,7 @@ export function applyPriceProposals(current: readonly PriceRule[], picked: reado
 }
 
 /** The first complete JSON object at the start of `text`, braces balanced outside strings. */
-function balanced(text: string): string {
+export function balanced(text: string): string {
   let depth = 0;
   let inString = false;
   let escaped = false;

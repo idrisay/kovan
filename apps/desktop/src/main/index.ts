@@ -12,7 +12,9 @@
  * If you ever find yourself moving the poller into the renderer, stop.
  */
 
-import { app, BrowserWindow, ipcMain, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, nativeTheme, shell } from 'electron';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,7 +72,13 @@ if (!app.requestSingleInstanceLock()) {
 const host = createHost();
 const poller = new Poller(host);
 const activity = new Activity(host);
-const sessions = new Sessions();
+// A ticket key in a terminal's title only counts for a project Baton already
+// has tickets from, as for branch names in `nameTerminal` below.
+const sessions = new Sessions((text) => {
+  const key = ticketKeyInTitle(text.toUpperCase());
+  const projects = new Set(poller.current().tickets.map((t) => t.key.split('-')[0]));
+  return key && projects.has(key.split('-')[0]!) ? key : undefined;
+});
 const detailHttp = new HttpClient(host.log);
 const credentials = new Credentials(host);
 const quick = new QuickModel(host, {
@@ -167,6 +175,35 @@ async function requestReviewers(repo: string, number: number, people: string[], 
   const counts = { ...(history[repo] ?? {}) };
   for (const login of people) counts[login] = (counts[login] ?? 0) + 1;
   await host.config.set('reviewers.history', { ...history, [repo]: counts });
+}
+
+/**
+ * Every status of the projects the loaded tickets come from, for the tickets
+ * filter. Asked when the filter first opens, and kept for an hour: workflows
+ * change about never, and a click should not cost a round trip each time.
+ */
+let statusCache: { key: string; at: number; statuses: { name: string; category: string }[] } | undefined;
+
+async function loadTicketStatuses(): Promise<{ name: string; category: string }[]> {
+  const projects = [...new Set(poller.current().tickets.map((t) => t.key.split('-')[0]!))].sort();
+  if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+    return ['To Specify', 'Ready for Tech Analysis', 'Ready For Implementation', 'In Development', 'In Review', 'QA', 'APPROVED', 'DEPLOYED', 'Closed']
+      .map((name, i) => ({ name, category: i < 3 ? 'new' : i < 6 ? 'indeterminate' : 'done' }));
+  }
+  const key = projects.join(',');
+  if (statusCache && statusCache.key === key && Date.now() - statusCache.at < 60 * 60_000) return statusCache.statuses;
+  const token = await host.secrets.get('jira');
+  const site = host.config.get('jira.baseUrl', '');
+  const email = host.config.get('jira.email', '');
+  if (!token || !site || !email || projects.length === 0) return [];
+  const client = new JiraClient(detailHttp, site, email, token);
+  const lists = await Promise.all(projects.map((p) => client.getProjectStatuses(p).catch(() => [])));
+  const seen = new Map<string, { name: string; category: string }>();
+  for (const status of lists.flat()) if (!seen.has(status.name)) seen.set(status.name, status);
+  const rank: Record<string, number> = { new: 0, indeterminate: 1, done: 2 };
+  const statuses = [...seen.values()].sort((a, b) => (rank[a.category] ?? 3) - (rank[b.category] ?? 3));
+  if (statuses.length > 0) statusCache = { key, at: Date.now(), statuses };
+  return statuses;
 }
 
 async function loadTicket(key: string) {
@@ -449,6 +486,20 @@ app.whenReady().then(async () => {
   // The run sheet's Model dropdown, and its ↻. Searching only adds names.
   const modelSearch = new ModelSearch(host, () => quick.available(true));
   ipcMain.handle('baton:known-models', () => modelSearch.lists());
+  ipcMain.handle('baton:ticket-statuses', () => loadTicketStatuses().catch(() => []));
+  // A screenshot on the clipboard, pasted into a terminal: saved as a file and
+  // its path typed in, which is how Claude Code takes an image in any
+  // terminal (VS Code's drop does the same with the dropped file's path).
+  ipcMain.handle('baton:clipboard-write', (_event, text: string) => { clipboard.writeText(String(text)); });
+  ipcMain.handle('baton:clipboard-image', async () => {
+    const image = clipboard.readImage();
+    if (image.isEmpty()) return '';
+    const dir = path.join(tmpdir(), 'baton-paste');
+    await mkdir(dir, { recursive: true });
+    const file = path.join(dir, `pasted-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
+    await writeFile(file, image.toPNG());
+    return file;
+  });
   ipcMain.handle('baton:models-search', (_event, command: string) => modelSearch.search(command));
   ipcMain.handle('baton:models-search-cancel', () => modelSearch.cancel());
   ipcMain.handle('baton:run-targets', (_event, force?: boolean) => agents.targets(force));

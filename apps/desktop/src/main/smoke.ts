@@ -20,7 +20,7 @@
  * `BATON_SHOT=<path>` also writes a PNG of the window.
  */
 
-import { app, type BrowserWindow } from 'electron';
+import { app, clipboard, type BrowserWindow } from 'electron';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -28,6 +28,7 @@ import type { Agents } from './agents';
 import type { Poller, Snapshot } from './poller';
 import type { Sessions } from './sessions';
 import { reviewBasis } from '@baton/core';
+import { RunStore } from '@baton/agent';
 
 export type SmokeMode = '1' | 'seeded' | 'live' | 'pty' | 'workspace';
 
@@ -46,13 +47,16 @@ const FIXTURE = {
   unresolvedThreads: 2,
   additions: 10,
   deletions: 3,
-  viewerReviewed: false
+  viewerReviewed: false,
+  // Names ticket ACME-2393 in its branch only, not its title.
+  headRef: 'fix/ACME-2393-tablet-mobile-qa-round2'
 };
 
 /** One open pull request per section, so all four headers have something in them. */
 const OPEN_PULLS = [
   {
     ...FIXTURE,
+    headRef: 'feat/unrelated-change',
     number: 118,
     // Carries the same ticket key as `TICKET` below on purpose — item 32's
     // two-way link needs one real match to exercise against.
@@ -67,6 +71,7 @@ const OPEN_PULLS = [
   },
   {
     ...FIXTURE,
+    headRef: 'feat/unrelated-change',
     number: 119,
     title: 'Spike: replace the retry queue with a worker',
     repo: 'acme/web',
@@ -82,6 +87,7 @@ const OPEN_PULLS = [
     // A draft that also cannot merge: the case the "N blocked" note on a
     // folded section exists for.
     ...FIXTURE,
+    headRef: 'feat/unrelated-change',
     number: 120,
     title: 'Draft: split the checkout reducer',
     repo: 'acme/web',
@@ -98,6 +104,7 @@ const OPEN_PULLS = [
 /** Someone else's pull request, waiting on the viewer's review. */
 const REVIEW_PULL = {
   ...FIXTURE,
+  headRef: 'feat/unrelated-change',
   number: 205,
   title: 'Split the invoice PDF generator out of the request path',
   repo: 'acme/billing',
@@ -147,6 +154,8 @@ export function mergedFixture(count: number) {
     reviewDecision: 'approved' as const,
     checks: 'success' as const,
     unresolvedThreads: 0,
+    // One merged pull request per ticket's history, found by a lower-case branch.
+    headRef: i === 1 ? 'feat/acme-2393-first-round' : `feat/change-${i + 1}`,
     updatedAt: new Date(Date.now() - (i + 1) * 43_200_000).toISOString(),
     mergedAt: new Date(Date.now() - (i + 1) * 86_400_000).toISOString()
   }));
@@ -752,6 +761,242 @@ export async function smokeUi(
     await snap('folders');
     await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
     console.log('items46:', JSON.stringify(report));
+  }
+
+  if (process.env['BATON_SHOT_TICKET_PULLS']) {
+    const report: Record<string, unknown> = {};
+    await read(win, `document.querySelector('.rail-item[aria-label="Tickets"]')?.click()`);
+    await until(win, `Array.from(document.querySelectorAll('.queue .row')).some(r => r.innerText.includes('ACME-2393'))`, 10_000);
+    await read(win, `Array.from(document.querySelectorAll('.queue .row')).find(r => r.innerText.includes('ACME-2393')).click()`);
+    await until(win, `document.querySelector('.linked-pull')`, 10_000);
+    report['rows'] = await read(win, `Array.from(document.querySelectorAll('.linked-pull')).map(b => b.innerText.split('\\n').join(' | '))`);
+    report['inHeader'] = await read(win, `Boolean(document.querySelector('.detail-head .linked-pulls'))`);
+    report['chipsGone'] = await read(win, `!document.querySelector('.detail-head .detail-related')`);
+    await new Promise((r) => setTimeout(r, 200));
+    await writeFile(process.env['BATON_SHOT_TICKET_PULLS'], (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${process.env['BATON_SHOT_TICKET_PULLS']}`);
+    await read(win, `document.querySelectorAll('.linked-pull')[1].click()`);
+    await until(win, `document.querySelector('.rail-item.active')?.getAttribute('aria-label') === 'Pull requests'`, 5_000);
+    report['opened'] = await read(win, `[document.querySelector('.rail-item.active')?.getAttribute('aria-label'), document.querySelector('.detail-pill-repo')?.textContent]`);
+    console.log('ticketPulls:', JSON.stringify(report));
+  }
+
+  if (process.env['BATON_SHOT_AGENT_REPORT']) {
+    const prefix = process.env['BATON_SHOT_AGENT_REPORT'];
+    const report: Record<string, unknown> = {};
+    const store = new RunStore(RunStore.rootFor(app.getPath('userData')));
+    const run = await store.begin({ subject: 'ACME-2393', pull: 'acme/web#118', kind: 'verify', prompt: 'Check it shipped.' });
+    await writeFile(path.join(run.directory, 'report.md'),
+      'VERDICT: implemented\n\nChecked acme/web#118 live on dev with a real browser, signed in as the teacher account.\n\n' +
+      Array.from({ length: 18 }, (_, i) => `${i + 1}. Behaviour ${i + 1} of the pull request is live (0${i}-shot.png).`).join('\n') + '\n', 'utf8');
+    await writeFile(path.join(run.directory, 'shots', '01-landing.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'));
+    const card = `document.querySelector('.agent-report')`;
+    // The ticket shows it, and so does the pull request it was started from.
+    await read(win, `document.querySelector('.rail-item[aria-label="Tickets"]')?.click()`);
+    await until(win, `Array.from(document.querySelectorAll('.queue .row')).some(r => r.innerText.includes('ACME-2393'))`, 10_000);
+    await read(win, `Array.from(document.querySelectorAll('.queue .row')).find(r => r.innerText.includes('ACME-2393')).click()`);
+    await until(win, card, 10_000);
+    report['ticketCard'] = await read(win, `${card}.querySelector('.quick-card-head').innerText.split('\\n').join(' | ')`);
+    report['folded'] = await read(win, `Boolean(${card}.querySelector('.agent-report-body.folded'))`);
+    await new Promise((r) => setTimeout(r, 200));
+    await writeFile(`${prefix}-ticket.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-ticket.png`);
+    await read(win, `document.querySelector('.linked-pull:nth-child(2)')?.click()`);
+    await until(win, `document.querySelector('.detail-pill-repo')?.textContent === 'acme/web #118'`, 10_000);
+    report['pullCard'] = await until(win, card, 10_000).then(() => true, () => false);
+    await read(win, `Array.from(document.querySelectorAll('.rows .row')).find(r => r.innerText.trim().startsWith('42'))?.click()`);
+    await until(win, `document.querySelector('.detail-pill-repo')?.textContent === 'acme/web #42'`, 10_000);
+    await new Promise((r) => setTimeout(r, 500));
+    report['otherPullHasNone'] = await read(win, `!${card}`);
+    console.log('agentReport:', JSON.stringify(report));
+  }
+
+  if (process.env['BATON_SHOT_ITEMS_60']) {
+    const prefix = process.env['BATON_SHOT_ITEMS_60'];
+    const report: Record<string, unknown> = {};
+    await read(win, `document.querySelector('.rows .row')?.click()`);
+    await until(win, `document.querySelector('.detail-pill-repo')`, 10_000);
+    const [, repo, num] = /^(\S+) #(\d+)$/.exec(String(await read(win, `document.querySelector('.detail-pill-repo').textContent`)).trim()) ?? [];
+    const subject = `${repo}#${num}`;
+    // 62: the pill and the line under it no longer repeat one state.
+    report['pill'] = await read(win, `document.querySelector('.status-pill')?.textContent`);
+    report['stateLine'] = await read(win, `document.querySelector('.detail-states')?.innerText.split('\\n').join(' · ') ?? '(none)'`);
+    // 60: a saved review, and its Copy.
+    await mkdir(path.join(app.getPath('userData'), 'quick'), { recursive: true });
+    const text = '## Summary\nNot ready.\n\n## Must fix\n- `src/a.ts:4`: anchor the actions to the scroll container.';
+    await writeFile(
+      path.join(app.getPath('userData'), 'quick', `${subject.replace(/[/\\:]/g, '_')}.json`),
+      JSON.stringify({ 'pull-review': {
+        kind: 'pull-review', subject, model: 'moonshotai/kimi-k3 (nv-review)', createdAt: new Date().toISOString(),
+        basis: reviewBasis(detailFixture(repo!, Number(num))), verdict: 'request_changes', text
+      } }),
+      'utf8'
+    );
+    await read(win, `document.querySelectorAll('.rows .row')[1]?.click()`);
+    await new Promise((r) => setTimeout(r, 500));
+    await read(win, `document.querySelector('.rows .row')?.click()`);
+    await until(win, `document.querySelector('.quick-copy')`, 10_000);
+    clipboard.writeText('');
+    await read(win, `document.querySelector('.quick-copy').click()`);
+    await until(win, `document.querySelector('.quick-copy.copied')`, 5_000);
+    report['copied'] = clipboard.readText() === text;
+    report['button'] = await read(win, `document.querySelector('.quick-copy').textContent`);
+    await read(win, `document.querySelector('.quick-copy').closest('.quick-card').scrollIntoView({ block: 'start' })`);
+    await new Promise((r) => setTimeout(r, 300));
+    await writeFile(`${prefix}-copy.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-copy.png`);
+    // Folding: the review card's title folds it, and it stays folded for this PR.
+    const reviewCard = `Array.from(document.querySelectorAll('.quick-card')).find(c => c.querySelector('.card-toggle')?.textContent === 'Code review')`;
+    await read(win, `${reviewCard}.querySelector('.card-toggle').click()`);
+    await new Promise((r) => setTimeout(r, 150));
+    report['foldedHidesBody'] = await read(win, `!${reviewCard}.querySelector('.quick-card-body')`);
+    await writeFile(`${prefix}-folded.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-folded.png`);
+    await read(win, `document.querySelectorAll('.rows .row')[1]?.click()`);
+    await new Promise((r) => setTimeout(r, 500));
+    await read(win, `document.querySelector('.rows .row')?.click()`);
+    await until(win, reviewCard, 10_000);
+    report['stillFolded'] = await read(win, `${reviewCard}.querySelector('.card-toggle').getAttribute('aria-expanded') === 'false'`);
+    await read(win, `${reviewCard}.querySelector('.card-toggle').click()`);
+    await new Promise((r) => setTimeout(r, 150));
+    report['unfolds'] = await read(win, `Boolean(${reviewCard}.querySelector('.quick-card-body'))`);
+    console.log('items60:', JSON.stringify(report));
+  }
+
+  if (process.env['BATON_SHOT_ITEMS_63']) {
+    const prefix = process.env['BATON_SHOT_ITEMS_63'];
+    const snap = async (name: string) => {
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    };
+    const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const report: Record<string, unknown> = {};
+    const railTo = (label: string) => read(win, `document.querySelector('.rail-item[aria-label="${label}"]')?.click()`);
+
+    // 66, 67: the review's picker offers nv-review and opencode; one menu at a time.
+    await read(win, `document.querySelector('.rows .row')?.click()`);
+    await until(win, `document.querySelectorAll('.quick-model').length >= 2`, 10_000);
+    report['buttons'] = await read(win, `Array.from(document.querySelectorAll('.quick-run')).map(b => b.textContent)`);
+    await read(win, `document.querySelectorAll('.quick-model')[0].click()`);
+    await until(win, `document.querySelector('.quick-model-menu')`, 5_000);
+    await read(win, `document.querySelectorAll('.quick-model')[1].click()`);
+    await until(win, `document.querySelector('.quick-model-field select option[value="nv-review"]')`, 5_000);
+    await until(win, `document.querySelectorAll('.quick-model-field select option').length > 2`, 10_000);
+    report['menusOpen'] = await read(win, `document.querySelectorAll('.quick-model-menu').length`);
+    report['reviewProviders'] = await read(win, `Array.from(document.querySelectorAll('.quick-model-field select option')).map(o => o.textContent)`);
+    await read(win, `document.querySelector('.quick-model-type')?.click()`);
+    await until(win, `document.querySelector('.quick-model-other input')`, 5_000);
+    await pause(150);
+    await snap('review-picker');
+    await read(win, `(() => {
+      const sel = document.querySelector('.quick-model-field select');
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, 'openai');
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await pause(150);
+    await read(win, `document.querySelector('.quick-model-list button')?.click()`);
+    await pause(400);
+    report['reviewTagAfterPick'] = await read(win, `document.querySelectorAll('.quick-model')[1]?.textContent`);
+    report['reviewSettings'] = await read(win, `window.baton.settings().then(s => [s['review.runner'], (s['quick.models'] || {})['pull-review']])`);
+    // Back to nv-review, as the user had it.
+    await read(win, `window.baton.quickModelSet('pull-review', 'moonshotai/kimi-k3 (nv-review)')`);
+
+    // 63: every workflow status in the tickets filter.
+    await railTo('Tickets');
+    await until(win, `document.querySelector('[aria-label="Filter tickets"]')`, 10_000);
+    await read(win, `document.querySelector('[aria-label="Filter tickets"]').click()`);
+    await until(win, `Array.from(document.querySelectorAll('.filter-option-name')).some(n => n.textContent === 'In Development')`, 10_000);
+    report['statuses'] = await read(win, `Array.from(document.querySelectorAll('.filter-group')[0].querySelectorAll('.filter-option')).map(r => r.innerText.replace(/\s+/g, ' '))`);
+    await pause(150);
+    await snap('statuses');
+    await read(win, `document.body.click()`);
+
+    // 68, 69, 65, 70 in Sessions: two terminals, a program title, a split that survives a tab switch.
+    const cwd = process.env['BATON_SMOKE_FOLDERS']?.split(',')[0] ?? process.cwd();
+    const a = await read(win, `window.baton.openTerminal(${JSON.stringify(cwd)}).then(s => s.id)`) as string;
+    const b = await read(win, `window.baton.openTerminal(${JSON.stringify(cwd)}).then(s => s.id)`) as string;
+    await pause(1500);
+    await read(win, `window.baton.sessionWrite(${JSON.stringify(a)}, "printf '\\\\033]0;\\\\342\\\\234\\\\263 Investigate ACME-2409\\\\007'\\r")`);
+    await until(win, `window.baton.sessions().then(l => l.some(s => s.task))`, 8_000).catch(() => undefined);
+    report['task'] = await read(win, `window.baton.sessions().then(l => l.map(s => [s.title, s.task, s.subject]))`);
+    await read(win, `localStorage.setItem('baton.session-panes', JSON.stringify({ focusedLeafId: 'l1', tree: {
+      type: 'split', id: 's1', orientation: 'row', children: [
+        { node: { type: 'leaf', id: 'l1', sessions: [${JSON.stringify(a)}], active: ${JSON.stringify(a)} }, size: 0.5 },
+        { node: { type: 'leaf', id: 'l2', sessions: [${JSON.stringify(b)}], active: ${JSON.stringify(b)} }, size: 0.5 }
+      ] } }))`);
+    await railTo('Sessions');
+    await until(win, `document.querySelectorAll('.pane-leaf').length >= 1`, 10_000);
+    report['leavesFirst'] = await read(win, `document.querySelectorAll('.pane-leaf').length`);
+    await railTo('Pull requests');
+    await pause(500);
+    await railTo('Sessions');
+    await until(win, `document.querySelectorAll('.pane-leaf').length >= 1`, 10_000);
+    report['leavesAfterSwitch'] = await read(win, `document.querySelectorAll('.pane-leaf').length`);
+    report['rowTitles'] = await read(win, `Array.from(document.querySelectorAll('.queue .row-title')).map(n => n.textContent)`);
+
+    // 70: a running quick job next to finished ones.
+    await read(win, `window.baton.quickRun('pull-summary', 'acme/web#205')`);
+    await until(win, `document.querySelector('.row.quick-job.running')`, 10_000).catch(() => undefined);
+    report['jobStates'] = await read(win, `Array.from(document.querySelectorAll('.row.quick-job')).map(r => r.className + ' | ' + r.querySelector('.quick-job-state')?.textContent)`);
+
+    // Reorder: drag the second session row above the first, then ⌥↓ it back.
+    const rowIds = () => read(win, `Array.from(document.querySelectorAll('[data-session-row]')).map(r => r.dataset.sessionRow)`) as Promise<string[]>;
+    report['orderBefore'] = await rowIds();
+    {
+      let attached = false;
+      try { win.webContents.debugger.attach('1.3'); attached = true; } catch { /* already attached */ }
+      const mouse = (type: string, x: number, y: number, buttons: number) =>
+        win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: 1, pointerType: 'mouse' });
+      const box = (i: number) => read(win, `(() => { const r = document.querySelectorAll('[data-session-row]')[${i}].getBoundingClientRect(); return { x: Math.round(r.x + 40), top: Math.round(r.top), mid: Math.round(r.top + r.height / 2) }; })()`) as Promise<{ x: number; top: number; mid: number }>;
+      const from = await box(1);
+      const to = await box(0);
+      await mouse('mousePressed', from.x, from.mid, 1);
+      for (let i = 1; i <= 8; i += 1) {
+        await mouse('mouseMoved', from.x, Math.round(from.mid + (to.top + 3 - from.mid) * (i / 8)), 1);
+        await pause(20);
+      }
+      report['dropLine'] = await read(win, `Boolean(document.querySelector('.row.drop-before'))`);
+      await snap('reorder');
+      await mouse('mouseReleased', from.x, to.top + 3, 0);
+      if (attached) win.webContents.debugger.detach();
+    }
+    await pause(300);
+    report['orderAfterDrag'] = await rowIds();
+    report['orderSaved'] = await read(win, `JSON.parse(localStorage.getItem('baton.session-order') || '[]')`);
+    await read(win, `document.querySelector('[data-session-row]').focus()`);
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down', modifiers: ['alt'] });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Down', modifiers: ['alt'] });
+    await pause(300);
+    report['orderAfterKey'] = await rowIds();
+
+    // Hovering a row must not change its height: reveal its hover icons as :hover would.
+    report['rowHeights'] = await read(win, `(() => {
+      const row = document.querySelector('.queue .row.one-line');
+      const before = row.getBoundingClientRect().height;
+      const icons = Array.from(row.querySelectorAll('.icon-button.rename, .icon-button.session-close, .icon-button.open-link'));
+      icons.forEach(i => { i.style.display = 'grid'; });
+      const after = row.getBoundingClientRect().height;
+      icons.forEach(i => { i.style.display = ''; });
+      return [before, after];
+    })()`);
+    // 65: the close asks first, and Cancel keeps the session.
+    await read(win, `document.querySelector('.queue .session-close')?.click()`);
+    await until(win, `document.querySelector('.session-close-confirm')`, 5_000);
+    report['confirmText'] = await read(win, `document.querySelector('.session-close-confirm')?.innerText.replace(/\s+/g, ' ')`);
+    report['focused'] = await read(win, `document.activeElement?.textContent`);
+    await pause(150);
+    await snap('sessions');
+    await read(win, `Array.from(document.querySelectorAll('.session-close-confirm button')).find(b => b.textContent === 'Cancel')?.click()`);
+    await pause(200);
+    report['sessionsAfterCancel'] = await read(win, `window.baton.sessions().then(l => l.length)`);
+    await read(win, `window.baton.quickCancel('pull-summary', 'acme/web#205')`);
+    // Leave the app as the rest of the run expects it.
+    await read(win, `window.baton.sessionClose(${JSON.stringify(a)})`);
+    await read(win, `window.baton.sessionClose(${JSON.stringify(b)})`);
+    await read(win, `localStorage.removeItem('baton.session-panes')`);
+    await railTo('Pull requests');
+    await pause(500);
+    console.log('items63:', JSON.stringify(report));
   }
 
   if (process.env['BATON_SHOT_ITEM_59']) {
@@ -3424,14 +3669,19 @@ async function driveRevert(win: BrowserWindow): Promise<Record<string, unknown>>
   const afterOne = await rowCount();
 
   // Whatever is left, in one shot via "Revert all".
-  const hadRevertAll = await read_<boolean>(`Boolean(document.querySelector('.change-list-head .link'))`);
+  const hadRevertAll = await read_<boolean>(`Boolean(document.querySelector('.icon-button.revert-all'))`);
   let allConfirmText = '';
   let afterAll = afterOne;
   let clean = false;
   if (hadRevertAll) {
-    await read(win, `document.querySelector('.change-list-head .link')?.click()`);
+    await read(win, `document.querySelector('.icon-button.revert-all')?.click()`);
     await until(win, `document.querySelector('.menu.confirm')`, 5_000);
     allConfirmText = await confirmText();
+    if (process.env['BATON_SHOT_REVERT_ALL']) {
+      await new Promise((r) => setTimeout(r, 150));
+      await writeFile(process.env['BATON_SHOT_REVERT_ALL'], (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${process.env['BATON_SHOT_REVERT_ALL']}`);
+    }
     await read(win, `document.querySelector('.confirm-actions button.menu-warn')?.click()`);
     await until(
       win,

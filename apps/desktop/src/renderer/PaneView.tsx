@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useRef, useState } from 'react';
 import { Terminal } from './Terminal';
-import { SessionName, type Selection } from './sessionSubject';
+import { SessionName, sessionLabel, type Selection } from './sessionSubject';
 import { CloseIcon } from './icons';
 import { SessionUsageStrip } from './Usage';
 import type { DropZone, PaneLeaf, PaneSplit, PaneTree } from './paneTree';
@@ -16,6 +16,8 @@ export interface DragState {
   x: number;
   y: number;
   hover?: { leafId: string; zone: DropZone };
+  /** Over the sidebar list instead: the row it would land next to. */
+  reorder?: { targetId: string; after: boolean };
 }
 
 /**
@@ -71,11 +73,11 @@ function PaneTabStrip({
             {...drag.handlers(id, () => onFocusTab(leaf.id, id))}
           >
             <span className={s.running ? (s.attention ? 'dot running' : 'dot live') : 'dot'} />
-            <span className="pane-tab-title">{s.title}</span>
+            <span className="pane-tab-title" title={sessionLabel(s)}>{sessionLabel(s)}</span>
             <button
               type="button"
               className="pane-tab-close"
-              aria-label={`Remove ${s.title} from this pane`}
+              aria-label={`Remove ${sessionLabel(s)} from this pane`}
               title="Remove from this pane (keeps it running — find it again in the list)"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); onDetachTab(id); }}
@@ -255,7 +257,7 @@ export function PaneView(props: {
       <PaneNodeView {...props} node={props.tree} />
       {props.drag.state && (
         <div className="pane-drag-ghost" style={{ left: props.drag.state.x, top: props.drag.state.y }}>
-          {props.sessions.find((s) => s.id === props.drag.state!.sessionId)?.title}
+          {(() => { const s = props.sessions.find((x) => x.id === props.drag.state!.sessionId); return s ? sessionLabel(s) : ''; })()}
         </div>
       )}
     </div>

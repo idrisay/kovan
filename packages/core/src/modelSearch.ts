@@ -18,6 +18,8 @@ export function modelFamily(command: string): ModelFamily | undefined {
   return undefined;
 }
 
+import { balanced } from './priceCheck';
+
 const VENDOR: Record<Exclude<ModelFamily, 'opencode'>, { cli: string; docs: string; example: string }> = {
   claude: { cli: 'Claude Code (`claude --model`)', docs: 'docs.anthropic.com / docs.claude.com', example: '"opus", "sonnet", "claude-opus-5-5"' },
   codex: { cli: 'OpenAI Codex CLI (`codex --model`)', docs: 'platform.openai.com and the Codex docs', example: '"gpt-5", "gpt-5-codex"' }
@@ -36,15 +38,19 @@ export function modelSearchPrompt(family: Exclude<ModelFamily, 'opencode'>): str
   ].join('\n');
 }
 
-/** The last `{"models": […]}` in the reply, names checked; an empty or unusable reply is an error. */
+/**
+ * The last `{"models": […]}` in the reply, names checked; an empty or unusable
+ * reply is an error. The object is read with strings respected: cutting at
+ * the first `]` broke on Claude Code's own `opus[1m]` alias, whose bracket
+ * sits inside a name.
+ */
 export function parseModelSearch(text: string): { models: string[] } | { error: string } {
   const at = text.lastIndexOf('{"models"');
   const from = at >= 0 ? at : text.search(/\{\s*"models"/);
   if (from < 0) return { error: 'The search did not answer with a model list.' };
-  const end = text.indexOf(']', from);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(`${text.slice(from, end + 1)}}`);
+    parsed = JSON.parse(balanced(text.slice(from)));
   } catch {
     return { error: 'The model list was not valid JSON.' };
   }
@@ -55,9 +61,13 @@ export function parseModelSearch(text: string): { models: string[] } | { error: 
   return models.length > 0 ? { models } : { error: 'The search found no model names.' };
 }
 
-/** The shape a model name takes on a command line — it ends up as one argv word. */
+/**
+ * The shape a model name takes on a command line — it ends up as one argv
+ * word (quoted, where it goes through a shell). Brackets for Claude Code's
+ * context-size aliases, `opus[1m]`.
+ */
 export function isModelName(name: string): boolean {
-  return /^[\w.:@/-]{1,80}$/.test(name);
+  return /^[\w.:@/[\]-]{1,80}$/.test(name);
 }
 
 /** `opencode models` output: one `provider/model` per line, anything else is chatter. */

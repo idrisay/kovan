@@ -43,3 +43,39 @@ export function scanForBell(data: string, inOsc: boolean): BellScan {
   }
   return { bell, inOsc };
 }
+
+export interface TitleScan {
+  /** Every window title set in this chunk (OSC 0 or 2), oldest first. */
+  titles: string[];
+  /** An OSC string still open at the end of the chunk — pass back in on the next. */
+  carry?: string;
+}
+
+/**
+ * The window titles a program sets, the same `ESC ] 0 ; title BEL` strings
+ * `scanForBell` above has to step over. Split chunks are carried like there.
+ */
+export function scanForTitles(data: string, carry?: string): TitleScan {
+  const titles: string[] = [];
+  let osc = carry;
+  for (let i = 0; i < data.length; i += 1) {
+    const ch = data[i];
+    if (osc !== undefined) {
+      const end = ch === '\x07' ? 1 : ch === '\x1b' && data[i + 1] === '\\' ? 2 : 0;
+      if (end) {
+        const match = /^[02];([\s\S]*)$/.exec(osc);
+        if (match) titles.push(match[1]!);
+        osc = undefined;
+        i += end - 1;
+      } else if (osc.length < 1024) {
+        osc += ch;
+      }
+      continue;
+    }
+    if (ch === '\x1b' && data[i + 1] === ']') {
+      osc = '';
+      i += 1;
+    }
+  }
+  return { titles, carry: osc };
+}

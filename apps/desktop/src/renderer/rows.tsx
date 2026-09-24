@@ -27,8 +27,8 @@ export const TONE: Record<PullFlagId, 'pass' | 'running' | 'fail' | 'waiting' | 
   draft: ''
 };
 
-export function States({ pull, max = 2 }: { pull: PullSummary; max?: number }) {
-  const flags = pullFlags(pull).slice(0, max);
+export function States({ pull, max = 2, skip }: { pull: PullSummary; max?: number; skip?: string }) {
+  const flags = pullFlags(pull).filter((flag) => flag.id !== skip).slice(0, max);
   return (
     <>
       {flags.map((flag) => (

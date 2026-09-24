@@ -454,6 +454,10 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
    so a long list of running work reads at a glance. */
 .row.one-line { padding: 6px 10px; }
 .row.one-line .row-top { align-items: center; }
+/* As tall as the 20px icons that appear on hover, from the start: sized to
+   the text alone, every row grew by a few pixels the moment it was hovered
+   and pushed the rows below it down and back up again. */
+.row.one-line .row-top { min-height: 20px; }
 .row.one-line .row-top > .dot { flex: none; }
 .row.one-line .row-age { flex: none; }
 /* The hover-only rename / open icons take no room until they show, or a one-
@@ -1499,7 +1503,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .change-row .icon-button.revert { flex: none; opacity: 0; margin-right: 2px; }
 .change-row:hover .icon-button.revert,
 .change-row .icon-button.revert:focus-visible { opacity: 1; }
-.change-row .icon-button.revert:hover { color: var(--blocked-bright); background: rgba(196, 99, 90, 0.12); }
+.change-row .icon-button.revert:hover, .change-group-row .icon-button.revert-all:hover { color: var(--running); background: rgba(208, 160, 90, 0.14); }
 .change {
   display: flex; align-items: baseline; gap: 7px; width: 100%; min-width: 0;
   background: none; border: 0; border-radius: 6px; padding: 3px 8px; text-align: left;
@@ -1508,14 +1512,18 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .change.selected { background: rgba(217, 119, 87, 0.14); }
 .change.selected .change-name { color: var(--title); }
 
-.change-list-head { padding: 2px 8px 5px; }
+.change-group-row { display: flex; align-items: center; }
+.change-group-row .change-group { flex: 1; }
+.change-group-row .icon-button.revert-all { flex: none; margin-right: 2px; opacity: 0.55; }
+.change-group-row .icon-button.revert-all:hover { opacity: 1; }
 .menu.confirm { min-width: 230px; }
 .menu.confirm p { margin: 4px 9px 8px; font-size: 12px; color: var(--body); line-height: 1.5; }
 .confirm-actions { display: flex; gap: 6px; padding: 0 4px 4px; }
 .confirm-actions button {
   flex: 1; justify-content: center; border: 1px solid var(--hair-strong); border-radius: 6px;
 }
-.confirm-actions button.menu-warn { color: var(--blocked-bright); border-color: rgba(196, 99, 90, 0.4); }
+.confirm-actions button.menu-warn { color: var(--running); border-color: rgba(208, 160, 90, 0.45); }
+.confirm-actions button.menu-warn:hover { background: rgba(208, 160, 90, 0.14); color: var(--running); }
 .change-mark {
   font-family: var(--mono); font-size: 10.5px; font-weight: 500;
   width: 10px; flex: none; color: var(--meta);
@@ -1749,8 +1757,11 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .quick-model-field select { flex: 1; }
 .quick-model-list { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; }
 .quick-model-id { flex: 1; min-width: 0; font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.quick-model-other { display: flex; gap: 6px; margin: 0 6px; }
-.quick-model-other input { flex: 1; min-width: 0; width: auto; padding: 5px 8px; font-family: var(--mono); font-size: 11.5px; }
+.quick-model-other { display: flex; flex-direction: column; gap: 6px; margin: 0 6px; }
+.menu .quick-model-other input { width: 100%; min-width: 0; padding: 6px 8px; font-family: var(--mono); font-size: 11.5px; }
+.menu .quick-model-other .ghost { width: auto; align-self: flex-end; padding: 4px 10px; font-size: 11.5px; }
+.menu .quick-model-other .ghost:disabled { opacity: 0.45; }
+.menu button.quick-model-type { color: var(--secondary); }
 .quick-model-other input:focus, .quick-model-field select:focus { outline: none; border-color: rgba(217, 119, 87, 0.5); }
 .quick-model-field select { padding: 5px 8px; }
 .quick-model-menu .menu-empty { margin: 2px 9px 0; }
@@ -2029,3 +2040,106 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
   color: var(--dim);
 }
 .collapsible.collapsed h3 { margin-bottom: 0; }
+
+/* Quick-model rows in Sessions: running reads as live work, finished as history. */
+.row.quick-job.finished .row-title { color: var(--meta); }
+.row.quick-job.finished:hover .row-title, .row.quick-job.finished.selected .row-title { color: var(--prose); }
+.quick-job-state {
+  flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--dim);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.quick-job-state.running { color: var(--running); }
+.quick-job-state.failed { color: var(--blocked-bright); }
+.row.quick-job .quick-job-actions { display: none; }
+.row.quick-job:hover .quick-job-actions, .row.quick-job:focus-within .quick-job-actions { display: inline-flex; }
+.row.quick-job:hover .quick-job-state:not(.running), .row.quick-job:focus-within .quick-job-state:not(.running) { display: none; }
+.dot.pulse { animation: dot-pulse 1.4s ease-in-out infinite; }
+@keyframes dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(208, 160, 90, 0.45); }
+  50% { box-shadow: 0 0 0 4px rgba(208, 160, 90, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .dot.pulse { animation: none; } }
+
+/* The session close's question. Amber, not red: stopping an agent is a
+   warning, not a failure (DESIGN.md rule 3). */
+.session-close-confirm { z-index: 40; width: 260px; }
+.session-close-confirm p strong { color: var(--title); font-weight: 600; }
+.session-close-confirm button.menu-warn { color: var(--running); font-weight: 500; }
+.session-close-confirm button.menu-warn:hover { background: rgba(208, 160, 90, 0.14); color: var(--running); }
+
+/* Ticket status filter: every workflow status, with how many tickets are in it. */
+.filter-option-name { flex: 1; min-width: 0; }
+.filter-option-count { font-family: var(--mono); font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.filter-option.unused .filter-option-name { color: var(--muted); }
+.quick-model-menu.align-right { left: auto; right: 0; }
+.menu .quick-model-other .ghost { border: 1px solid var(--hair-strong); background: rgba(255, 255, 255, 0.04); color: var(--prose); }
+:root[data-theme='light'] .menu .quick-model-other .ghost { background: rgba(20, 20, 19, 0.03); }
+
+/* A quick card's Copy: small, beside Refresh. Turns green for a moment once done. */
+.ghost.quick-copy { padding: 2px 8px; font-size: 11px; gap: 5px; }
+.ghost.quick-copy.copied { color: var(--pass); border-color: rgba(111, 169, 127, 0.4); }
+.quick-card-actions { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.quick-card-actions .quick-card-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quick-card-actions > :not(.quick-card-meta) { flex: none; }
+
+/* Dragging a session row within the list: a straight clay line between the
+   rows where it will land. Rows are not text to select — a drag would
+   otherwise highlight half a name on the way. */
+.row.one-line { user-select: none; }
+.row.one-line.drop-before::after, .row.one-line.drop-after::after {
+  content: ''; position: absolute; left: 6px; right: 6px; height: 2px;
+  border-radius: 1px; background: var(--clay); pointer-events: none;
+}
+.row.one-line.drop-before::after { top: -2px; }
+.row.one-line.drop-after::after { bottom: -2px; }
+
+/* A ticket's pull requests, one line each under its title. Each row opens
+   the pull request in Baton's Pull requests tab. */
+.linked-pulls {
+  display: flex; flex-direction: column; margin-top: 12px; max-width: var(--column);
+  border: 1px solid var(--hair); border-radius: 9px; overflow: hidden;
+}
+.linked-pull {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; text-align: left;
+  padding: 7px 11px; background: var(--wash); border: 0; color: inherit; font: inherit;
+}
+.linked-pull + .linked-pull { border-top: 1px solid var(--hair); }
+.linked-pull:hover { background: rgba(255, 255, 255, 0.05); }
+.linked-pull:hover .linked-pull-title { color: var(--title); }
+.linked-pull:focus-visible { outline: 1px solid var(--clay); outline-offset: -1px; }
+.linked-pull-state { flex: none; font-size: 11.5px; color: var(--meta); min-width: 96px; }
+.linked-pull-id { flex: none; font-family: var(--mono); font-size: 11.5px; color: var(--clay); }
+.linked-pull-title { flex: 1; min-width: 0; font-size: 12.5px; color: var(--prose); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.linked-pull-age { flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+:root[data-theme='light'] .linked-pull:hover { background: rgba(20, 20, 19, 0.04); }
+
+/* The latest agent report, at the top of a pull request or ticket. Clay-edged,
+   not the quick card's blue: it came from an agent run (the clay buttons). */
+.detail section.agent-report {
+  margin-top: 22px; padding: 12px 15px;
+  border: 1px solid rgba(217, 119, 87, 0.3); border-radius: 10px;
+  background: rgba(217, 119, 87, 0.04);
+}
+.agent-report-tag { background: rgba(217, 119, 87, 0.14); color: var(--clay-bright); }
+.agent-report-verdict { font-size: 11.5px; font-weight: 600; color: var(--meta); }
+.agent-report-verdict.pass { color: var(--pass); }
+.agent-report-verdict.running { color: var(--running); }
+.agent-report-verdict.fail { color: var(--blocked-bright); }
+.agent-report-body { margin-top: 8px; }
+.agent-report-body.folded {
+  max-height: 260px; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent);
+  mask-image: linear-gradient(to bottom, #000 70%, transparent);
+}
+.agent-report-more { margin-top: 6px; }
+
+/* A result card's title folds the card, like the Description heading; the
+   chevron hangs in the card's padding so the title keeps its place. */
+.card-toggle {
+  display: inline-flex; align-items: center; gap: 5px; margin-left: -15px;
+  padding: 0; background: none; border: 0; font-family: inherit; cursor: pointer;
+}
+.card-toggle svg { flex: none; width: 10px; color: var(--dim); }
+.card-toggle:hover, .card-toggle:hover svg { color: var(--title); }
+.card-toggle:focus-visible { outline: 1px solid var(--clay); outline-offset: 2px; border-radius: 3px; }
+.detail section.quick-card.folded, .detail section.agent-report.folded { padding-bottom: 12px; }

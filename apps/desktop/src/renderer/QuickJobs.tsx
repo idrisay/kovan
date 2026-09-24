@@ -45,9 +45,22 @@ function startedAgo(startedAt: number): string {
   return /now/.test(age) ? age : `${age} ago`;
 }
 
+// Running is amber and pulses; done is the quiet green of finished work.
+// Both used to be green (live and pass), and a running job could not be told
+// from a finished one at a glance.
 const STATUS_DOT: Record<QuickJob['status'], string> = {
-  running: 'dot live', done: 'dot pass', failed: 'dot fail', cancelled: 'dot'
+  running: 'dot running pulse', done: 'dot pass', failed: 'dot fail', cancelled: 'dot'
 };
+
+/** The word at the end of the row: the state, or for finished work its age. */
+function rowState(job: QuickJob, now: number): string {
+  switch (job.status) {
+    case 'running': return `running ${seconds(now - job.startedAt)}`;
+    case 'failed': return 'failed';
+    case 'cancelled': return 'cancelled';
+    case 'done': return formatAge(new Date(job.finishedAt ?? job.startedAt).toISOString()) ?? '';
+  }
+}
 
 function statusText(job: QuickJob, now: number): string {
   switch (job.status) {
@@ -86,7 +99,7 @@ export function QuickJobRow({
   return (
     <li>
       <div
-        className={selected ? 'row one-line selected' : 'row one-line'}
+        className={['row one-line quick-job', running ? 'running' : 'finished', selected ? 'selected' : ''].join(' ').trim()}
         role="button"
         tabIndex={0}
         title={statusText(job, now)}
@@ -97,8 +110,9 @@ export function QuickJobRow({
           onSelect();
         }}
       >
-        {/* One line, the same as a session row: the dot is the status, the
-            status in words is the tooltip. */}
+        {/* One line, the same as a session row. The state is a dot and a
+            word: amber and counting while it runs, the age once done. The
+            actions take the word's place on hover. */}
         <span className="row-top">
           <span className={STATUS_DOT[job.status]} />
           <span className="row-title">{QUICK_KIND_LABEL[job.kind]} · {job.subject}</span>
@@ -129,7 +143,7 @@ export function QuickJobRow({
               <CloseIcon size={10} />
             </button>
           </span>
-          <span className="row-age">{formatAge(new Date(job.startedAt).toISOString())}</span>
+          <span className={`quick-job-state ${job.status}`}>{rowState(job, now)}</span>
         </span>
       </div>
     </li>

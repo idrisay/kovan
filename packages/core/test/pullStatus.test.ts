@@ -4,6 +4,7 @@ import {
   isBlocked,
   isMerged,
   primaryFlag,
+  pullMentionsTicket,
   pullFlags,
   reviewDecisionFrom,
   rollUpChecks,
@@ -169,5 +170,18 @@ describe('merged', () => {
     // over IPC as a present key, which `'mergedAt' in pull` would believe.
     expect('mergedAt' in summaryFromApi({ ...node, mergedAt: null })).toBe(false);
     expect('mergedAt' in summaryFromApi(node)).toBe(false);
+  });
+});
+
+describe('pullMentionsTicket', () => {
+  it('finds the key in the title or the branch, in any case', () => {
+    expect(pullMentionsTicket({ title: 'bug/ACME-2409 UX QA' }, 'ACME-2409')).toBe(true);
+    expect(pullMentionsTicket({ title: 'Tidy up', headRef: 'fix/acme-2409-hover' }, 'ACME-2409')).toBe(true);
+  });
+
+  it('matches the whole key only', () => {
+    expect(pullMentionsTicket({ title: 'ACME-24090 something' }, 'ACME-2409')).toBe(false);
+    expect(pullMentionsTicket({ title: 'XACME-2409' }, 'ACME-2409')).toBe(false);
+    expect(pullMentionsTicket({ title: 'Unrelated', headRef: 'main' }, 'ACME-2409')).toBe(false);
   });
 });

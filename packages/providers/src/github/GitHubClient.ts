@@ -75,6 +75,7 @@ const PULL_FIELDS = `
   createdAt
   updatedAt
   mergedAt
+  headRefName
   additions
   deletions
   mergeable

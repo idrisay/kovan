@@ -32,7 +32,8 @@ import {
   type RunKind
 } from '@baton/agent';
 import { EventEmitter } from '@baton/host';
-import { scanForBell } from './bell';
+import { usefulTerminalTitle } from '@baton/core';
+import { scanForBell, scanForTitles } from './bell';
 
 export interface SessionInfo {
   id: string;
@@ -56,12 +57,24 @@ export interface SessionInfo {
    * that is the actual "I saw it" signal, not a timer.
    */
   attention: boolean;
+  /**
+   * What the program in a plain terminal says it is doing — the title it sets,
+   * as a VS Code terminal tab shows it ("Investigate ACME-2409"). The name
+   * given at opening comes from the branch the clone was on then, and says
+   * nothing once the work in it moves on. Never set on an agent run, whose
+   * title already names its work, nor once somebody renamed the session.
+   */
+  task?: string;
+  /** Renamed by hand: the name is theirs and nothing retitles it. */
+  renamed?: boolean;
 }
 
 interface Session extends SessionInfo {
   pty: IPty;
   /** Carried between chunks: an OSC string can straddle two of them. */
   inOsc: boolean;
+  /** An OSC title string split across two chunks. */
+  titleCarry?: string;
   /**
    * Everything written so far, so a reopened window can redraw a session it
    * was not present for. Capped — an agent that prints a megabyte of diff must
@@ -79,6 +92,11 @@ export class Sessions {
 
   readonly onOutput = this.output.event;
   readonly onDidChange = this.changed.event;
+
+  constructor(
+    /** The ticket a program's title names, when it names one Baton knows. */
+    private readonly ticketIn: (text: string) => string | undefined = () => undefined
+  ) {}
 
   list(): SessionInfo[] {
     return [...this.sessions.values()]
@@ -157,10 +175,10 @@ export class Sessions {
       session.inOsc = scan.inOsc;
       // Only worth a `changed` broadcast on the transition — the list would
       // otherwise republish on every single chunk a busy agent prints.
-      if (scan.bell && !session.attention) {
-        session.attention = true;
-        this.changed.fire(this.list());
-      }
+      let changed = scan.bell && !session.attention;
+      if (changed) session.attention = true;
+      if (!session.kind) changed = this.retitle(session, data) || changed;
+      if (changed) this.changed.fire(this.list());
       this.output.fire({ id, data });
     });
 
@@ -241,6 +259,19 @@ export class Sessions {
     });
   }
 
+  /** Follows the title the program sets. True when the row should redraw. */
+  private retitle(session: Session, data: string): boolean {
+    const scan = scanForTitles(data, session.titleCarry);
+    session.titleCarry = scan.carry;
+    if (session.renamed) return false;
+    // Only the last one counts: a busy chunk can hold several frames of a spinner.
+    const task = scan.titles.map(usefulTerminalTitle).filter(Boolean).pop();
+    if (!task || task === session.task) return false;
+    session.task = task;
+    session.subject = this.ticketIn(task) ?? session.subject;
+    return true;
+  }
+
   write(id: string, data: string): void {
     const session = this.sessions.get(id);
     if (!session) return;
@@ -261,6 +292,8 @@ export class Sessions {
     const trimmed = title.trim();
     if (!session || !trimmed || trimmed === session.title) return;
     session.title = trimmed;
+    session.renamed = true;
+    session.task = undefined;
     this.changed.fire(this.list());
   }
 
@@ -299,9 +332,10 @@ export class Sessions {
 }
 
 function strip(session: Session): SessionInfo {
-  const { pty, buffer, inOsc, ...info } = session;
+  const { pty, buffer, inOsc, titleCarry, ...info } = session;
   void pty;
   void buffer;
   void inOsc;
+  void titleCarry;
   return info;
 }

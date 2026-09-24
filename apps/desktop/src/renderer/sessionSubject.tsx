@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ticketKeyInTitle } from '@baton/core';
+import { pullMentionsTicket } from '@baton/core';
 import type { JiraIssue, PullSummary, SentryIssue, SessionInfo, Snapshot } from './types';
 import { EditIcon, OpenLinkIcon } from './icons';
 
@@ -33,21 +33,20 @@ export function findSubject(subject: string, snapshot: Snapshot): Selection | un
 }
 
 /**
- * The open pull requests that carry this ticket's key in their title — the
- * other direction of the same link `findSubject` follows from a pull
- * request back to its ticket. Open only: a ticket that shipped already has
- * its own "merged" line in whatever pull request closed it, and listing
- * every merged PR that ever mentioned the key would bury the ones that
- * actually still need attention. Deduplicated, because a pull request that
- * is both "blocked on you" and "yours" is one row here, not two.
+ * Every pull request Baton has loaded that belongs to this ticket — the key
+ * in its title or its branch — open ones first (blocked, yours, awaiting your
+ * review), then merged ones, newest first. Each opens in Baton's own Pull
+ * requests tab. Deduplicated: a pull request that is both "blocked on you"
+ * and "yours" is one row, not two.
  */
 export function findRelatedPulls(ticketKey: string, snapshot: Snapshot): PullSummary[] {
   const open = [...snapshot.blocked, ...snapshot.mine, ...snapshot.reviewRequested];
+  const merged = [...snapshot.merged].sort((a, b) => (b.mergedAt ?? '').localeCompare(a.mergedAt ?? ''));
   const seen = new Set<string>();
   const related: PullSummary[] = [];
-  for (const pull of open) {
+  for (const pull of [...open, ...merged]) {
     const id = `${pull.repo}#${pull.number}`;
-    if (seen.has(id) || ticketKeyInTitle(pull.title) !== ticketKey) continue;
+    if (seen.has(id) || !pullMentionsTicket(pull, ticketKey)) continue;
     seen.add(id);
     related.push(pull);
   }
@@ -69,6 +68,14 @@ export function splitTitle(s: SessionInfo): { prefix: string; subject?: string }
 }
 
 /**
+ * What a session is called on screen: the title its program set, when it set
+ * one (see `task` on `SessionInfo`), else the name it was opened with.
+ */
+export function sessionLabel(s: SessionInfo): string {
+  return s.task ?? s.title;
+}
+
+/**
  * A session's name, its identifier's own open-in-its-tab icon, and the
  * pencil that renames it. Shared by the sidebar row and every pane's own
  * header, so all three work the same everywhere a session's name is shown.
@@ -84,7 +91,7 @@ export function SessionName({
   onRename: (id: string, title: string) => void;
   className: string;
 }) {
-  const [draft, setDraft] = useState(session.title);
+  const [draft, setDraft] = useState(sessionLabel(session));
   // What the row shows the instant you commit a rename, rather than however
   // long the round trip to main and back takes — renaming is a fire-and-
   // forget IPC call, and showing the old name for even one more frame after
@@ -94,14 +101,14 @@ export function SessionName({
     if (pending !== undefined && session.title === pending) setPending(undefined);
   }, [session.title, pending]);
 
-  const displayTitle = pending ?? session.title;
+  const displayTitle = pending ?? sessionLabel(session);
   const { prefix, subject } = splitTitle({ ...session, title: displayTitle });
   const match = subject ? findSubject(subject, snapshot) : undefined;
 
   function commit() {
     const next = draft.trim();
     onEdit(false);
-    if (next && next !== session.title) {
+    if (next && next !== sessionLabel(session)) {
       setPending(next);
       onRename(session.id, next);
     }
@@ -119,7 +126,7 @@ export function SessionName({
         onKeyDown={(e) => {
           e.stopPropagation();
           if (e.key === 'Enter') commit();
-          else if (e.key === 'Escape') { setDraft(session.title); onEdit(false); }
+          else if (e.key === 'Escape') { setDraft(sessionLabel(session)); onEdit(false); }
         }}
       />
     );
@@ -127,7 +134,9 @@ export function SessionName({
 
   return (
     <>
-      <span className={className}>{prefix}{subject}</span>
+      <span className={className} title={session.task ? `${session.task}\nOpened as ${session.title}` : displayTitle}>
+        {prefix}{subject}
+      </span>
       {match && (
         <button
           type="button"
@@ -144,7 +153,7 @@ export function SessionName({
         className="icon-button rename"
         aria-label="Rename session"
         title="Rename session"
-        onClick={(e) => { e.stopPropagation(); setDraft(session.title); onEdit(true); }}
+        onClick={(e) => { e.stopPropagation(); setDraft(sessionLabel(session)); onEdit(true); }}
       >
         <EditIcon />
       </button>

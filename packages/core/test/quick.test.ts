@@ -8,6 +8,7 @@ import {
   pullReviewPrompt,
   pullSummaryInput,
   reviewBasis,
+  isNvReviewModel,
   reviewModelName,
   reviewSubmissionBody,
   splitVerdict,
@@ -142,5 +143,9 @@ describe('review verdict', () => {
   it('names the model and marks the posted review as its', () => {
     expect(reviewModelName('moonshotai/kimi-k3 (nv-review)')).toBe('Kimi K3');
     expect(reviewSubmissionBody('Looks good.', 'Kimi K3')).toContain('Written by Kimi K3 via nv-review');
+    expect(reviewModelName('opencode/muse-spark-1.3-contributor-free')).toBe('Muse Spark 1.3');
+    expect(reviewSubmissionBody('Fine.', 'Muse Spark 1.3', 'opencode')).toContain('via opencode');
+    expect(isNvReviewModel('moonshotai/kimi-k3 (nv-review)')).toBe(true);
+    expect(isNvReviewModel('openai/gpt-oss-120b')).toBe(false);
   });
 });

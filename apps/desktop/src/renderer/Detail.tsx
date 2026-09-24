@@ -2,12 +2,15 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   formatAge, isMerged, olderCommentCount, pullBasis, pullFlags, reviewBasis, ticketBasis, ticketKeyInTitle,
   KIMI_REVIEW_FILE,
+  isNvReviewModel,
   reviewModelName,
   TICKET_RECENT_COMMENTS
 } from '@baton/core';
 import { States, TONE } from './rows';
 import { Prose } from './Prose';
-import { QuickButton, QuickCard, ReviewDecision, VerdictBadge, useQuick } from './Quick';
+import { CardTitle, CopyResult, QuickButton, QuickCard, ReviewDecision, VerdictBadge, useQuick } from './Quick';
+import { KIND_LABEL } from './RunSheet';
+import { useFold } from './folds';
 import { SubjectUsage } from './Usage';
 import { RunViewer } from './RunViewer';
 import { Terminal } from './Terminal';
@@ -135,36 +138,12 @@ function CommentCard({
   );
 }
 
-const COLLAPSED_KEY = 'baton.collapsed-descriptions';
-
-function collapsedSubjects(): string[] {
-  try {
-    const list = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]');
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
-  }
-}
-
 /**
  * A description that can fold away, like GitHub's, so a long PR body doesn't
- * push the conversation off screen. Remembered per PR or ticket rather than
- * once for all: collapsing one long description shouldn't hide the next one
- * you haven't read yet.
+ * push the conversation off screen. Remembered per PR or ticket.
  */
 function DescriptionSection({ subject, children }: { subject: string; children: React.ReactNode }) {
-  const [collapsed, setCollapsed] = useState(() => collapsedSubjects().includes(subject));
-  useEffect(() => setCollapsed(collapsedSubjects().includes(subject)), [subject]);
-  const toggle = () => {
-    const next = !collapsed;
-    setCollapsed(next);
-    try {
-      // Newest last, and capped, so the list can't grow forever.
-      const list = collapsedSubjects().filter((s) => s !== subject);
-      if (next) list.push(subject);
-      localStorage.setItem(COLLAPSED_KEY, JSON.stringify(list.slice(-300)));
-    } catch { /* the fold still works for this visit */ }
-  };
+  const [collapsed, toggle] = useFold(subject, 'baton.collapsed-descriptions');
   return (
     <section className={collapsed ? 'collapsible collapsed' : 'collapsible'}>
       <h3>
@@ -194,6 +173,39 @@ function ThreadCard({ thread, defaultExpanded }: { thread: ReviewThread; default
       defaultExpanded={defaultExpanded}
       extra={rest.map((c) => ({ author: c.author, when: formatAge(c.createdAt) ?? '', body: c.body }))}
     />
+  );
+}
+
+/**
+ * A ticket's pull requests, in its header where they are seen first at any
+ * window width: one line each — headline state, where it lives, title — and
+ * a click opens it in Baton's own Pull requests tab. Open ones first, then
+ * merged. They used to be small `repo #number` chips that said nothing about
+ * state and only listed open pull requests with the key in their title; in
+ * the side column they fell below the comments on a narrow window.
+ */
+function TicketPulls({ pulls, onOpen }: { pulls: PullSummary[]; onOpen: (pull: PullSummary) => void }) {
+  if (pulls.length === 0) return null;
+  return (
+    <div className="linked-pulls" role="list" aria-label="Pull requests for this ticket">
+      {pulls.map((pull) => {
+        const flag = pullFlags(pull)[0]!;
+        const name = pull.repo.split('/').pop() ?? pull.repo;
+        return (
+          <button
+            key={`${pull.repo}#${pull.number}`} role="listitem"
+            type="button" className="linked-pull" onClick={() => onOpen(pull)}
+            title={`${pull.repo} #${pull.number} · ${pull.author}\nOpen in Pull requests`}
+          >
+            <span className={`dot ${TONE[flag.id]}`} />
+            <span className="linked-pull-state">{flag.label}</span>
+            <span className="linked-pull-id">{name} #{pull.number}</span>
+            <span className="linked-pull-title">{pull.title}</span>
+            <span className="linked-pull-age">{formatAge(pull.mergedAt ?? pull.updatedAt)}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -487,6 +499,86 @@ function History({ subject, refreshOn }: { subject: string; refreshOn?: string }
       </section>
       {viewing && <RunViewer run={viewing} onClose={() => setViewing(undefined)} />}
     </>
+  );
+}
+
+const VERDICT_SHOWN: Record<AgentRun['verdict'], { label: string; tone: string } | undefined> = {
+  implemented: { label: 'Implemented', tone: 'pass' },
+  partly: { label: 'Partly implemented', tone: 'running' },
+  'not-implemented': { label: 'Not implemented', tone: 'fail' },
+  unchecked: { label: 'Could not check', tone: '' },
+  unknown: undefined
+};
+
+/**
+ * The latest agent report for this pull request or ticket — "Check it
+ * shipped", an agent review, an unblock — at the top of the page, where a
+ * finished run's answer belongs. It used to be one line in History, at the
+ * bottom of the side column under every changed file, which is to say it
+ * could not be found at all.
+ */
+function AgentReport({ subject, pull, refreshOn }: { subject: string; pull?: string; refreshOn?: string }) {
+  const [run, setRun] = useState<AgentRun>();
+  const [text, setText] = useState('');
+  const [open, setOpen] = useState(false);
+  const [viewing, setViewing] = useState(false);
+  const [folded, toggleFold] = useFold(`report:${pull ?? subject}`);
+
+  useEffect(() => {
+    let live = true;
+    void window.baton.runHistory(subject).then(async (runs) => {
+      // On a pull request's page, only runs started from that pull request:
+      // a ticket's folder collects runs from every pull request that named it.
+      const latest = runs
+        .filter((r) => r.reportPath && (!pull || r.pull === pull || r.subject === pull))
+        .sort((a, b) => b.startedAt - a.startedAt)[0];
+      const body = latest?.reportPath ? await window.baton.runText(latest.reportPath).catch(() => '') : '';
+      if (!live) return;
+      setRun(latest);
+      setText(body.trim());
+    });
+    return () => { live = false; };
+  }, [subject, pull, refreshOn]);
+
+  if (!run || !text) return null;
+  const verdict = VERDICT_SHOWN[run.verdict];
+  // The verdict line is shown as the badge; the rest is the report.
+  const body = text.replace(/^\s*\**VERDICT:[^\n]*\n+/i, '');
+  const long = body.split('\n').length > 14;
+  return (
+    <section className={folded ? 'agent-report folded' : 'agent-report'}>
+      <div className="quick-card-head">
+        <CardTitle title={KIND_LABEL[run.kind] ?? run.kind} folded={folded} onToggle={toggleFold} />
+        <span className="quick-tag agent-report-tag">agent report</span>
+        {verdict && (
+          <span className={`state agent-report-verdict ${verdict.tone}`}>
+            <span className={`dot ${verdict.tone}`} />
+            {verdict.label}
+          </span>
+        )}
+        <span className="quick-card-actions">
+          <span className="quick-card-meta">
+            {(() => { const age = formatAge(new Date(run.startedAt).toISOString()) ?? ''; return /now/.test(age) ? age : `${age} ago`; })()}
+            {run.shots.length > 0 ? ` · ${run.shots.length} screenshot${run.shots.length === 1 ? '' : 's'}` : ''}
+          </span>
+          <CopyResult text={text} what="report" />
+          <button type="button" className="link" onClick={() => setViewing(true)}>
+            {run.shots.length > 0 ? 'Open with screenshots' : 'Open'}
+          </button>
+        </span>
+      </div>
+      {!folded && (
+        <div className={long && !open ? 'agent-report-body folded' : 'agent-report-body'}>
+          <Prose text={body} />
+        </div>
+      )}
+      {!folded && long && (
+        <button type="button" className="link agent-report-more" onClick={() => setOpen((v) => !v)}>
+          {open ? 'Show less' : 'Show the whole report'}
+        </button>
+      )}
+      {viewing && <RunViewer run={run} onClose={() => setViewing(false)} />}
+    </section>
   );
 }
 
@@ -795,9 +887,13 @@ export function PullPane({
         <RelatedLinks
           links={relatedTicket ? [{ label: relatedTicket.key, onClick: () => onOpenSubject({ issue: relatedTicket }) }] : []}
         />
-        <div className="detail-states">
-          <States pull={pull} max={6} />
-        </div>
+        {/* The pill above already says the headline state; this line lists
+            the rest, and goes when there is no rest ("Approved" twice). */}
+        {pullFlags(pull).some((flag) => flag.id !== primaryFlag.id) && (
+          <div className="detail-states">
+            <States pull={pull} max={6} skip={primaryFlag.id} />
+          </div>
+        )}
         {/* One row of actions, the agent runs first: they are the reason this
             app exists, and 'Open on GitHub' is the escape hatch. */}
         <div className="detail-actions">
@@ -806,11 +902,11 @@ export function PullPane({
           <QuickButton kind="pull-summary" label="Summarize" runningLabel="Summarizing" state={summary.state} onRun={summary.run} />
           <QuickButton
             kind="pull-review"
-            label="Review with nv-review"
-            runningLabel="nv-review reviewing"
+            label="Review"
+            runningLabel="Reviewing"
             state={review.state}
             onRun={review.run}
-            tooltip="Sends the diff to nv-review (NVIDIA's free API; the model is on the button's tag). It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Slow: several minutes."
+            tooltip="Sends the diff to the model on the button's tag (NVIDIA through nv-review, or any opencode model). It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Can take several minutes."
           />
           <span className="action-divider" />
           <button className="ghost" onClick={openQuickTerminal}>
@@ -830,6 +926,10 @@ export function PullPane({
       */}
       <div className={hasReading ? 'detail-body' : 'detail-body solo'}>
         <div className="detail-main">
+          <AgentReport
+            subject={subject} pull={`${pull.repo}#${pull.number}`}
+            refreshOn={sessionSignature(sessions, subject)}
+          />
           <QuickCard
             kind="pull-summary"
             title={isMerged(pull) ? 'Summary' : "Why it's blocked"}
@@ -844,12 +944,12 @@ export function PullPane({
           <QuickCard
             kind="pull-review"
             title="Code review"
-            runningNote="nv-review on NVIDIA's free API is slow: expect several minutes. You can leave this pane."
-            tag={review.state.result ? reviewModelName(review.state.result.model) : 'nv-review'}
+            runningNote="A review reads the whole diff: expect a few minutes, more on NVIDIA's free API. You can leave this pane."
+            tag={review.state.result ? reviewModelName(review.state.result.model) : 'review'}
             badge={<VerdictBadge verdict={review.state.result?.verdict} />}
             state={review.state}
             basisNow={detail ? reviewBasis(detail) : undefined}
-            footer={`Read the diff, description and open threads through nv-review, and changed nothing. Saved as ${KIMI_REVIEW_FILE} in this PR's History below.`}
+            footer={`Read the diff, description and open threads through ${review.state.result && !isNvReviewModel(review.state.result.model) ? 'opencode' : 'nv-review'}, and changed nothing. Saved as ${KIMI_REVIEW_FILE} in this PR's History below.`}
             onRun={review.run}
             onCancel={review.cancel}
             onDismiss={review.dismiss}
@@ -1027,8 +1127,8 @@ export function TicketPane({
   }, [inlineSession?.id]);
 
   const openQuickTerminal = useQuickTerminal(undefined, issue.key, onOpenSession);
-  // The open pull requests that name this ticket — the other direction of
-  // the link a pull request's own header follows back to its ticket.
+  // The pull requests that belong to this ticket — the other direction of the
+  // link a pull request's own header follows back to its ticket.
   const relatedPulls = findRelatedPulls(issue.key, snapshot);
 
   return (
@@ -1048,12 +1148,7 @@ export function TicketPane({
           {issue.priority && <span>{issue.priority}</span>}
           <span>{formatAge(issue.updated)}</span>
         </div>
-        <RelatedLinks
-          links={relatedPulls.map((p) => ({
-            label: `${p.repo} #${p.number}`,
-            onClick: () => onOpenSubject({ pull: p })
-          }))}
-        />
+        <TicketPulls pulls={relatedPulls} onOpen={(pull) => onOpenSubject({ pull })} />
         <div className="detail-actions">
           <RunButtons kinds={['implement']} onRun={(kind) => onRun(kind, issue)} />
           {older > 0 && (
@@ -1080,6 +1175,7 @@ export function TicketPane({
 
       <div className="detail-body">
         <div className="detail-main">
+          <AgentReport subject={issue.key} refreshOn={sessionSignature(sessions, issue.key)} />
           <DescriptionSection subject={issue.key}>
             <Prose text={description} />
           </DescriptionSection>

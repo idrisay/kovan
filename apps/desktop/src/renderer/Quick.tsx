@@ -10,12 +10,14 @@
  */
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useMenuDismiss } from './menuDismiss';
 import {
-  NV_REVIEW_DEFAULT_MODEL, REVIEW_EVENT_LABEL, describeChange, formatAge, priceFor, reviewModelName,
+  NV_REVIEW_DEFAULT_MODEL, NV_REVIEW_SUFFIX, REVIEW_EVENT_LABEL, describeChange, formatAge, isNvReviewModel, priceFor, reviewModelName,
   type PriceRule, type QuickBasis, type QuickKind, type QuickResult, type ReviewEvent, type ReviewVerdict
 } from '@baton/core';
 import { Prose } from './Prose';
-import { CloseIcon } from './icons';
+import { CheckIcon, ChevronIcon, CloseIcon, CopyIcon } from './icons';
+import { useFold } from './folds';
 import { useUsage } from './Usage';
 import type { QuickState } from './types';
 
@@ -87,14 +89,14 @@ function useQuickModel(kind: QuickKind): [string, (model: string) => Promise<voi
 
 /** `opencode/muse-spark-1.3-contributor-free` → `muse-spark-1.3`; nv-review's → `Kimi K3`. */
 export function shortModelName(kind: QuickKind, model: string): string {
-  if (kind === 'pull-review') return reviewModelName(model);
+  if (kind === 'pull-review' && isNvReviewModel(model)) return reviewModelName(model);
   return (model.split('/').pop() ?? model).replace(/-(contributor-)?free$/, '');
 }
 
 /** FREE, the list price per million tokens, or nothing when no price row knows it. */
 function costLabel(kind: QuickKind, model: string, prices: PriceRule[]): { text: string; free: boolean } | undefined {
   // nv-review goes through NVIDIA's free API whatever the model.
-  if (kind === 'pull-review' || /free/i.test(model)) return { text: 'FREE', free: true };
+  if ((kind === 'pull-review' && isNvReviewModel(model)) || /free/i.test(model)) return { text: 'FREE', free: true };
   const price = priceFor(model, prices);
   if (!price) return undefined;
   if (price.input === 0 && price.output === 0) return { text: 'FREE', free: true };
@@ -120,14 +122,12 @@ export function QuickButton({
   const [model, setModel] = useQuickModel(kind);
   const { prices } = useUsage();
   const [picking, setPicking] = useState(false);
+  // Opens toward whichever side has room: the Review button sits near the
+  // right edge, and a menu hung from its left ran off the window.
+  const [alignRight, setAlignRight] = useState(false);
   const cost = model ? costLabel(kind, model, prices) : undefined;
 
-  useEffect(() => {
-    if (!picking) return undefined;
-    const close = () => setPicking(false);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [picking]);
+  useMenuDismiss(picking, () => setPicking(false));
 
   // One pill, two controls: the label runs it, the tag picks the model. Two
   // buttons side by side rather than one inside the other, which HTML forbids.
@@ -141,14 +141,19 @@ export function QuickButton({
         type="button" className="quick quick-model"
         aria-label={`Model for ${label}: ${model || 'default'}. Change`} aria-expanded={picking}
         title={model ? `Runs on ${model}. Click to change.` : 'Click to choose the model'}
-        onClick={(e) => { e.stopPropagation(); setPicking((v) => !v); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          const split = e.currentTarget.parentElement?.getBoundingClientRect();
+          setAlignRight(Boolean(split && split.left + 330 > window.innerWidth));
+          setPicking((v) => !v);
+        }}
       >
         {model && <span className="quick-model-name">{shortModelName(kind, model)}</span>}
         {cost && <span className={cost.free ? 'quick-tag' : 'quick-tag paid'}>{cost.text}</span>}
       </button>
       {picking && (
         <QuickModelPicker
-          kind={kind} label={label} model={model}
+          kind={kind} label={label} model={model} alignRight={alignRight}
           onPick={(next) => { void setModel(next); setPicking(false); }}
         />
       )}
@@ -156,64 +161,83 @@ export function QuickButton({
   );
 }
 
+/** NVIDIA models worth offering for nv-review; any other can be typed in. */
+const NV_SUGGESTIONS = [NV_REVIEW_DEFAULT_MODEL, 'nvidia/nemotron-3-super-120b-a12b'];
+const NV_PROVIDER = 'nv-review';
+
 /**
  * The tag's popover: a provider, then one of its models, or any name typed
- * in. For nv-review the provider is NVIDIA through your `nv-review` function,
- * and the model is whatever `NV_MODEL` it should be told.
+ * in. Providers are opencode's (`opencode models`, asked when the popover
+ * first opens) and, for the review, NVIDIA through your `nv-review` function.
  */
-function QuickModelPicker({ kind, label, model, onPick }: {
-  kind: QuickKind; label: string; model: string; onPick: (model: string) => void;
+function QuickModelPicker({ kind, label, model, alignRight, onPick }: {
+  kind: QuickKind; label: string; model: string; alignRight: boolean; onPick: (model: string) => void;
 }) {
   const review = kind === 'pull-review';
   const [available, setAvailable] = useState<string[]>();
-  const [provider, setProvider] = useState(() => (review ? 'nvidia' : model.split('/')[0] ?? ''));
-  const [typed, setTyped] = useState(model);
+  const [provider, setProvider] = useState(() => (isNvReviewModel(model) ? NV_PROVIDER : model.split('/')[0] ?? ''));
+  const nv = provider === NV_PROVIDER;
+  // "Type another model…" is a row until clicked, then a field. A bare field
+  // at the bottom of the list, with a "Use" beside it, read as a mystery box.
+  const [typing, setTyping] = useState(false);
+  const [typed, setTyped] = useState('');
 
   useEffect(() => {
-    if (review) return;
     void window.baton.quickModelsAvailable().then(setAvailable);
-  }, [review]);
+  }, []);
 
-  const providers = [...new Set((available ?? []).map((m) => m.split('/')[0]!))].sort();
-  const models = (available ?? []).filter((m) => m.startsWith(`${provider}/`));
-  const suggestions = review ? [NV_REVIEW_DEFAULT_MODEL] : models;
+  const opencodeProviders = [...new Set((available ?? []).map((m) => m.split('/')[0]!))].sort();
+  const providers = review ? [NV_PROVIDER, ...opencodeProviders] : opencodeProviders;
+  const suggestions = nv
+    ? [...new Set([...NV_SUGGESTIONS, ...(isNvReviewModel(model) ? [model.slice(0, -NV_REVIEW_SUFFIX.length)] : [])])].map((m) => `${m}${NV_REVIEW_SUFFIX}`)
+    : (available ?? []).filter((m) => m.startsWith(`${provider}/`));
+  const shown = (m: string) => (nv ? m.slice(0, -NV_REVIEW_SUFFIX.length) : m.slice(m.indexOf('/') + 1));
+  const submit = () => {
+    const value = typed.trim();
+    if (!value) return;
+    onPick(nv ? `${value.replace(/\s*\(nv-review\)$/, '')}${NV_REVIEW_SUFFIX}` : value);
+  };
 
   return (
-    <div className="menu quick-model-menu" role="dialog" aria-label={`${label} model`} onClick={(e) => e.stopPropagation()}>
+    <div className={alignRight ? 'menu quick-model-menu align-right' : 'menu quick-model-menu'} role="dialog" aria-label={`${label} model`} onClick={(e) => e.stopPropagation()}>
       <div className="menu-head">{label} with</div>
       <label className="quick-model-field">
         <span>Provider</span>
-        {review ? (
-          <select value="nvidia" disabled><option value="nvidia">NVIDIA · nv-review</option></select>
-        ) : (
-          <select value={provider} onChange={(e) => setProvider(e.target.value)} disabled={!available}>
-            {!available && <option value={provider}>Loading…</option>}
-            {available && !providers.includes(provider) && <option value={provider}>{provider || 'Choose…'}</option>}
-            {providers.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-        )}
+        <select value={provider} onChange={(e) => { setProvider(e.target.value); setTyping(false); }} disabled={!available && !review}>
+          {!available && !nv && <option value={provider}>Loading…</option>}
+          {available && !providers.includes(provider) && <option value={provider}>{provider || 'Choose…'}</option>}
+          {providers.map((p) => (
+            <option key={p} value={p}>{p === NV_PROVIDER ? 'NVIDIA · nv-review' : p}</option>
+          ))}
+        </select>
       </label>
       <div className="quick-model-list" role="listbox">
         {suggestions.map((m) => (
           <button key={m} type="button" role="option" aria-selected={m === model} className={m === model ? 'active' : ''} onClick={() => onPick(m)}>
-            <span className="quick-model-id">{m.slice(m.indexOf('/') + 1)}</span>
-            {/free/i.test(m) && <span className="quick-tag">FREE</span>}
+            <span className="quick-model-id">{shown(m)}</span>
+            {(nv || /free/i.test(m)) && <span className="quick-tag">FREE</span>}
           </button>
         ))}
-        {!review && available && models.length === 0 && <p className="menu-empty">No models listed for this provider.</p>}
+        {!nv && available && suggestions.length === 0 && <p className="menu-empty">No models listed for this provider.</p>}
+        {!nv && !available && <p className="menu-empty">Asking opencode for its models…</p>}
       </div>
       <div className="menu-rule" />
-      <form
-        className="quick-model-other"
-        onSubmit={(e) => { e.preventDefault(); if (typed.trim()) onPick(typed.trim()); }}
-      >
-        <input
-          type="text" value={typed} onChange={(e) => setTyped(e.target.value)}
-          placeholder={review ? 'moonshotai/kimi-k3' : 'provider/model'} aria-label="Another model"
-        />
-        <button type="submit" className="ghost">Use</button>
-      </form>
-      <p className="menu-empty">Remembered for {label.split(' ')[0]}. Settings → General has the default.</p>
+      {typing ? (
+        <form className="quick-model-other" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+          <input
+            type="text" autoFocus value={typed} onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setTyping(false); } }}
+            placeholder={nv ? 'NVIDIA model id, e.g. moonshotai/kimi-k3' : `${provider || 'provider'}/model-id`}
+            aria-label="Model id"
+          />
+          <button type="submit" className="ghost" disabled={!typed.trim()}>Use this model</button>
+        </form>
+      ) : (
+        <button type="button" className="quick-model-type" onClick={() => { setTyped(''); setTyping(true); }}>
+          Type another model…
+        </button>
+      )}
+      <p className="menu-empty">Remembered for {label}.</p>
     </div>
   );
 }
@@ -252,6 +276,9 @@ export function QuickCard({
   onDismiss: () => void;
 }) {
   const { result, running, error } = state;
+  // Folded per card and per PR or ticket; the head, with its verdict and
+  // actions, stays either way.
+  const [folded, toggleFold] = useFold(`${kind}:${result?.subject ?? ''}`);
   if (!result && !running && !error) return null;
 
   if (running) {
@@ -289,29 +316,78 @@ export function QuickCard({
 
   const change = result && basisNow ? describeChange(kind, result.basis, basisNow) : undefined;
   return (
-    <section className={change ? 'quick-card stale' : 'quick-card'}>
+    <section className={['quick-card', change ? 'stale' : '', folded ? 'folded' : ''].join(' ').trim()}>
       <div className="quick-card-head">
-        <span className="quick-card-title">{title}</span>
+        <CardTitle title={title} folded={folded} onToggle={toggleFold} />
         {subtitle && <span className="quick-card-meta">{subtitle}</span>}
         <span className="quick-tag">{tag}</span>
         {badge}
         {change && <span className="quick-stale">{change}</span>}
-        <span className="spacer" />
-        <span className="quick-card-meta">
-          {result!.model.replace(/^opencode\//, '')} · {formatAge(result!.createdAt)}
+        {/* One group that never wraps: the model name gives way (…) before
+            Copy, Refresh or × drop to a line of their own. */}
+        <span className="quick-card-actions">
+          <span className="quick-card-meta" title={result!.model}>
+            {result!.model.replace(/^opencode\//, '')} · {formatAge(result!.createdAt)}
+          </span>
+          <CopyResult text={result!.text} what={title} />
+          <button type="button" className="link" onClick={onRun}>Refresh</button>
+          <button type="button" className="icon-button" aria-label="Dismiss" onClick={onDismiss}>
+            <CloseIcon />
+          </button>
         </span>
-        <button type="button" className="link" onClick={onRun}>Refresh</button>
-        <button type="button" className="icon-button" aria-label="Dismiss" onClick={onDismiss}>
-          <CloseIcon />
-        </button>
       </div>
       {error && <p className="error">Refresh failed: {error}</p>}
-      <div className="quick-card-body">
-        <Prose text={result!.text} />
-      </div>
-      {children?.(Boolean(change))}
-      <div className="quick-card-foot">{footer}</div>
+      {!folded && (
+        <>
+          <div className="quick-card-body">
+            <Prose text={result!.text} />
+          </div>
+          {children?.(Boolean(change))}
+          <div className="quick-card-foot">{footer}</div>
+        </>
+      )}
     </section>
+  );
+}
+
+/**
+ * A card's title as the button that folds it: the whole title is the target,
+ * with the chevron hanging in front, the same as the Description heading.
+ */
+export function CardTitle({ title, folded, onToggle }: { title: string; folded: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button" className="quick-card-title card-toggle" aria-expanded={!folded} onClick={onToggle}
+      title={folded ? `Show ${title.toLowerCase()}` : `Fold ${title.toLowerCase()}`}
+    >
+      <ChevronIcon size={10} open={!folded} />
+      {title}
+    </button>
+  );
+}
+
+/**
+ * Copies a result as its Markdown source, so it pastes into a GitHub comment,
+ * Slack or a ticket with its headings, lists and code intact. Selecting the
+ * rendered text by hand lost all of that and was fiddly across a long review.
+ */
+export function CopyResult({ text, what }: { text: string; what: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const timer = setTimeout(() => setCopied(false), 1_600);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const label = copied ? 'Copied' : `Copy ${what.toLowerCase()} as Markdown`;
+  return (
+    <button
+      type="button" className={copied ? 'ghost quick-copy copied' : 'ghost quick-copy'}
+      aria-label={label} title={label}
+      onClick={() => void window.baton.copyText(text.trim()).then(() => setCopied(true))}
+    >
+      {copied ? <CheckIcon size={12} /> : <CopyIcon size={12} />}
+      {copied ? 'Copied' : 'Copy'}
+    </button>
   );
 }
 

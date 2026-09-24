@@ -23,9 +23,21 @@ export type QuickKind = 'pull-summary' | 'ticket-condense' | 'pull-review';
 export const NV_REVIEW_DEFAULT_MODEL = 'moonshotai/kimi-k3';
 export const KIMI_REVIEW_MODEL = `${NV_REVIEW_DEFAULT_MODEL} (nv-review)`;
 
+/**
+ * How a review model is stored: an NVIDIA model through `nv-review` carries
+ * this suffix; anything else is an opencode `provider/model`. The suffix, not
+ * the name, decides the route — NVIDIA's ids look like opencode's
+ * (`openai/gpt-oss-120b` exists on both).
+ */
+export const NV_REVIEW_SUFFIX = ' (nv-review)';
+
+export function isNvReviewModel(model: string): boolean {
+  return model.endsWith(NV_REVIEW_SUFFIX);
+}
+
 /** `moonshotai/kimi-k3 (nv-review)` → `Kimi K3`, for a card's tag. */
 export function reviewModelName(model: string): string {
-  const id = model.replace(/\s*\(nv-review\)$/, '').split('/').pop() ?? model;
+  const id = (model.replace(/\s*\(nv-review\)$/, '').split('/').pop() ?? model).replace(/-(contributor-)?free$/, '');
   return id.split('-').map((part) => (/^k?\d/.test(part) ? part.toUpperCase() : part[0]?.toUpperCase() + part.slice(1))).join(' ');
 }
 export const KIMI_REVIEW_FILE = 'kimi-k3-review.md';
@@ -307,8 +319,8 @@ export function splitVerdict(review: string): { text: string; verdict?: ReviewVe
 }
 
 /** What goes to GitHub: the review, plainly marked as a model's. */
-export function reviewSubmissionBody(text: string, model: string): string {
-  return `${text.trim()}\n\n---\n_Written by ${model} via nv-review, posted from Baton._`;
+export function reviewSubmissionBody(text: string, model: string, via = 'nv-review'): string {
+  return `${text.trim()}\n\n---\n_Written by ${model} via ${via}, posted from Baton._`;
 }
 
 // --- Out of date --------------------------------------------------------------------

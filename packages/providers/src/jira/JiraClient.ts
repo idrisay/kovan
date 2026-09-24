@@ -106,6 +106,30 @@ export class JiraClient {
   }
 
   /**
+   * Every status a project's workflows can put an issue in, To Do first, then
+   * In Progress, then Done — Jira's own category order, which is the order a
+   * person reads a board in. The filter used to offer only the statuses the
+   * loaded tickets happened to be in, so a status nobody was in right now
+   * ("In Development") looked like it did not exist.
+   */
+  async getProjectStatuses(projectKey: string, signal?: CancelSignal): Promise<{ name: string; category: string }[]> {
+    const response = await this.http.json<{ statuses?: { name: string; statusCategory?: { key: string } }[] }[]>(
+      this.api(`/project/${encodeURIComponent(projectKey)}/statuses`),
+      { headers: this.headers, signal }
+    );
+    const rank: Record<string, number> = { new: 0, indeterminate: 1, done: 2 };
+    const seen = new Map<string, { name: string; category: string }>();
+    for (const type of response ?? []) {
+      for (const status of type.statuses ?? []) {
+        if (status.name && !seen.has(status.name)) {
+          seen.set(status.name, { name: status.name, category: status.statusCategory?.key ?? 'undefined' });
+        }
+      }
+    }
+    return [...seen.values()].sort((a, b) => (rank[a.category] ?? 3) - (rank[b.category] ?? 3));
+  }
+
+  /**
    * Priority names in the site's own rank order, most urgent first. Sorting a
    * task list by priority is meaningless without this — the names are per-site
    * configuration and carry no order of their own.

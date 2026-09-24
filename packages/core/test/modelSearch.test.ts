@@ -27,4 +27,9 @@ describe('parseOpencodeModels', () => {
       'opencode/grok-code-fast', 'anthropic/claude-sonnet-5'
     ]);
   });
+
+  it("reads Claude Code's real answer, brackets inside names and all", () => {
+    const answer = '```json\n{"models":["default","opus","fable[1m]","opus[1m]","claude-opus-5-5"]}\n```';
+    expect(parseModelSearch(answer)).toEqual({ models: ['default', 'opus', 'fable[1m]', 'opus[1m]', 'claude-opus-5-5'] });
+  });
 });

@@ -23,7 +23,7 @@ can't express.
    selected.
 3. **Red only means something failed** (`--blocked`, `--blocked-bright`). A
    destructive *warning* is not a failure: use amber (`--running`) for "are
-   you sure", like the armed session close.
+   you sure", like the session close's confirmation.
 4. **Hairlines at 6–9%** (`--hair`, `--hair-strong`). No heavy dividers, no box
    inside a box.
 5. **Anything a machine wrote is mono** (`--mono`): paths, SHAs, keys, model
@@ -81,21 +81,46 @@ the existing vertical rule, not with space alone.
 - **Sheet** (`.sheet-backdrop` > `.sheet`): modal for settings, run setup and the
   run viewer. The header is `.sheet-head` with an `h2` and a **boxed ✕ close**,
   never a "Done" button. Clicking the backdrop closes it too.
-- **Menu** (`.menu`): drop-down from a button. It closes on any outside click,
-  and its rows are `role="menuitem"`. Use it for sort, filter, refresh and
-  model pickers.
+- **Menu** (`.menu`): drop-down from a button. Every menu uses
+  `useMenuDismiss` (`menuDismiss.ts`): it closes on an outside click, on
+  Escape, and when another menu opens, so two are never open at once. Rows
+  are `role="menuitem"`. Use it for sort, filter, refresh and model pickers.
+  A menu near the window's right edge opens leftward.
 - **Sidebar** (`aside.queue` + `<Resizer />` + `main.pane`): every rail view has
   this shape. The width comes from `--queue-w` and the text size from
   `--sidebar-zoom`. Clicking the active rail icon hides it.
 - **Rows** (`.row`, `.row.one-line`): list items. Actions that aren't always
   needed (rename, open, close) are **hover-revealed and take no space until
   hover** (`display: none` → `grid` on `:hover` / `:focus-within`), so names
-  aren't truncated.
+  aren't truncated. The row is already as tall as those icons (20px), so a
+  hover never changes its height and the list never jumps.
+- **Reorderable lists** (Sessions): drag a row within the list; a straight
+  clay line between rows shows where it lands; ⌥↑ / ⌥↓ does the same from the
+  keyboard. The order is a per-window preference (localStorage), and new items
+  arrive on top.
 - **Settings sections**: an `h3`, a `.settings-note` explaining what it does in
   plain words, then controls. Steppers use `.font-size-control`.
 - **Split quick button** (`.quick-split`): the label half runs the action, and
   the tag half shows the model plus FREE or `$in/$out`, and opens a provider and
   model picker. Any action that runs a model names that model on its button.
+- **Free text in a picker**: a "Type another model…" row that turns into a
+  field with a labelled button, never a bare field sitting at the bottom.
+- **Agent report card** (`AgentReport`): the latest finished agent run's
+  report at the top of its pull request and ticket (verdict badge, Copy, open
+  with screenshots, folded when long). A run's result is never only in History.
+- **Linked pull requests** (`TicketPulls`): one line each under a ticket's
+  title, state first; a click opens the pull request in Baton, not on GitHub.
+- **Result cards** (`QuickCard`): model, age, **Copy** (the Markdown source),
+  Refresh and × stay on one line; the model name gives way first.
+  Clicking the title (`CardTitle`) folds the card to its head; folds are
+  remembered per card and per PR or ticket (`useFold` in `folds.ts`).
+- **Headline state**: a detail pane's pill says the most important state; the
+  line under it lists the others and never repeats the pill.
+- **Group actions** (Revert all) sit in the group's own header as an icon,
+  not on a line of their own.
+- **Job rows** (`QuickJobRow`): running is an amber pulsing dot and a live
+  timer; finished work is dimmed like merged history and shows its age.
+  Actions replace the state word on hover.
 - **Picker input** (`.reviewer-picker`): a text field with a `.menu` under it,
   loaded on first focus, most-used entries first, grouped with `.menu-head`.
 - **Model field** (`ModelField` in `RunSheet.tsx`): a dropdown with "Type
@@ -121,6 +146,14 @@ font (px), reading pane (`--reading-zoom`) and sidebar (`--sidebar-zoom`).
 region that wants its own size gets a `Scale` in `readingSize.tsx` and a
 branch in `zoomTarget.ts`. It doesn't get a new keyboard shortcut.
 
+### Terminals
+
+A terminal's row and tab show the title its program sets (Claude Code's task,
+as a VS Code tab does), and fall back to the name it was opened with; renaming
+by hand wins over both. Dropping a file, or pasting a copied file or a
+screenshot, types its path (`shellPath`), which is how Claude Code takes an
+image. The Sessions split layout is kept across tabs and window reopenings.
+
 ### Keyboard
 
 ⌘F focuses the sidebar filter (except inside the code editor). ⌘+ and ⌘−
@@ -141,10 +174,11 @@ visible focus state.
    value with a tick per row. Apply only what's ticked. Example: *Check prices
    online*.
 4. **Destructive actions are conservative.** Closing a running session, stopping
-   an agent or deleting a stored password needs either a confirmation or
-   **arm-then-confirm** (first click turns the control amber and changes its
-   label; a second click within 3s acts). An idle or finished thing can go on
-   one click. Deleting data goes to the Trash when it's a file.
+   an agent or deleting a stored password asks first, in a small popover by
+   the control (`.menu.confirm`) that says what will stop, with focus on
+   Cancel. Don't use arm-then-confirm (first click arms, second acts): it read
+   as a button that doesn't work on the first click. An idle or finished
+   thing can go on one click. Deleting data goes to the Trash when it's a file.
 5. **State names what the user recognises.** "Waiting for you", "Checks again
    every minute", "Updated at 14:32". Ages under a minute get seconds, and
    anything relative has the absolute time in its tooltip.

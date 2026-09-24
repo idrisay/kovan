@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useMenuDismiss } from './menuDismiss';
 import { formatAge, modelFamily, type ModelFamily } from '@baton/core';
 import type {
   JiraIssue, ModelList, PullSummary, RunKind, Runner, RunTarget, SentryFrame, SentryIssue, StartResult, TestSelection
 } from './types';
-import { RefreshIcon } from './icons';
+import { CloseIcon, RefreshIcon } from './icons';
 import { TestEnvironmentPicker } from './TestEnvironments';
 
 const LAST_MODEL_KEY = 'runner.lastModel';
 
-const KIND_LABEL: Record<RunKind, string> = {
+export const KIND_LABEL: Record<RunKind, string> = {
   implement: 'Work on this in an agent',
   review: 'Review in an agent',
   unblock: 'Unblock in an agent',
@@ -142,8 +143,8 @@ export function RunSheet({
       <div className="sheet wide" onClick={(e) => e.stopPropagation()}>
         <header className="sheet-head">
           <h2>{sentry ? 'Fix in an agent' : KIND_LABEL[kind]}</h2>
-          <button className="ghost" onClick={onClose}>
-            Cancel
+          <button type="button" className="icon-button boxed" aria-label="Close" title="Close" onClick={onClose}>
+            <CloseIcon size={14} />
           </button>
         </header>
 
@@ -311,12 +312,7 @@ function FolderField({ targets, cwd, extras, runner, onChange }: {
   onChange: (main: string, extras: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = () => setOpen(false);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [open]);
+  useMenuDismiss(open, () => setOpen(false));
 
   const label = (p: string) => targets.find((t) => t.path === p)?.label ?? p.split('/').pop() ?? p;
   const chosen = [cwd, ...extras].filter(Boolean);

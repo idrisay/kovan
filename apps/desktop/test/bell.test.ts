@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scanForBell } from '../src/main/bell';
+import { scanForBell, scanForTitles } from '../src/main/bell';
 
 const BEL = '\x07';
 /** What a shell writes on nearly every prompt redraw: `ESC ] 0 ; title BEL`. */
@@ -37,5 +37,21 @@ describe('scanForBell', () => {
     expect(scanForBell('Read 1 file, listed 1 directory\r\n', false)).toEqual({
       bell: false, inOsc: false
     });
+  });
+});
+
+describe('scanForTitles', () => {
+  it('reads the titles a program sets', () => {
+    expect(scanForTitles('\x1b]0;✳ Fix the retry\x07out\x1b]2;Second\x1b\\').titles).toEqual(['✳ Fix the retry', 'Second']);
+  });
+
+  it('ignores other OSC strings', () => {
+    expect(scanForTitles('\x1b]8;;https://x\x07link\x1b]8;;\x07').titles).toEqual([]);
+  });
+
+  it('carries a title split across chunks', () => {
+    const first = scanForTitles('\x1b]0;Investigate AC');
+    expect(first).toEqual({ titles: [], carry: '0;Investigate AC' });
+    expect(scanForTitles('ME-2409\x07', first.carry)).toEqual({ titles: ['Investigate ACME-2409'], carry: undefined });
   });
 });

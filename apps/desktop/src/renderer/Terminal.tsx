@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Terminal as Xterm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { shellPath } from '@baton/core';
 import '@xterm/xterm/css/xterm.css';
 
 /**
@@ -105,10 +106,56 @@ export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; font
     const observer = new ResizeObserver(sync);
     observer.observe(host.current);
 
+    // Files and images in, as VS Code's terminal takes them: a dropped file,
+    // a file copied in Finder, or a screenshot on the clipboard all arrive as
+    // their path, typed in as a paste. xterm on its own only pastes text, so
+    // an image-only clipboard did nothing at all.
+    const element = host.current;
+    const pastePaths = (paths: string[]) => {
+      const words = paths.filter(Boolean).map(shellPath);
+      if (words.length === 0) return false;
+      term.paste(`${words.join(' ')} `);
+      term.focus();
+      return true;
+    };
+    const filesOf = (list?: FileList | null) => Array.from(list ?? []).map((f) => window.baton.pathForFile(f));
+    const onDragOver = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes('Files')) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes('Files')) return;
+      event.preventDefault();
+      pastePaths(filesOf(event.dataTransfer.files));
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      const data = event.clipboardData;
+      if (!data) return;
+      // A file copied in Finder also carries its name as text; the path is what's wanted.
+      if (data.files.length > 0 && pastePaths(filesOf(data.files))) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      const hasImage = Array.from(data.items).some((item) => item.type.startsWith('image/'));
+      if (!hasImage || data.getData('text/plain')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void window.baton.clipboardImagePath().then((file) => { if (file) pastePaths([file]); });
+    };
+    element.addEventListener('dragover', onDragOver);
+    element.addEventListener('drop', onDrop);
+    // Capture, so this sees the paste before xterm's own textarea handler does.
+    element.addEventListener('paste', onPaste, true);
+
     return () => {
       disposed = true;
       live.current = null;
       observer.disconnect();
+      element.removeEventListener('dragover', onDragOver);
+      element.removeEventListener('drop', onDrop);
+      element.removeEventListener('paste', onPaste, true);
       offOutput();
       typed.dispose();
       term.dispose();

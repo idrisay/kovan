@@ -7,7 +7,7 @@
  * manages to run.
  */
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const api = {
   snapshot: () => ipcRenderer.invoke('baton:snapshot'),
@@ -84,6 +84,12 @@ const api = {
   runners: () => ipcRenderer.invoke('baton:runners'),
   knownModels: () => ipcRenderer.invoke('baton:known-models'),
   modelsSearch: (command: string) => ipcRenderer.invoke('baton:models-search', command),
+  ticketStatuses: () => ipcRenderer.invoke('baton:ticket-statuses'),
+  clipboardImagePath: () => ipcRenderer.invoke('baton:clipboard-image'),
+  copyText: (text: string) => ipcRenderer.invoke('baton:clipboard-write', text),
+  // Electron 32 took `File.path` away; this is its replacement, and it has
+  // to run here, where the File object still is.
+  pathForFile: (file: File) => webUtils.getPathForFile(file),
   modelsSearchCancel: () => ipcRenderer.invoke('baton:models-search-cancel'),
   runTargets: (force?: boolean) => ipcRenderer.invoke('baton:run-targets', force),
   buildPrompt: (kind: string, subject: unknown, test?: unknown) =>

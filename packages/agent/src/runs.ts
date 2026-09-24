@@ -30,7 +30,11 @@ export const RUN_KIND_LABEL: Record<RunKind, string> = {
   verify: 'Check'
 };
 
-export type Verdict = 'unknown' | 'shipped' | 'missing' | 'broken';
+/**
+ * What "Check it shipped" concluded, in the prompt's own four words
+ * (`VERDICTS` in `@baton/core`'s prompts).
+ */
+export type Verdict = 'unknown' | 'implemented' | 'partly' | 'not-implemented' | 'unchecked';
 
 export interface RunFile {
   /** Relative to the run directory — stable, and doubles as a React key. */
@@ -256,13 +260,18 @@ export class RunStore {
  * The verdict, from the report's first line.
  *
  * The prompt asks the agent to put it there precisely so this does not have to
- * interpret prose.
+ * interpret prose. It used to look for "shipped", "missing" and "broken" —
+ * words from an older prompt — while the prompt asks for "implemented",
+ * "partly implemented", "not implemented" or "could not check", so every
+ * verdict read as unknown. The old words still count, for old reports. The
+ * longer phrases are checked first: "not implemented" contains "implemented".
  */
 export function verdictFrom(report: string): Verdict {
-  const first = (report.split('\n')[0] ?? '').toLowerCase();
-  if (first.includes('shipped')) return 'shipped';
-  if (first.includes('missing') || first.includes('not shipped')) return 'missing';
-  if (first.includes('broken')) return 'broken';
+  const first = (report.split('\n').find((line) => line.trim()) ?? '').toLowerCase();
+  if (first.includes('could not check')) return 'unchecked';
+  if (first.includes('partly')) return 'partly';
+  if (/not implemented|not shipped|missing|broken/.test(first)) return 'not-implemented';
+  if (/implemented|shipped/.test(first)) return 'implemented';
   return 'unknown';
 }
 
