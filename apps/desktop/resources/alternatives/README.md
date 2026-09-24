@@ -1,9 +1,17 @@
 # Icon
 
+**In use: `C5-conductor`**, a conductor's baton with two sweeping arcs in clay
+on near-black. Codex drew it (`C5-conductor-source.png`, chosen from six
+concepts); `python3 build-conductor.py` centres it on Apple's icon grid and
+writes `icon.icns`. The menu bar glyph is redrawn by hand in the same idea
+(`python3 tray-conductor.py`), since traced from the icon it faded at 16pt.
+
+## Earlier icon
+
 A **ceremonial baton** — cord and tassel, red shaft with cross-lacing, spear
 tip, bulb — drawn flat in three colours.
 
-`W4-mono` is in use. The alternatives change only the palette; the layout is
+`W4-mono` was in use. The alternatives change only the palette; the layout is
 identical across all four.
 
 ## Three colours
