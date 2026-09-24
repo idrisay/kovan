@@ -94,7 +94,6 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "extendInfo": {
-        "LSUIElement": true,
         "NSUserNotificationAlertStyle": "banner"
       }
     },

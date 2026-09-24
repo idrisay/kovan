@@ -12,7 +12,7 @@
  * If you ever find yourself moving the poller into the renderer, stop.
  */
 
-import { app, BrowserWindow, clipboard, ipcMain, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
@@ -329,8 +329,8 @@ function createWindow(): void {
  * location silently orphans the old registration. Re-asserting it costs
  * nothing and makes a reinstall self-healing.
  *
- * `openAsHidden` is redundant under LSUIElement — there is no window to hide —
- * but it is what stops a Dock icon flashing on login for a fraction of a second.
+ * `openAsHidden` keeps a login launch quiet: Baton starts polling with its
+ * Dock icon and menu bar glyph, but no window jumps up at login.
  */
 function applyLoginItem(): void {
   const wanted = host.config.get('launchAtLogin', false);
@@ -359,9 +359,10 @@ function broadcast(snapshot: Snapshot): void {
 }
 
 app.whenReady().then(async () => {
-  // The macOS equivalent of the Swift app's LSUIElement: no Dock tile, no menu
-  // bar of its own. Baton lives in the status bar.
-  app.dock?.hide();
+  // A normal Dock app, like VS Code: it shows in Cmd+Tab and has a menu bar,
+  // and the menu bar glyph stays as a glance at what is blocked. It used to be
+  // menu-bar-only (LSUIElement), which left Cmd+Tab and the Dock with nothing
+  // to switch to and made opening it from Finder look like it did nothing.
 
   tray = new BatonTray({
     open: () => createWindow(),
@@ -373,9 +374,9 @@ app.whenReady().then(async () => {
       applyLoginItem();
       tray?.update(poller.current());
     },
-    quit: () => {
-      app.exit(0);
-    }
+    // Through `quit`, not `exit`, so the tray's Quit asks about running
+    // sessions the same way Cmd+Q does.
+    quit: () => app.quit()
   });
 
   poller.onDidChange((snapshot) => {
@@ -663,6 +664,15 @@ app.whenReady().then(async () => {
 
   app.on('activate', () => createWindow());
   app.on('second-instance', () => createWindow());
+  // Cmd+Tab to Baton with its window closed: `activate` only fires for a Dock
+  // click, so switching to it would show a menu bar and nothing else.
+  app.on('did-become-active', () => {
+    if (!window || window.isDestroyed()) createWindow();
+  });
+
+  // Opened from Finder, Spotlight or the Dock: show the window. Only a login
+  // launch stays in the background.
+  if (!app.getLoginItemSettings().wasOpenedAtLogin) createWindow();
 });
 
 async function seedWorkspace(folder: string): Promise<void> {
@@ -682,13 +692,34 @@ async function seedWorkspace(folder: string): Promise<void> {
   await host.config.set('workspace.active', 'smoke-workspace');
 }
 
-// Closing every window must NOT quit: that is the entire point of a menu bar
-// app. Overriding the default here is what keeps Baton running.
+// Closing the window must NOT quit, as with any Mac app: the poller, the
+// sessions and the notifications keep running, and the Dock icon reopens it.
 app.on('window-all-closed', () => {
   // Intentionally empty.
 });
 
-app.on('before-quit', () => {
+// Cmd+Q is now one key away in any window, and quitting ends every terminal
+// with it. Ask first when something is still running there.
+let quitConfirmed = false;
+app.on('before-quit', (event) => {
+  const live = sessions.list().filter((s) => s.running).length;
+  if (quitConfirmed || live === 0 || process.env['BATON_SMOKE']) return;
+  const choice = dialog.showMessageBoxSync({
+    type: 'warning',
+    message: `Quit Baton and stop ${live === 1 ? 'the running session' : `${live} running sessions`}?`,
+    detail: 'Their terminals close and anything running in them stops.',
+    buttons: ['Cancel', 'Quit'],
+    defaultId: 0,
+    cancelId: 0
+  });
+  if (choice === 0) {
+    event.preventDefault();
+    return;
+  }
+  quitConfirmed = true;
+});
+
+app.on('will-quit', () => {
   usage.dispose();
   running.dispose();
   poller.stop();

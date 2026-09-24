@@ -57,5 +57,5 @@ try {
 
 if (!process.argv.includes('--no-launch')) {
   spawn('open', ['-a', target], { detached: true, stdio: 'ignore' }).unref();
-  console.log('launched — look for the Baton icon in your menu bar');
+  console.log('launched — Baton is in the Dock and Cmd+Tab');
 }

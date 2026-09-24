@@ -184,7 +184,10 @@ visible focus state.
    anything relative has the absolute time in its tooltip.
 6. **Remember the last choice** (runner, model, environment, dock position,
    sizes), per thing, not globally, when the thing differs.
-7. **Everything in the main process keeps working with no window open.**
+7. **Baton is a normal Dock app** with a menu bar glyph as well. Opening
+   it, clicking its Dock icon or Cmd+Tabbing to it shows the window; closing
+   the window keeps it running. Quitting asks first while sessions run.
+8. **Everything in the main process keeps working with no window open.**
    Poller, sessions, quick jobs and notifications live in `src/main`. The
    renderer only asks and listens.
 
