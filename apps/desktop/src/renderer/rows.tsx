@@ -10,7 +10,7 @@
  */
 
 import {
-  formatAge, isBlocked, isMerged, pullFlags, type PullFlagId, type PullSummary
+  formatAge, isBlocked, isMerged, primaryFlag, pullFlags, type PullFlagId, type PullSummary
 } from '@baton/core';
 import { ChevronIcon } from './icons';
 
@@ -24,15 +24,34 @@ export const TONE: Record<PullFlagId, 'pass' | 'running' | 'fail' | 'waiting' | 
   approved: 'pass',
   'checks-pending': 'running',
   'awaiting-review': 'waiting',
-  draft: ''
+  draft: '',
+  open: ''
 };
 
+/**
+ * The repository, as a row shows it: the name without its owner, which is
+ * nearly always the same one. The whole `owner/name` is in the tooltip.
+ */
+export function repoName(repo: string): string {
+  return repo.split('/').pop() || repo;
+}
+
+export function RepoLabel({ repo }: { repo: string }) {
+  if (!repo) return null;
+  return <span className="row-repo" title={repo}>{repoName(repo)}</span>;
+}
+
 export function States({ pull, max = 2, skip }: { pull: PullSummary; max?: number; skip?: string }) {
-  const flags = pullFlags(pull).filter((flag) => flag.id !== skip).slice(0, max);
+  // A pull request with nothing to report still says "Open" rather than
+  // leaving its second line empty.
+  const all = pullFlags(pull);
+  const flags = (all.length > 0 ? all : [primaryFlag(pull)])
+    .filter((flag) => flag.id !== skip)
+    .slice(0, max);
   return (
     <>
       {flags.map((flag) => (
-        <span key={flag.id} className="state">
+        <span key={flag.id} className="state" title={flag.hint}>
           <span className={`dot ${TONE[flag.id]}`} />
           {flag.label}
         </span>
@@ -72,6 +91,7 @@ export function PullRow({
           <span className="row-top">
             <span className="row-num">{pull.number}</span>
             <span className="row-title">{pull.title}</span>
+            <RepoLabel repo={pull.repo} />
             <span className="row-age">{formatAge(pull.mergedAt!)}</span>
           </span>
         </button>
@@ -92,6 +112,7 @@ export function PullRow({
         <span className="row-state">
           <States pull={pull} />
           <span className="spacer" />
+          <RepoLabel repo={pull.repo} />
           <span className="row-age">{formatAge(pull.updatedAt)}</span>
         </span>
       </button>

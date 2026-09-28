@@ -184,7 +184,8 @@ export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; font
   // `overflow: hidden` cropped the bottom line. The padding lives on the
   // outer box; the host xterm measures has none.
   return (
-    <div className="term">
+    // The session id is how dictation (item 88) knows which terminal to type into.
+    <div className="term" data-session-id={sessionId}>
       <div className="term-host" ref={host} />
     </div>
   );

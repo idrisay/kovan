@@ -22,15 +22,40 @@ if (!fs.existsSync(built)) {
   process.exit(1);
 }
 
-function quitRunning() {
+const APP = '/Applications/Baton.app/Contents/MacOS/Baton';
+
+function running() {
   try {
-    execFileSync('pkill', ['-f', '/Applications/Baton.app/Contents/MacOS/Baton'], {
-      stdio: 'ignore'
-    });
-    console.log('stopped the running Baton');
+    execFileSync('pgrep', ['-f', APP], { stdio: 'ignore' });
+    return true;
   } catch {
-    // Nothing was running, which is the common case.
+    return false;
   }
+}
+
+/**
+ * Asks the running copy to quit, then checks that it did. It may not: with
+ * terminal sessions running, Baton asks "Quit Baton and stop N running
+ * sessions?" and stays if you say Cancel. This used to print "stopped" as soon
+ * as the signal was sent, then replace the bundle under the live app — the
+ * very thing the note above warns about. It is never force-killed: that would
+ * end your terminals and whatever agents are running in them.
+ */
+function quitRunning() {
+  if (!running()) return;
+  execFileSync('pkill', ['-f', APP], { stdio: 'ignore' });
+  const deadline = Date.now() + 15_000;
+  while (running() && Date.now() < deadline) {
+    execFileSync('sleep', ['0.5']);
+  }
+  if (running()) {
+    console.error(
+      'Baton is still running — probably asking whether to stop its running sessions.\n' +
+      'Nothing was installed. Quit it yourself (answer that dialog, or ⌘Q), then run this again.'
+    );
+    process.exit(1);
+  }
+  console.log('stopped the running Baton');
 }
 
 quitRunning();

@@ -42,6 +42,24 @@ describe('blocked-on-you', () => {
     expect(primaryFlag(pull).id).toBe('conflict');
   });
 
+  // Item 83: acme-infra#40 — no branch protection, no checks, requested
+  // reviewers but no decision. It has no flags, and `pullFlags(pull)[0]!.id`
+  // in the detail pane threw and blanked the window.
+  it('gives a pull request with nothing to report its own Open flag', () => {
+    const quiet: PullState = { ...open, checks: 'none' };
+    expect(pullFlags(quiet)).toEqual([]);
+    expect(primaryFlag(quiet)).toMatchObject({ id: 'open', label: 'Open' });
+    expect(describePull(quiet)).toBe('Open');
+  });
+
+  it('says what an unresolved count is counting', () => {
+    expect(pullFlags({ ...open, unresolvedThreads: 1 })[0]).toMatchObject({
+      label: '1 unresolved comment',
+      hint: expect.stringContaining('marked resolved')
+    });
+    expect(pullFlags({ ...open, unresolvedThreads: 2 })[0]!.label).toBe('2 unresolved comments');
+  });
+
   it('never drops a blocking flag to stay inside the label budget', () => {
     const pull: PullState = {
       ...open,

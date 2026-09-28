@@ -338,3 +338,24 @@ export function CheckIcon({ size = 13 }: Props) {
     </svg>
   );
 }
+
+/** A bell: the Activity inbox — review requests, approvals, new tickets. */
+export function BellIcon({ size = 19 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" />
+      <path d="M10 20.5a2.2 2.2 0 0 0 4 0" />
+    </svg>
+  );
+}
+
+/** A microphone: dictation (item 88). */
+export function MicIcon({ size = 16 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0" />
+      <path d="M12 17.5V21" />
+    </svg>
+  );
+}

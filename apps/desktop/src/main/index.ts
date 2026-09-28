@@ -12,18 +12,21 @@
  * If you ever find yourself moving the poller into the renderer, stop.
  */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, Notification, shell } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHost } from './host';
+import { logFilePath, logRendererError } from './logFile';
 import { Poller, type PolledProvider, type Snapshot } from './poller';
 import type { ProviderId } from '@baton/core';
 import type { ChangeKind } from '@baton/git';
 import { BatonTray } from './tray';
 import { Activity } from './notify';
+import { ActivityFeed } from './activityFeed';
+import { Dictation } from './dictation';
 import {
   CREDENTIAL_FIELDS, Credentials, HttpClient, JiraClient, fetchPullDetail, fetchPullDiff, fetchReviewerCandidates,
   requestPullReviewers, submitPullReview
@@ -42,7 +45,7 @@ import { PriceCheck } from './priceCheck';
 import { ModelSearch } from './modelSearch';
 import { Usage } from './usage';
 import { RunningAgents } from './running';
-import { ticketKeyInTitle, type PriceCheckRunner, type PriceRule, type QuickKind, type ReviewEvent } from '@baton/core';
+import { activityLabel, ticketKeyInTitle, type ActivityEvent, type PriceCheckRunner, type PriceRule, type QuickKind, type ReviewEvent } from '@baton/core';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -57,6 +60,8 @@ app.setName('Baton');
 // before anything reads the path, for the same reason `setName` is.
 if (process.env['BATON_USER_DATA']) {
   app.setPath('userData', process.env['BATON_USER_DATA']);
+  // Its log too: a smoke run's crashes are not the user's.
+  app.setAppLogsPath(path.join(process.env['BATON_USER_DATA'], 'logs'));
 }
 
 // Measured, not assumed: `app.disableHardwareAcceleration()` was tried here and
@@ -70,8 +75,71 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 const host = createHost();
+
+// Logged rather than left to Electron's default, which in the installed app
+// prints to nowhere — the crash that blanked the window left no trace at all
+// (item 83). Main keeps running: the poller and the tray are still useful.
+process.on('uncaughtException', (error) => host.log.error('Uncaught exception in main', error));
+process.on('unhandledRejection', (reason) => host.log.error('Unhandled rejection in main', reason));
 const poller = new Poller(host);
 const activity = new Activity(host);
+
+// --- Activity inbox (item 86) ------------------------------------------------
+// A subject a notification was clicked for, waiting for a window to open it.
+let pendingActivityOpen: string | undefined;
+
+function deliverActivity(inbox: ActivityEvent[], fresh: ActivityEvent[], quiet: boolean): void {
+  const live = window && !window.isDestroyed() ? window : undefined;
+  live?.webContents.send('baton:activity', inbox);
+  if (quiet || fresh.length === 0) return;
+
+  // In front: a toast in the window. Anywhere else — closed, hidden, behind
+  // another app — a macOS notification, because a toast nobody sees is none.
+  // A smoke run never reaches Notification Center: it would pop up on the
+  // machine running it, and the toast path is the one it can check.
+  const inFront = live && (process.env['BATON_SMOKE'] ? true : live.isVisible() && live.isFocused());
+  if (inFront) {
+    live.webContents.send('baton:activity-toast', fresh);
+    return;
+  }
+  if (!host.config.get('notify.enabled', true) || !Notification.isSupported()) return;
+  // "Changes requested" also makes the pull request blocked, and the blocked
+  // notification already says so; two for one change would be noise.
+  const notify = fresh.filter((event) => event.kind !== 'changes-requested');
+  if (notify.length === 0) return;
+  const open = (subject: string) => {
+    pendingActivityOpen = subject;
+    if (window && !window.isDestroyed()) {
+      window.show();
+      window.focus();
+      window.webContents.send('baton:activity-open', subject);
+      pendingActivityOpen = undefined;
+    } else {
+      createWindow();
+    }
+  };
+  if (notify.length <= 2) {
+    for (const event of notify) {
+      const n = new Notification({
+        title: activityLabel(event.kind),
+        subtitle: event.who ? `${event.label} · ${event.who}` : event.label,
+        body: event.title
+      });
+      n.on('click', () => open(event.subject));
+      n.show();
+    }
+    return;
+  }
+  const n = new Notification({
+    title: 'Baton',
+    body: `${notify.length} new: ${[...new Set(notify.map((e) => activityLabel(e.kind).toLowerCase()))].join(', ')}`
+  });
+  n.on('click', () => open(''));
+  n.show();
+}
+
+const activityFeed = new ActivityFeed(host, deliverActivity);
+const dictation = new Dictation(host);
 // A ticket key in a terminal's title only counts for a project Baton already
 // has tickets from, as for branch names in `nameTerminal` below.
 const sessions = new Sessions((text) => {
@@ -285,6 +353,12 @@ function createWindow(): void {
     });
   }
 
+  // The window's own process going away is the other way to a black screen.
+  window.webContents.on('render-process-gone', (_event, details) => {
+    host.log.error(`Window process gone: ${details.reason} (exit code ${details.exitCode})`);
+  });
+  window.on('unresponsive', () => host.log.warn('Window stopped responding'));
+
   // Destroy, don't hide. See the note at the top of this file.
   window.on('closed', () => {
     window = undefined;
@@ -383,6 +457,7 @@ app.whenReady().then(async () => {
     broadcast(snapshot);
     if (!snapshot.refreshing) {
       void activity.report(snapshot.blocked, firstRefresh);
+      void activityFeed.report(snapshot, firstRefresh);
       firstRefresh = false;
     }
   });
@@ -537,6 +612,40 @@ app.whenReady().then(async () => {
   ipcMain.handle('baton:run-files', (_event, directory: string) => agents.runFiles(directory));
   ipcMain.handle('baton:run-text', (_event, file: string) => agents.readRunText(file));
   ipcMain.handle('baton:run-image', (_event, file: string) => agents.readRunImage(file));
+  ipcMain.handle('baton:run-reveal', (_event, file: string) => agents.revealRunFile(file));
+
+  // --- Dictation (item 88) ---------------------------------------------------
+  // Only ever the window that asked hears the words; the helper exits with it.
+  ipcMain.handle('baton:dictation-start', (event) => dictation.start(event.sender));
+  ipcMain.handle('baton:dictation-stop', () => dictation.stop());
+  ipcMain.handle('baton:dictation-cancel', () => dictation.cancel());
+  ipcMain.handle('baton:dictation-status', (_event, refresh: unknown) => dictation.currentStatus(refresh === true));
+  // A fixed pair of Settings panes, never a URL from the renderer.
+  ipcMain.handle('baton:privacy-open', (_event, pane: unknown) =>
+    shell.openExternal(
+      pane === 'speech'
+        ? 'x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition'
+        : 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'
+    )
+  );
+
+  // --- Activity inbox (item 86) ---------------------------------------------
+  ipcMain.handle('baton:activity', async () => {
+    const open = pendingActivityOpen;
+    pendingActivityOpen = undefined;
+    return { inbox: await activityFeed.inbox(), open };
+  });
+  ipcMain.handle('baton:activity-read', (_event, ids: unknown) =>
+    activityFeed.markRead(
+      ids === 'all' ? 'all' : Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []
+    )
+  );
+
+  // --- Log (item 83) --------------------------------------------------------
+  // The renderer reports what threw; main writes it. Only a report goes in and
+  // nothing comes back — the renderer never learns or chooses a path.
+  ipcMain.handle('baton:error-log', (_event, report: unknown) => logRendererError(report));
+  ipcMain.handle('baton:log-reveal', () => shell.showItemInFolder(logFilePath()));
 
   // --- Workspace ------------------------------------------------------------
   // Every path-taking channel below is resolved against the workspace folders
@@ -553,6 +662,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('baton:workspace-remove-folder', (_event, id: string, folder: string) =>
     workspaces.removeFolder(id, folder)
   );
+  ipcMain.handle('baton:workspace-reorder', (_event, id: string, folders: string[]) =>
+    workspaces.reorder(id, Array.isArray(folders) ? folders.filter((f) => typeof f === 'string') : [])
+  );
   ipcMain.handle('baton:workspace-forget', (_event, id: string) => workspaces.forget(id));
   ipcMain.handle('baton:workspace-repos', (_event, id: string, force?: boolean) =>
     workspaces.repos(id, force)
@@ -566,8 +678,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('baton:workspace-status', (_event, repo: string) => workspaces.status(repo));
   ipcMain.handle(
     'baton:workspace-diff',
-    (_event, repo: string, file: string, side: string, from?: string) =>
-      workspaces.diff(repo, file, side as 'staged' | 'unstaged' | 'untracked', from)
+    (_event, repo: string, file: string, side: string, from?: string, context?: number) =>
+      workspaces.diff(repo, file, side as 'staged' | 'unstaged' | 'untracked', from, context)
   );
   ipcMain.handle(
     'baton:workspace-revert',
@@ -651,7 +763,7 @@ app.whenReady().then(async () => {
       // the run hung until whatever was waiting on it gave up, with the actual
       // error nowhere in the output. A smoke that cannot fail is not a check.
       try {
-        console.log(JSON.stringify(await smokeUi(win, poller, mode), null, 2));
+        console.log(JSON.stringify(await smokeUi(win, poller, mode, activityFeed), null, 2));
         app.exit(0);
       } catch (err) {
         console.error('smoke failed:', err instanceof Error ? err.stack ?? err.message : err);
@@ -720,6 +832,7 @@ app.on('before-quit', (event) => {
 });
 
 app.on('will-quit', () => {
+  dictation.dispose();
   usage.dispose();
   running.dispose();
   poller.stop();

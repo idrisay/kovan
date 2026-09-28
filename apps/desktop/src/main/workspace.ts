@@ -38,6 +38,7 @@ import {
   type FileDiff,
   type RepoStatus
 } from '@baton/git';
+import { isReordering } from '@baton/core';
 import type { DesktopHost } from './host';
 
 export interface Workspace {
@@ -228,6 +229,23 @@ export class Workspaces {
   }
 
   /**
+   * Puts the workspace's folders in the order you dragged them into.
+   *
+   * Only a reordering is accepted — the same folders, none added or dropped —
+   * so a request from a renderer holding a stale list can't quietly undo an
+   * add or a remove that happened since. The repo scan is kept: `roots` reads
+   * its order from `folders`, not from the cache.
+   */
+  async reorder(id: string, folders: string[]): Promise<Workspace | undefined> {
+    const all = this.list();
+    const workspace = all.find((w) => w.id === id);
+    if (!workspace || !isReordering(workspace.folders, folders)) return undefined;
+    workspace.folders = [...folders];
+    await this.save(all);
+    return workspace;
+  }
+
+  /**
    * Forgets a workspace. It does not touch a single file on disk — "remove"
    * here means "stop listing these folders", and the naming has to make that
    * unmistakable, because the opposite reading is unrecoverable.
@@ -295,7 +313,11 @@ export class Workspaces {
     }
   }
 
-  async diff(repo: string, file: string, side: DiffSide, from?: string): Promise<FileDiff> {
+  /**
+   * `context` is the lines kept around each change: 3 by default, or enough to
+   * cover any file for the diff's "Whole file" view, which is one hunk then.
+   */
+  async diff(repo: string, file: string, side: DiffSide, from?: string, context?: number): Promise<FileDiff> {
     const resolved = await this.inside(repo);
     // `file` is repo-relative and goes to git as a pathspec after `--`, never
     // to the filesystem. Reject an absolute or climbing path anyway: a
@@ -303,7 +325,10 @@ export class Workspaces {
     if (path.isAbsolute(file) || file.split('/').includes('..')) {
       throw new Error('Invalid path');
     }
-    return readDiff(resolved, file, side, from);
+    const lines = typeof context === 'number' && Number.isFinite(context)
+      ? Math.min(1_000_000, Math.max(0, Math.round(context)))
+      : 3;
+    return readDiff(resolved, file, side, from, lines);
   }
 
   /**

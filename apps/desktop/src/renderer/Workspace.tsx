@@ -19,6 +19,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { changeMarks, moveBy, moveItem, type ChangeMark } from '@baton/core';
 import { useMenuDismiss } from './menuDismiss';
 import { Editor, formatBytes, statusFor } from './Editor';
 import { Diff } from './Diff';
@@ -50,7 +51,16 @@ const KIND_MARK: Record<ChangeKind, string> = {
 
 interface Cursor { line: number; column: number; selected: number }
 
-export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => void }) {
+export function WorkspaceView({ onTerminal, visible }: {
+  onTerminal: (cwd: string) => void;
+  /**
+   * App keeps this view mounted once opened and only hides it, so coming back
+   * finds the same Files/Changes tab, open repositories, editor tabs and
+   * scroll position — even unsaved edits. It used to unmount on every rail
+   * switch and come back with everything reset.
+   */
+  visible: boolean;
+}) {
   const [list, setList] = useState<Workspace[]>([]);
   const [active, setActive] = useState<string>();
   const [roots, setRoots] = useState<Root[]>();
@@ -90,6 +100,45 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
   }, []);
 
   useEffect(() => { void loadWorkspaces(); }, [loadWorkspaces]);
+
+  /**
+   * Bumped every time git status is read again. The open tab listens: a diff
+   * re-reads itself and an editor checks the disk. Before this, a tab showed
+   * whatever was true when it was opened — a diff opened while an agent had
+   * its work stashed or just committed said "No changes in this file" for as
+   * long as it stayed open, next to a list saying the file was modified.
+   */
+  const [revision, setRevision] = useState(0);
+
+  /** Git status for every repo again; `bump` tells the open tab to follow. */
+  const refreshStatuses = useCallback(async (bump = true) => {
+    if (!roots) return;
+    const pairs = await Promise.all(
+      reposOf(roots).map(async (r) => [r.path, await window.baton.workspaceStatus(r.path)] as const)
+    );
+    setStatuses(Object.fromEntries(pairs));
+    if (bump) setRevision((r) => r + 1);
+  }, [roots]);
+
+  /**
+   * Coming back to a view that stayed mounted, or to the window: re-read git
+   * status (local and cheap — the same call opening the view always made) so
+   * work an agent did meanwhile shows up, in the list and in the open tab.
+   * VS Code does the same on focus. The repository scan and the file tree are
+   * left as they were; Refresh redoes those.
+   */
+  const shown = useRef(visible);
+  useEffect(() => {
+    const returning = visible && !shown.current;
+    shown.current = visible;
+    if (returning) void refreshStatuses();
+  }, [visible, refreshStatuses]);
+  useEffect(() => {
+    if (!visible) return undefined;
+    const onFocus = () => void refreshStatuses();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [visible, refreshStatuses]);
 
   /**
    * Repos and statuses for the active workspace.
@@ -174,7 +223,7 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
     if (!active) return;
     setEntries(new Map());
     setFailed(new Map());
-    void loadRoots(active, true);
+    void loadRoots(active, true).then(() => setRevision((r) => r + 1));
   }, [active, loadRoots]);
 
   const createWorkspace = useCallback(() => {
@@ -208,6 +257,38 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
       await loadRoots(active, true);
     });
   }, [active, loadWorkspaces, loadRoots]);
+
+  /**
+   * A new order for the workspace's folders, from a drag or ⌥↑ / ⌥↓. Shown at
+   * once, then stored in the workspace itself, so it holds everywhere the
+   * workspace does. If main refuses it (the folder list changed meanwhile),
+   * the rows go back to what is actually stored.
+   */
+  const reorderRoots = useCallback((order: string[]) => {
+    if (!active || !roots) return;
+    const byFolder = new Map(roots.map((r) => [r.folder, r]));
+    setRoots(order.flatMap((f) => byFolder.get(f) ?? []));
+    void window.baton.workspaceReorder(active, order).then(async (updated) => {
+      if (updated) await loadWorkspaces();
+      else await loadRoots(active, true);
+    });
+  }, [active, roots, loadWorkspaces, loadRoots]);
+
+  const folderOrder = useMemo(() => roots?.map((r) => r.folder) ?? [], [roots]);
+  const rootDrag = useRowDrag('data-root-row', (folder, target, after) =>
+    reorderRoots(moveItem(folderOrder, folder, target, after)));
+  const moveRootBy = useCallback((folder: string, delta: -1 | 1) => {
+    const next = moveBy(folderOrder, folder, delta);
+    if (next.every((f, i) => f === folderOrder[i])) return;
+    reorderRoots(next);
+    // The row's DOM node moves, which can drop focus; put it back so a second
+    // ⌥↓ keeps going.
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(
+        `[data-root-row="${CSS.escape(folder)}"] .repo-main`
+      )?.focus();
+    });
+  }, [folderOrder, reorderRoots]);
 
   const renameWorkspace = useCallback((name: string) => {
     if (!active) return;
@@ -252,9 +333,12 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
   }, [changed]);
 
   const open = useCallback((tab: Tab) => {
+    // Clicking a change whose tab is already open reads it again, rather than
+    // showing what it said last time.
+    if (tabs.some((t) => t.key === tab.key)) setRevision((r) => r + 1);
     setTabs((existing) => (existing.some((t) => t.key === tab.key) ? existing : [...existing, tab]));
     setCurrent(tab.key);
-  }, []);
+  }, [tabs]);
 
   const openFile = useCallback((entry: Entry) =>
     open({ key: `file:${entry.path}`, kind: 'file', title: entry.name, path: entry.path }), [open]);
@@ -281,6 +365,13 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
   }, []);
 
   const tab = tabs.find((t) => t.key === current);
+
+  /** Longest first, so a clone nested in another resolves to itself. */
+  const repoPaths = useMemo(
+    () => (roots ? reposOf(roots).map((r) => r.path).sort((a, b) => b.length - a.length) : []),
+    [roots]
+  );
+  const repoOf = (file: string) => repoPaths.find((r) => file.startsWith(`${r}/`));
 
   const markDirty = useCallback((key: string, value: boolean) => {
     setDirty((d) => {
@@ -313,6 +404,7 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
       }
       const fresh = await window.baton.workspaceStatus(repoPath);
       setStatuses((s) => ({ ...s, [repoPath]: fresh }));
+      setRevision((r) => r + 1);
     } finally {
       setReverting(false);
     }
@@ -400,6 +492,10 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
                       onToggle={toggle}
                       onRemove={() => removeFolder(root.folder)}
                       onTerminal={onTerminal}
+                      drop={rootDrag.drop?.target === root.folder ? (rootDrag.drop.after ? 'after' : 'before') : undefined}
+                      dragging={rootDrag.drop?.id === root.folder}
+                      onDragStart={(e) => rootDrag.start(root.folder, e)}
+                      onMove={(delta) => moveRootBy(root.folder, delta)}
                       renderRepo={(repo) => (
                         pane === 'files' ? (
                           <Tree
@@ -483,6 +579,13 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
               <TabBody
                 key={tab.key}
                 tab={tab}
+                revision={revision}
+                repo={tab.kind === 'file' ? repoOf(tab.path) : tab.repo}
+                untracked={changed.get(tab.path) === 'untracked'}
+                onOpenFile={(file) => open({
+                  key: `file:${file}`, kind: 'file', title: file.split('/').pop() || file, path: file
+                })}
+                onStatus={() => void refreshStatuses(false)}
                 cursor={cursor}
                 dirty={dirty.has(tab.key)}
                 onDirty={(value) => markDirty(tab.key, value)}
@@ -501,7 +604,7 @@ export function WorkspaceView({ onTerminal }: { onTerminal: (cwd: string) => voi
 // --- Explorer -----------------------------------------------------------------
 
 function RepoRow({
-  repo, status, open, onToggle, onTerminal, onRemove, children
+  repo, status, open, onToggle, onTerminal, onRemove, order, children
 }: {
   repo: WorkspaceRepo;
   status?: WorkspaceStatus;
@@ -510,40 +613,56 @@ function RepoRow({
   onTerminal: () => void;
   /** Present only when this repo *is* a workspace folder, so removable. */
   onRemove?: () => void;
+  /** Present only when this repo *is* a workspace folder, so reorderable. */
+  order?: Reorderable;
   children: React.ReactNode;
 }) {
   const count = status?.changes;
+  // "acme/acme-backend": the owner is usually the same on every row, so
+  // it steps back and the repository's own name is what the eye lands on.
+  const slash = repo.name.lastIndexOf('/');
+  const owner = slash === -1 ? '' : repo.name.slice(0, slash + 1);
+  const short = repo.name.slice(slash + 1);
   return (
-    <section className="ws-root">
+    <section {...sectionProps(order)}>
       <div className={open ? 'repo open' : 'repo'}>
-        <button className="repo-main" onClick={onToggle} aria-expanded={open}>
+        <button
+          className="repo-main" onClick={onToggle} aria-expanded={open}
+          title={order ? `${repo.path}\nDrag, or ⌥↑ / ⌥↓, to reorder` : repo.path}
+          onKeyDown={order && moveKeys(order)}
+        >
           <ChevronIcon open={open} size={11} />
-          <span className="repo-name">{repo.name}</span>
+          <span className="repo-name">
+            {owner && <span className="repo-owner">{owner}</span>}
+            {short}
+          </span>
           {repo.branch && <span className="repo-branch">{repo.branch}</span>}
+          <span className="spacer" />
           {status && (status.ahead > 0 || status.behind > 0) && (
-            <span className="repo-ab">
+            <span className="repo-ab" title={aheadBehind(status)}>
               {status.ahead > 0 && `↑${status.ahead}`}
               {status.behind > 0 && `↓${status.behind}`}
             </span>
           )}
-          <span className="spacer" />
-          {count === undefined ? (
-            <span className="repo-pill quiet-pill">·</span>
-          ) : count > 0 ? (
-            <span className="repo-pill dirty">{count}</span>
+          {/* Rule 6 with the word in the tooltip: a column of "clean" on
+              every row was the loudest thing in the list and said the least. */}
+          {count === undefined ? null : count > 0 ? (
+            <span className="repo-pill dirty" title={`${count} uncommitted change${count === 1 ? '' : 's'}`}>
+              {count}
+            </span>
           ) : (
-            <span className="repo-pill quiet-pill">clean</span>
+            <span className="dot pass" title="Clean — no uncommitted changes" aria-label="clean" />
           )}
         </button>
         <button
-          className="icon-button" aria-label={`Open a terminal in ${repo.name}`}
-          onClick={onTerminal}
+          className="icon-button reveal" aria-label={`Open a terminal in ${repo.name}`}
+          title="Open a terminal here" onClick={onTerminal}
         >
           <TerminalIcon size={13} />
         </button>
         {onRemove && (
           <button
-            className="icon-button remove"
+            className="icon-button reveal remove"
             aria-label={`Remove ${repo.name} from workspace`}
             title="Remove from workspace — no files are deleted"
             onClick={onRemove}
@@ -555,6 +674,13 @@ function RepoRow({
       {open && <div className="repo-body">{children}</div>}
     </section>
   );
+}
+
+function aheadBehind(status: WorkspaceStatus): string {
+  const parts: string[] = [];
+  if (status.ahead > 0) parts.push(`${status.ahead} commit${status.ahead === 1 ? '' : 's'} to push`);
+  if (status.behind > 0) parts.push(`${status.behind} to pull`);
+  return sentence(parts.join(', '));
 }
 
 /**
@@ -670,7 +796,7 @@ function WorkspaceRow({
  * was added and so the only thing that can be taken away.
  */
 function RootRow({
-  root, statuses, expanded, onToggle, onRemove, onTerminal, renderRepo, renderPlain
+  root, statuses, expanded, onToggle, onRemove, onTerminal, renderRepo, renderPlain, ...order
 }: {
   root: Root;
   statuses: Record<string, WorkspaceStatus>;
@@ -680,8 +806,9 @@ function RootRow({
   onTerminal: (cwd: string) => void;
   renderRepo: (repo: WorkspaceRepo) => React.ReactNode;
   renderPlain: (folder: string) => React.ReactNode;
-}) {
+} & Reorderable) {
   const open = expanded.has(root.folder);
+  const reorderable: Reorderable = { ...order, id: root.folder };
 
   if (root.repo) {
     return (
@@ -690,6 +817,7 @@ function RootRow({
         onToggle={() => onToggle(root.folder)}
         onTerminal={() => onTerminal(root.repo!.path)}
         onRemove={onRemove}
+        order={reorderable}
       >
         {renderRepo(root.repo)}
       </RepoRow>
@@ -697,9 +825,13 @@ function RootRow({
   }
 
   return (
-    <section className="ws-root">
+    <section {...sectionProps(reorderable)}>
       <div className={open ? 'repo open' : 'repo'}>
-        <button className="repo-main" onClick={() => onToggle(root.folder)} aria-expanded={open}>
+        <button
+          className="repo-main" onClick={() => onToggle(root.folder)} aria-expanded={open}
+          title={`${root.folder}\nDrag, or ⌥↑ / ⌥↓, to reorder`}
+          onKeyDown={moveKeys(reorderable)}
+        >
           <ChevronIcon open={open} size={11} />
           <FolderIcon size={13} />
           <span className="repo-name">{root.name}</span>
@@ -709,13 +841,13 @@ function RootRow({
           )}
         </button>
         <button
-          className="icon-button" aria-label={`Open a terminal in ${root.name}`}
-          onClick={() => onTerminal(root.folder)}
+          className="icon-button reveal" aria-label={`Open a terminal in ${root.name}`}
+          title="Open a terminal here" onClick={() => onTerminal(root.folder)}
         >
           <TerminalIcon size={13} />
         </button>
         <button
-          className="icon-button remove" aria-label={`Remove ${root.name} from workspace`}
+          className="icon-button reveal remove" aria-label={`Remove ${root.name} from workspace`}
           title="Remove from workspace — no files are deleted" onClick={onRemove}
         >
           <CloseIcon size={12} />
@@ -738,6 +870,109 @@ function RootRow({
       )}
     </section>
   );
+}
+
+// --- Reordering the workspace's folders -----------------------------------------
+
+/** What a top-level row needs to be dragged and moved from the keyboard. */
+interface Reorderable {
+  id?: string;
+  /** This row is where the dragged one would land, before or after it. */
+  drop?: 'before' | 'after';
+  /** This row is the one being dragged. */
+  dragging?: boolean;
+  onDragStart: (event: React.PointerEvent) => void;
+  onMove: (delta: -1 | 1) => void;
+}
+
+function sectionProps(order?: Reorderable) {
+  if (!order) return { className: 'ws-root' };
+  const classes = ['ws-root', 'reorderable'];
+  if (order.drop) classes.push(`drop-${order.drop}`);
+  if (order.dragging) classes.push('dragged');
+  return {
+    className: classes.join(' '),
+    'data-root-row': order.id,
+    onPointerDown: order.onDragStart
+  };
+}
+
+/** ⌥↑ / ⌥↓ on the row's own button, as in the Sessions list. */
+function moveKeys(order: Reorderable) {
+  return (event: React.KeyboardEvent) => {
+    if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+    event.preventDefault();
+    order.onMove(event.key === 'ArrowUp' ? -1 : 1);
+  };
+}
+
+/**
+ * Dragging a row within a list, by rows marked with `attribute`.
+ *
+ * Window listeners, not pointer capture as in Sessions: capture retargets the
+ * click to the element that captured it, so the row's own button (which
+ * opens the repository) would stop getting clicks. Instead a press that moves
+ * less than 4px stays a click, and once it has become a drag the click that
+ * follows the release is swallowed, so a drop doesn't also open or shut the
+ * row it started on.
+ */
+function useRowDrag(attribute: string, onDrop: (id: string, target: string, after: boolean) => void) {
+  const [drop, setDrop] = useState<{ id: string; target: string; after: boolean }>();
+  const latest = useRef(onDrop);
+  latest.current = onDrop;
+
+  const start = useCallback((id: string, event: React.PointerEvent) => {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    // Terminal, remove and anything else inside keeps its own click.
+    if (target.closest('.icon-button, input')) return;
+    // Only the row's own head drags it: not the files open beneath it, and
+    // not a repository nested inside a folder row.
+    if (target.closest('.repo')?.parentElement !== event.currentTarget) return;
+    const x0 = event.clientX;
+    const y0 = event.clientY;
+    let dragging = false;
+    let last: { id: string; target: string; after: boolean } | undefined;
+
+    const move = (e: PointerEvent) => {
+      if (!dragging && Math.hypot(e.clientX - x0, e.clientY - y0) < 4) return;
+      if (!dragging) {
+        dragging = true;
+        document.body.classList.add('dragging-row');
+      }
+      const row = document.elementFromPoint(e.clientX, e.clientY)
+        ?.closest<HTMLElement>(`[${attribute}]`);
+      const target = row?.getAttribute(attribute);
+      if (row && target && target !== id) {
+        const rect = row.getBoundingClientRect();
+        last = { id, target, after: e.clientY > rect.top + rect.height / 2 };
+      } else {
+        last = undefined;
+      }
+      setDrop(last ?? { id, target: '', after: false });
+    };
+    const finish = (commit: boolean) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      document.body.classList.remove('dragging-row');
+      setDrop(undefined);
+      if (!dragging) return;
+      const swallow = (e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); };
+      window.addEventListener('click', swallow, { capture: true, once: true });
+      // The click comes in the same task as the release, if at all — a
+      // release outside the window has none, and this must not eat the next.
+      setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0);
+      if (commit && last) latest.current(last.id, last.target, last.after);
+    };
+    const up = () => finish(true);
+    const cancel = () => finish(false);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+  }, [attribute]);
+
+  return { drop, start };
 }
 
 /**
@@ -1043,33 +1278,90 @@ function NoWorkspace({ onCreate }: { onCreate: () => void }) {
 
 // --- Tab bodies ---------------------------------------------------------------
 
+/** Enough context lines to cover any file: the diff becomes one hunk. */
+const WHOLE_FILE = 1_000_000;
+const WHOLE_KEY = 'baton.diff-whole-file';
+
+function loadWhole(): boolean {
+  try { return localStorage.getItem(WHOLE_KEY) === '1'; } catch { return false; }
+}
+
 function TabBody({
-  tab, cursor, dirty, onDirty, onCursor, registerSave, onSave
+  tab, revision, repo, untracked, cursor, dirty, onDirty, onCursor, registerSave, onSave,
+  onOpenFile, onStatus
 }: {
   tab: Tab;
+  /** Bumped whenever git status is re-read; see `WorkspaceView`. */
+  revision: number;
+  /** The clone the file is in — for a file tab, found by path; absent outside one. */
+  repo?: string;
+  untracked: boolean;
   cursor?: Cursor;
   dirty: boolean;
   onDirty: (value: boolean) => void;
   onCursor: (c: Cursor) => void;
   registerSave: (fn: (() => void) | undefined) => void;
   onSave: () => void;
+  onOpenFile: (path: string) => void;
+  /** Git state changed under us (a save, an empty diff); re-read the list. */
+  onStatus: () => void;
 }) {
   const [body, setBody] = useState<FileBody>();
   const [diff, setDiff] = useState<FileDiff>();
+  const [marks, setMarks] = useState<ChangeMark[]>();
   const [error, setError] = useState<string>();
   /** Updated on every save, so the size shown is the size on disk. */
   const [bytes, setBytes] = useState<number>();
+  const [saves, setSaves] = useState(0);
+  // Remembered across tabs and launches: someone who reads diffs in full
+  // wants the next one in full too.
+  const [whole, setWhole] = useState(loadWhole);
 
+  const toggleWhole = () => setWhole((w) => {
+    try { localStorage.setItem(WHOLE_KEY, w ? '0' : '1'); } catch { /* this window only */ }
+    return !w;
+  });
+
+  // The file's text is read once; after that the editor owns it and checks
+  // the disk itself on every revision (see `Editor`).
   useEffect(() => {
+    if (tab.kind !== 'file') return undefined;
     let cancelled = false;
-    setBody(undefined); setDiff(undefined); setError(undefined); setBytes(undefined);
-    const load = tab.kind === 'file'
-      ? window.baton.workspaceRead(tab.path).then((b) => { if (!cancelled) setBody(b); })
-      : window.baton.workspaceDiff(tab.repo!, tab.path, tab.side!, tab.from)
-          .then((d) => { if (!cancelled) setDiff(d); });
-    void load.catch((e: Error) => { if (!cancelled) setError(e.message); });
+    void window.baton.workspaceRead(tab.path)
+      .then((b) => { if (!cancelled) setBody(b); })
+      .catch((e: Error) => { if (!cancelled) setError(e.message); });
     return () => { cancelled = true; };
   }, [tab]);
+
+  // The diff, and a file's change bars, are read again on every revision and
+  // after every save. The previous diff stays on screen until the new one
+  // arrives, so a refresh doesn't flash a skeleton.
+  useEffect(() => {
+    let cancelled = false;
+    if (tab.kind === 'diff') {
+      void window.baton
+        .workspaceDiff(tab.repo!, tab.path, tab.side!, tab.from, whole ? WHOLE_FILE : undefined)
+        .then((d) => {
+          if (cancelled) return;
+          setDiff(d);
+          setError(undefined);
+          // The list said this file had changes and git now says none: the
+          // list is out of date, so bring it up to date too.
+          if (d.empty) onStatus();
+        })
+        .catch((e: Error) => { if (!cancelled) setError(e.message); });
+    } else if (repo) {
+      const relative = tab.path.slice(repo.length + 1);
+      void window.baton
+        .workspaceDiff(repo, relative, untracked ? 'untracked' : 'unstaged')
+        .then((d) => { if (!cancelled) setMarks(changeMarks(d.hunks)); })
+        // No bars is the honest answer when git can't say (an ignored file).
+        .catch(() => { if (!cancelled) setMarks([]); });
+    }
+    return () => { cancelled = true; };
+    // `onStatus` is a fresh closure every render; it is not a reason to re-read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, revision, whole, repo, untracked, saves]);
 
   if (error) return <p className="quiet centred error">{error}</p>;
 
@@ -1083,15 +1375,25 @@ function TabBody({
         body ? (
           <>
             <Editor
-              path={tab.path} body={body}
+              path={tab.path} body={body} marks={marks} revision={revision}
               onDirtyChange={onDirty} onCursor={onCursor} registerSave={registerSave}
-              onSaved={(next) => setBytes(next.bytes)}
+              onSaved={(next) => {
+                setBytes(next.bytes);
+                // A save changes what git sees: new bars, and the list's count.
+                setSaves((n) => n + 1);
+                onStatus();
+              }}
             />
             <div className="status-bar">
               {cursor && <span>Ln {cursor.line}, Col {cursor.column}</span>}
               {cursor && cursor.selected > 0 && <span>Sel {cursor.selected}</span>}
               <span>{statusFor(tab.path)}</span>
               <span>{formatBytes(bytes ?? body.bytes)}</span>
+              {marks && marks.length > 0 && (
+                <span className="status-changes" title="Lines that differ from git's copy">
+                  {describeMarks(marks)}
+                </span>
+              )}
               <span className="spacer" />
               {dirty ? (
                 <button className="save" onClick={onSave}>Save <kbd>⌘S</kbd></button>
@@ -1102,12 +1404,32 @@ function TabBody({
           </>
         ) : <Skeleton rows={4} label="Reading…" />
       ) : diff ? (
-        <Diff path={tab.path} side={tab.side!} from={tab.from} diff={diff} />
+        <Diff
+          path={tab.path} side={tab.side!} from={tab.from} diff={diff}
+          whole={whole} onWhole={toggleWhole}
+          // Not for a binary, and not for a deleted file: nothing to open.
+          onOpenFile={diff.binary || (!diff.empty && diff.hunks.every((h) => h.header.includes('+0,0')))
+            ? undefined
+            : () => onOpenFile(`${tab.repo}/${tab.path.replace(/\/$/, '')}`)}
+        />
       ) : (
         <Skeleton rows={4} label="Diffing…" />
       )}
     </div>
   );
+}
+
+/** "3 changed · 1 added", for the status bar. */
+function describeMarks(marks: ChangeMark[]): string {
+  const count = (kind: ChangeMark['kind']) => marks.filter((m) => m.kind === kind).length;
+  const parts: string[] = [];
+  const modified = count('modified');
+  const added = count('added');
+  const deleted = count('deleted');
+  if (modified) parts.push(`${modified} changed`);
+  if (added) parts.push(`${added} added`);
+  if (deleted) parts.push(`${deleted} removal${deleted === 1 ? '' : 's'}`);
+  return parts.join(' · ');
 }
 
 /**

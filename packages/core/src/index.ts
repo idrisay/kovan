@@ -25,6 +25,8 @@ export * from './figma/urlParser';
 
 export * from './text/rowText';
 export * from './work/repoWork';
+export * from './order';
+export * from './changeMarks';
 export * from './promptSettings';
 
 // `sentry/pathMapper` is deliberately NOT re-exported here. It imports node's
@@ -36,9 +38,11 @@ export * from './prompts';
 export * from './testAccounts';
 export * from './quick';
 export * from './usage';
+export * from './activity';
 export * from './priceCheck';
 export * from './modelSearch';
 export * from './folders';
 export * from './processes';
 export * from './terminalTitle';
 export * from './shellPath';
+export * from './dictation';

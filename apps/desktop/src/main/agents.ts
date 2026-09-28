@@ -7,6 +7,7 @@
  * that records it (`RunStore`).
  */
 
+import { shell } from 'electron';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -429,6 +430,18 @@ export class Agents {
       throw new Error('Not a run directory.');
     }
     return this.store.files(directory);
+  }
+
+  /**
+   * Shows a run's file (or folder) selected in Finder. Only inside the runs
+   * store, like every other run IPC: the renderer names a path, and this must
+   * not become a way to open Finder anywhere.
+   */
+  revealRunFile(file: string): void {
+    if (!this.store.owns(file)) {
+      throw new Error('Not a run file.');
+    }
+    shell.showItemInFolder(file);
   }
 
   /** A run's own report.md or prompt.md, read for the in-app viewer. */

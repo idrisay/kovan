@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { ErrorBoundary, installErrorReporting } from './ErrorBoundary';
 import { restoreSidebarWidth } from './Resizer';
 import { restoreReadingSize } from './readingSize';
 import { installZoomRouting } from './zoomTarget';
@@ -11,9 +12,13 @@ import './styles.css';
 restoreSidebarWidth();
 restoreReadingSize();
 installZoomRouting();
+installErrorReporting();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {/* The last resort: a pane's own boundary should catch first. */}
+    <ErrorBoundary where="the window" whole>
+      <App />
+    </ErrorBoundary>
   </StrictMode>
 );

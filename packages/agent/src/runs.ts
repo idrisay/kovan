@@ -41,6 +41,11 @@ export interface RunFile {
   path: string;
   name: string;
   size: number;
+  /**
+   * When the file was last written, ISO 8601. For a screenshot that is when
+   * it was taken — the agent writes it once and never touches it again.
+   */
+  modifiedAt: string;
 }
 
 export interface AgentRun {
@@ -245,8 +250,13 @@ export class RunStore {
         if (entry.isDirectory()) {
           await walk(path.join(dir, entry.name), rel);
         } else {
-          const size = await stat(path.join(dir, entry.name)).then((s) => s.size).catch(() => 0);
-          found.push({ path: rel, name: entry.name, size });
+          const info = await stat(path.join(dir, entry.name)).catch(() => undefined);
+          found.push({
+            path: rel,
+            name: entry.name,
+            size: info?.size ?? 0,
+            modifiedAt: (info?.mtime ?? new Date(0)).toISOString()
+          });
         }
       }
     };

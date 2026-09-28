@@ -19,6 +19,7 @@ import {
   type SecretStore
 } from '@baton/host';
 import { DEFAULT_SETTINGS, type Settings } from '@baton/core';
+import { appendLog } from './logFile';
 
 const STATE_DIR = () => app.getPath('userData');
 
@@ -166,6 +167,8 @@ class ConsoleLog implements Logger {
   private line(level: string, message: string, args: unknown[]): void {
     const stamp = new Date().toISOString();
     console.log(`${stamp} [${level}] ${message}`, ...args);
+    // And to disk: the installed app's stdout goes nowhere (item 83).
+    appendLog(level, message, args);
   }
   info = (m: string, ...a: unknown[]) => this.line('info', m, a);
   warn = (m: string, ...a: unknown[]) => this.line('warn', m, a);

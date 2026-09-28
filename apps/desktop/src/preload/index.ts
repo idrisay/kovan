@@ -105,6 +105,42 @@ const api = {
   runFiles: (directory: string) => ipcRenderer.invoke('baton:run-files', directory),
   runText: (file: string) => ipcRenderer.invoke('baton:run-text', file),
   runImage: (file: string) => ipcRenderer.invoke('baton:run-image', file),
+  runReveal: (file: string) => ipcRenderer.invoke('baton:run-reveal', file),
+
+  // Dictation (item 88)
+  dictationStart: () => ipcRenderer.invoke('baton:dictation-start'),
+  dictationStop: () => ipcRenderer.invoke('baton:dictation-stop'),
+  dictationCancel: () => ipcRenderer.invoke('baton:dictation-cancel'),
+  dictationStatus: (refresh?: boolean) => ipcRenderer.invoke('baton:dictation-status', refresh === true),
+  privacyOpen: (pane: 'mic' | 'speech') => ipcRenderer.invoke('baton:privacy-open', pane),
+  onDictation: (listener: (event: unknown) => void) => {
+    const handler = (_event: unknown, payload: unknown) => listener(payload);
+    ipcRenderer.on('baton:dictation', handler);
+    return () => ipcRenderer.removeListener('baton:dictation', handler);
+  },
+
+  // Activity inbox (item 86)
+  activity: () => ipcRenderer.invoke('baton:activity'),
+  activityRead: (ids: string[] | 'all') => ipcRenderer.invoke('baton:activity-read', ids),
+  onActivity: (listener: (inbox: unknown) => void) => {
+    const handler = (_event: unknown, inbox: unknown) => listener(inbox);
+    ipcRenderer.on('baton:activity', handler);
+    return () => ipcRenderer.removeListener('baton:activity', handler);
+  },
+  onActivityToast: (listener: (events: unknown) => void) => {
+    const handler = (_event: unknown, events: unknown) => listener(events);
+    ipcRenderer.on('baton:activity-toast', handler);
+    return () => ipcRenderer.removeListener('baton:activity-toast', handler);
+  },
+  onActivityOpen: (listener: (subject: string) => void) => {
+    const handler = (_event: unknown, subject: string) => listener(subject);
+    ipcRenderer.on('baton:activity-open', handler);
+    return () => ipcRenderer.removeListener('baton:activity-open', handler);
+  },
+
+  // Log (item 83)
+  logError: (report: unknown) => ipcRenderer.invoke('baton:error-log', report),
+  revealLog: () => ipcRenderer.invoke('baton:log-reveal'),
 
   // Workspace
   workspaces: () => ipcRenderer.invoke('baton:workspaces'),
@@ -113,6 +149,8 @@ const api = {
   workspaceAddFolder: (id: string) => ipcRenderer.invoke('baton:workspace-add-folder', id),
   workspaceRemoveFolder: (id: string, folder: string) =>
     ipcRenderer.invoke('baton:workspace-remove-folder', id, folder),
+  workspaceReorder: (id: string, folders: string[]) =>
+    ipcRenderer.invoke('baton:workspace-reorder', id, folders),
   workspaceForget: (id: string) => ipcRenderer.invoke('baton:workspace-forget', id),
   workspaceRepos: (id: string, force?: boolean) =>
     ipcRenderer.invoke('baton:workspace-repos', id, force),
@@ -121,8 +159,8 @@ const api = {
   workspaceRename: (id: string, name: string) =>
     ipcRenderer.invoke('baton:workspace-rename', id, name),
   workspaceStatus: (repo: string) => ipcRenderer.invoke('baton:workspace-status', repo),
-  workspaceDiff: (repo: string, file: string, side: string, from?: string) =>
-    ipcRenderer.invoke('baton:workspace-diff', repo, file, side, from),
+  workspaceDiff: (repo: string, file: string, side: string, from?: string, context?: number) =>
+    ipcRenderer.invoke('baton:workspace-diff', repo, file, side, from, context),
   workspaceRevert: (repo: string, changes: unknown[]) =>
     ipcRenderer.invoke('baton:workspace-revert', repo, changes),
   workspaceTree: (dir: string) => ipcRenderer.invoke('baton:workspace-tree', dir),

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { ActivitySettings } from './Activity';
+import { DictationSettings } from './Dictation';
 import {
   DEFAULT_IDLE_MINUTES, DEFAULT_PRICES, NV_REVIEW_DEFAULT_MODEL, PRICE_CHECK_RUNNERS, QUICK_DEFAULT_MODEL,
   QUICK_DEFAULT_TIMEOUT_SECONDS, applyPriceProposals,
@@ -622,8 +624,11 @@ export function Settings({
                     checked={notify}
                     onChange={(e) => void toggle('notify.enabled', e.target.checked, setNotify)}
                   />
-                  <span>Notify when something is blocked on you</span>
+                  <span>macOS notifications: blocked pull requests, and Activity while Baton isn't in front</span>
                 </label>
+
+                <ActivitySettings />
+                <DictationSettings />
 
                 <QuickModelSettings />
                 <RunningAgentSettings />

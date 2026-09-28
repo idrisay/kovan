@@ -5,17 +5,17 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "node scripts/build-dictate.mjs && electron-vite dev",
+    "build": "node scripts/build-dictate.mjs && electron-vite build",
     "start": "electron-vite preview",
-    "pack": "electron-vite build && electron-builder --dir",
-    "dist": "electron-vite build && electron-builder --mac --arm64",
-    "smoke": "electron-vite build && BATON_SMOKE=1 electron .",
-    "smoke:seeded": "electron-vite build && BATON_SMOKE=seeded electron .",
-    "smoke:live": "electron-vite build && BATON_SMOKE=live electron .",
+    "pack": "node scripts/build-dictate.mjs && electron-vite build && electron-builder --dir",
+    "dist": "node scripts/build-dictate.mjs && electron-vite build && electron-builder --mac --arm64",
+    "smoke": "node scripts/build-dictate.mjs && electron-vite build && BATON_SMOKE=1 electron .",
+    "smoke:seeded": "node scripts/build-dictate.mjs && electron-vite build && BATON_SMOKE=seeded electron .",
+    "smoke:live": "node scripts/build-dictate.mjs && electron-vite build && BATON_SMOKE=live electron .",
     "typecheck": "tsc --noEmit",
     "install:app": "npm run dist && node ../../scripts/install-app.mjs",
-    "smoke:workspace": "electron-vite build && BATON_SMOKE=workspace electron ."
+    "smoke:workspace": "node scripts/build-dictate.mjs && electron-vite build && BATON_SMOKE=workspace electron ."
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
@@ -94,7 +94,9 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "extendInfo": {
-        "NSUserNotificationAlertStyle": "banner"
+        "NSUserNotificationAlertStyle": "banner",
+        "NSMicrophoneUsageDescription": "Baton listens only while you dictate: double-tap ⌘ to start, and again to stop.",
+        "NSSpeechRecognitionUsageDescription": "Baton turns what you dictate into text on this Mac."
       }
     },
     "electronVersion": "33.4.11",
@@ -110,6 +112,10 @@
       {
         "from": "resources/trayTemplate@2x.png",
         "to": "trayTemplate@2x.png"
+      },
+      {
+        "from": "resources/bin/baton-dictate",
+        "to": "bin/baton-dictate"
       }
     ]
   },

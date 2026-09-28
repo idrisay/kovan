@@ -1,12 +1,12 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
-  formatAge, isMerged, olderCommentCount, pullBasis, pullFlags, reviewBasis, ticketBasis, ticketKeyInTitle,
+  formatAge, isMerged, olderCommentCount, primaryFlag, pullBasis, pullFlags, reviewBasis, ticketBasis, ticketKeyInTitle,
   KIMI_REVIEW_FILE,
   isNvReviewModel,
   reviewModelName,
   TICKET_RECENT_COMMENTS
 } from '@baton/core';
-import { States, TONE } from './rows';
+import { repoName, States, TONE } from './rows';
 import { Prose } from './Prose';
 import { CardTitle, CopyResult, QuickButton, QuickCard, ReviewDecision, VerdictBadge, useQuick } from './Quick';
 import { KIND_LABEL } from './RunSheet';
@@ -57,9 +57,9 @@ function Avatar({ name, size = 26 }: { name: string; size?: number }) {
 /** The single most important fact about a pull request or ticket, read at a
  *  glance the way GitHub's own Open/Merged/Draft pill is — everything
  *  `States` already lists in more detail stays right underneath it. */
-function StatusPill({ tone, label }: { tone: string; label: string }) {
+function StatusPill({ tone, label, title }: { tone: string; label: string; title?: string }) {
   return (
-    <span className={`status-pill ${tone}`}>
+    <span className={`status-pill ${tone}`} title={title}>
       <span className={`dot ${tone}`} />
       {label}
     </span>
@@ -189,8 +189,8 @@ function TicketPulls({ pulls, onOpen }: { pulls: PullSummary[]; onOpen: (pull: P
   return (
     <div className="linked-pulls" role="list" aria-label="Pull requests for this ticket">
       {pulls.map((pull) => {
-        const flag = pullFlags(pull)[0]!;
-        const name = pull.repo.split('/').pop() ?? pull.repo;
+        const flag = primaryFlag(pull);
+        const name = repoName(pull.repo);
         return (
           <button
             key={`${pull.repo}#${pull.number}`} role="listitem"
@@ -848,7 +848,9 @@ export function PullPane({
   // The same priority order the queue row's own state chips already use —
   // `pullFlags` puts the one thing that matters most first, so the header
   // pill and the first chip in `States` below it never disagree.
-  const primaryFlag = pullFlags(pull)[0]!;
+  // `primaryFlag`, not `pullFlags(pull)[0]!`: a pull request with nothing to
+  // report has no flags, and that `!` blanked the window (item 83).
+  const headline = primaryFlag(pull);
 
   // Keyed by the pull request itself, not `subject`: a summary is about this
   // PR's own reviews and checks, even when its title names a ticket.
@@ -871,7 +873,7 @@ export function PullPane({
     <div className="detail reading">
       <header className="detail-head">
         <div className="detail-pill-row">
-          <StatusPill tone={TONE[primaryFlag.id]} label={primaryFlag.label} />
+          <StatusPill tone={TONE[headline.id]} label={headline.label} title={headline.hint} />
           <span className="detail-pill-repo">{pull.repo} #{pull.number}</span>
         </div>
         <h2>{pull.title}</h2>
@@ -889,9 +891,9 @@ export function PullPane({
         />
         {/* The pill above already says the headline state; this line lists
             the rest, and goes when there is no rest ("Approved" twice). */}
-        {pullFlags(pull).some((flag) => flag.id !== primaryFlag.id) && (
+        {pullFlags(pull).some((flag) => flag.id !== headline.id) && (
           <div className="detail-states">
-            <States pull={pull} max={6} skip={primaryFlag.id} />
+            <States pull={pull} max={6} skip={headline.id} />
           </div>
         )}
         {/* One row of actions, the agent runs first: they are the reason this

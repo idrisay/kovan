@@ -317,7 +317,12 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
 .queue > * { zoom: var(--sidebar-zoom, 1); }
 /* Clicking the active rail icon again folds the sidebar away, VS Code-style. */
 .body.queue-hidden > .queue,
-.body.queue-hidden > .queue + .resizer { display: none; }
+.body.queue-hidden > .queue + .resizer,
+.body.queue-hidden > .keep-alive > .queue,
+.body.queue-hidden > .keep-alive > .queue + .resizer { display: none; }
+/* A view kept mounted while another is showing (the workspace). */
+.keep-alive { display: contents; }
+.keep-alive.hidden { display: none; }
 .queue-head { padding: 12px 12px 10px; flex: none; }
 .queue-title-row { display: flex; align-items: center; gap: 8px; }
 .queue-head h1 {
@@ -450,6 +455,15 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
   font-size: 11px; color: var(--meta);
 }
 .row-age { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+/* Which repository a pull request is in (item 85). Beside the age rather than
+   in the title line, so it costs the title nothing; it gives way before the
+   state does, and in a one-line merged row it gives way before the title. */
+.row-repo {
+  min-width: 0; max-width: 45%; flex: 0 1 auto;
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.row-top .row-repo { max-width: 32%; flex-shrink: 2; }
 /* Sessions and quick-model jobs: one line each — state dot, name, cost, age —
    so a long list of running work reads at a glance. */
 .row.one-line { padding: 6px 10px; }
@@ -1058,20 +1072,69 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   margin: 0; font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--muted);
 }
 
-/* A screenshot enlarged over everything, including the viewer sheet itself. */
+/* A screenshot enlarged over everything, including the viewer sheet itself.
+ * The picture takes the room; a caption bar under it says which one it is,
+ * when it was taken, and how to move on. */
 .lightbox-backdrop {
-  position: fixed; inset: 0; background: rgba(6, 7, 9, 0.85); z-index: 20;
-  display: flex; align-items: center; justify-content: center; padding: 48px;
+  position: fixed; inset: 0; background: rgba(6, 7, 9, 0.88); z-index: 20;
+  display: flex; flex-direction: column; padding: 32px 32px 20px; gap: 14px;
 }
-.lightbox-backdrop img { max-width: 100%; max-height: 100%; border-radius: 8px; display: block; }
+.lightbox-stage {
+  flex: 1; min-height: 0; position: relative;
+  display: flex; align-items: center; justify-content: center; padding: 0 64px;
+}
+.lightbox-stage img {
+  max-width: 100%; max-height: 100%; border-radius: 8px; display: block;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
 .lightbox-nav {
   position: absolute; top: 50%; transform: translateY(-50%);
   width: 44px; height: 44px; border-radius: 50%; border: 0;
-  background: rgba(255, 255, 255, 0.08); color: var(--title); font-size: 22px; line-height: 1;
+  background: rgba(255, 255, 255, 0.08); color: #f4f1ea; font-size: 22px; line-height: 1;
 }
 .lightbox-nav:hover { background: rgba(255, 255, 255, 0.16); }
-.lightbox-nav.prev { left: 16px; }
-.lightbox-nav.next { right: 16px; }
+.lightbox-nav.prev { left: 0; }
+.lightbox-nav.next { right: 0; }
+/* Always on the dark backdrop, so light-coloured text in both themes. */
+.lightbox-caption {
+  flex: none; align-self: center; width: min(100%, 1100px);
+  display: flex; align-items: center; gap: 14px; padding: 8px 8px 8px 16px;
+  background: rgba(30, 31, 34, 0.92); border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px; color: #c9c5bc; font-size: 12px;
+}
+.lightbox-name {
+  font-family: var(--mono); font-size: 11.5px; color: #f4f1ea;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.lightbox-time { font-family: var(--mono); font-size: 11.5px; color: #a8a49b; flex: none; }
+.lightbox-count { font-family: var(--mono); font-size: 11px; color: #a8a49b; flex: none; }
+.lightbox-keys { font-size: 11px; color: #7d7a73; flex: none; white-space: nowrap; }
+.lightbox-keys kbd {
+  font-family: var(--mono); font-size: 10px; padding: 0 4px; margin-right: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 4px; color: #c9c5bc;
+}
+.lightbox-caption .ghost.lightbox-finder {
+  padding: 3px 10px; font-size: 11.5px; color: #e8e4dc; border-color: rgba(255, 255, 255, 0.16);
+}
+.lightbox-caption .icon-button { color: #a8a49b; flex: none; }
+.lightbox-caption .icon-button:hover { color: #f4f1ea; background: rgba(255, 255, 255, 0.08); }
+@media (max-width: 760px) { .lightbox-keys { display: none; } }
+
+/* A thumbnail with its name and time under it. */
+.run-section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.run-section-head h3 { margin: 0 !important; }
+.run-section-head .link { font-size: 11.5px; }
+.run-section-count { font-family: var(--mono); color: var(--dim); letter-spacing: 0; margin-left: 4px; }
+.run-shot-item { margin: 0; min-width: 0; }
+/* The figure is the grid cell now, so the button has to fill it itself, or a
+ * small image shrinks its thumbnail to nothing. */
+.run-shot-item .run-shot { width: 100%; }
+.run-shot-item figcaption {
+  display: flex; gap: 8px; align-items: baseline; margin-top: 6px; padding: 0 2px;
+  font-family: var(--mono); font-size: 10.5px;
+}
+.run-shot-name { color: var(--meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.run-shot-time { color: var(--dim); flex: none; }
 
 .run-controls label { flex: 1; }
 /* Model: a dropdown (or free text) with ↻ beside it, and one line of state under. */
@@ -1310,9 +1373,10 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 }
 .ws-row:hover { background: rgba(255, 255, 255, 0.03); }
 .ws-main {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
-  background: none; border: 0; padding: 6px 4px 6px 8px; text-align: left;
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
+  background: none; border: 0; padding: 6px 4px 6px 6px; text-align: left;
 }
+.ws-main svg { flex: none; color: var(--dim); }
 .ws-title {
   font-family: var(--display); font-size: 12.5px; font-weight: 600;
   color: var(--title); letter-spacing: -0.01em;
@@ -1332,8 +1396,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 /* Remove-from-workspace. Deliberately quiet until you go looking for it: it is
  * next to a tree people click through quickly, and although it deletes nothing
  * it is still not something to hit by accident. */
-.icon-button.remove { color: var(--dim); opacity: 0; }
-.repo:hover .icon-button.remove, .icon-button.remove:focus-visible { opacity: 1; }
+.icon-button.remove { color: var(--dim); }
 .icon-button.remove:hover { color: var(--blocked-bright); background: rgba(196, 99, 90, 0.12); }
 
 /* --- The overflow menu --- */
@@ -1402,21 +1465,29 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 
 /* --- A repository is a row --- */
 
-.ws-root { margin-bottom: 2px; }
-.repo { display: flex; align-items: center; border-radius: 7px; }
+.ws-root { margin-bottom: 1px; }
+.repo { display: flex; align-items: center; border-radius: 7px; padding-right: 4px; }
 .repo:hover { background: rgba(255, 255, 255, 0.03); }
 .repo.open { background: var(--wash); }
+/* The chevron must not shrink. It used to, by however much a long name
+ * needed, so every repository's name started at a different x. */
 .repo-main {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
-  background: none; border: 0; padding: 6px 4px 6px 8px; text-align: left;
+  flex: 1; min-width: 0; height: 28px; display: flex; align-items: center; gap: 6px;
+  background: none; border: 0; padding: 0 6px; text-align: left;
 }
+.repo-main svg { flex: none; color: var(--dim); }
 .repo-name {
   font-family: var(--display); font-size: 12px; font-weight: 600; color: var(--title);
-  letter-spacing: -0.01em; flex: none;
+  letter-spacing: -0.01em;
+  /* The name wins over the branch: the branch gives up all its room first,
+   * and the name only truncates once it alone would pass 70% of the row. */
+  flex: none; max-width: 70%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.repo-owner { font-weight: 500; color: var(--muted); }
 .repo-branch {
-  font-family: var(--mono); font-size: 10px; color: var(--meta);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  font-family: var(--mono); font-size: 10px; color: var(--dim);
+  flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
 .repo-ab { font-family: var(--mono); font-size: 10px; color: var(--clay); flex: none; }
 .repo-pill {
@@ -1426,7 +1497,27 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
  * and rule 3 keeps red for something that failed. */
 .repo-pill.dirty { background: rgba(208, 160, 90, 0.16); color: var(--running); }
 .repo-pill.quiet-pill { color: var(--dim); }
+.repo-main .dot { flex: none; margin: 0 4px; opacity: 0.8; }
+/* Terminal and remove appear on hover and take no space until then, so the
+ * branch gets the room. The row is 28px, taller than the 24px buttons, so
+ * revealing them never changes its height. */
+.repo .icon-button.reveal { display: none; flex: none; }
+.repo:hover .icon-button.reveal, .repo:has(:focus-visible) .icon-button.reveal { display: grid; }
 .repo-body { padding: 2px 0 8px; }
+
+/* Reordering the workspace's folders: the same straight clay line between
+ * rows as the Sessions list, and the row being moved steps back. The row
+ * heads aren't text to select, or a drag would highlight half a name. */
+.ws-root.reorderable { position: relative; }
+.ws-root.reorderable > .repo { user-select: none; -webkit-user-select: none; }
+.ws-root.drop-before::after, .ws-root.drop-after::after {
+  content: ''; position: absolute; left: 6px; right: 6px; height: 2px;
+  border-radius: 1px; background: var(--clay); pointer-events: none;
+}
+.ws-root.drop-before::after { top: -2px; }
+.ws-root.drop-after::after { bottom: -2px; }
+.ws-root.dragged > .repo { opacity: 0.5; }
+body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-select: none; }
 
 /* --- The tree --- */
 
@@ -1645,6 +1736,32 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
   border-bottom: 1px solid var(--hair); font-size: 11.5px; color: var(--meta);
 }
 .diff-side { font-weight: 500; color: var(--secondary); }
+/* The diff head's own controls: a toggle and a way out to the editor. */
+.diff-head-rule { width: 1px; height: 14px; background: var(--hair-strong); }
+.diff-toggle {
+  background: none; border: 1px solid transparent; border-radius: 6px; padding: 2px 8px;
+  color: var(--meta); font-size: 11px;
+}
+.diff-toggle:hover { color: var(--title); }
+.diff-toggle.on { color: var(--title); background: var(--wash); border-color: var(--hair-strong); }
+.ghost.diff-open { padding: 2px 9px; font-size: 11px; }
+.diff-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; }
+.diff-empty .quiet { margin: 0; }
+.diff-empty-note { margin: 0 0 6px; max-width: 340px; font-size: 11.5px; color: var(--dim); line-height: 1.5; }
+
+/* The editor's change bars, VS Code's quick diff: green added, blue changed,
+ * a red notch where lines were removed — the diff's own colours. */
+.cm-change-gutter { width: 5px; }
+.cm-change-gutter .cm-gutterElement { padding: 0 !important; }
+.cm-change-bar { width: 3px; height: 100%; margin-left: 1px; }
+.cm-change-bar.added { background: var(--pass); }
+.cm-change-bar.modified { background: var(--waiting); }
+.cm-change-bar.deleted {
+  height: 0; margin-left: 0; margin-top: -4px; width: 0;
+  border-left: 5px solid var(--blocked-bright);
+  border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+}
+.status-changes { color: var(--waiting); }
 .diff-rename { color: var(--waiting); font-size: 11px; }
 .diff-rename .mono { font-family: var(--mono); }
 .hunk { border-bottom: 1px solid var(--hair); }
@@ -2143,3 +2260,134 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .card-toggle:hover, .card-toggle:hover svg { color: var(--title); }
 .card-toggle:focus-visible { outline: 1px solid var(--clay); outline-offset: 2px; border-radius: 3px; }
 .detail section.quick-card.folded, .detail section.agent-report.folded { padding-bottom: 12px; }
+
+/* --- Error card (item 83) ----------------------------------------------------
+   What a pane shows instead of itself when it throws, so one broken pull
+   request no longer blanks the whole window. A crash is a failure, so the
+   dot is red (rule 3); the error itself is machine text, so it is mono. */
+.error-card {
+  max-width: var(--measure); margin: 48px 28px; padding: 20px 22px;
+  background: var(--card); border: 1px solid var(--hair); border-radius: 12px;
+}
+.error-card.whole { margin: 18vh auto; }
+.error-card h2 {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 8px;
+  font-family: var(--display); font-size: 15px; font-weight: 600; color: var(--title);
+}
+.error-card h2::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--blocked-bright);
+}
+.error-card-note { margin: 0 0 12px; font-size: 12.5px; color: var(--prose); line-height: 1.5; }
+.error-card-message {
+  margin: 0 0 14px; padding: 10px 12px; border-radius: 8px; background: var(--editor);
+  font-family: var(--mono); font-size: 11.5px; color: var(--body);
+  white-space: pre-wrap; word-break: break-word;
+}
+.error-card-actions { display: flex; align-items: center; gap: 8px; }
+
+/* --- Activity inbox and toasts (item 86) ------------------------------------
+   Unread is a count on the rail, in the "waiting" blue — it's a state, not an
+   action, so not clay (rule 2) and not red (nothing failed, rule 3). Read
+   events dim like merged history, so the unread ones are what the eye finds. */
+.rail-count {
+  position: absolute; top: 3px; right: 1px;
+  min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px;
+  display: grid; place-items: center;
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600; line-height: 1;
+  color: var(--rail); background: var(--waiting);
+}
+.activity-day {
+  margin: 14px 4px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--meta);
+}
+.activity-day:first-child { margin-top: 4px; }
+.activity-row .row-num { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+.activity-row.read .row-num,
+.activity-row.read .row-title,
+.activity-row.read .row-state { color: var(--meta); opacity: 0.8; }
+.activity-row:not(.read) .row-title { color: var(--strong); }
+.activity-who { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+
+/* Above the status bar, bottom right; newest on top. The card surface, a
+   hairline and a soft shadow — the one place something floats over content.
+   Over the panes (6) but under sheets (10) and the lightbox (20): a toast
+   must never cover a form you're filling in. */
+.toasts {
+  position: fixed; right: 16px; bottom: 36px; z-index: 8;
+  display: flex; flex-direction: column; gap: 8px; width: 320px;
+}
+.toast {
+  padding: 10px 12px 10px; border-radius: 10px;
+  background: var(--card); border: 1px solid var(--hair-strong);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  animation: toast-in 160ms ease-out;
+}
+@keyframes toast-in { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+.toast-head { display: flex; align-items: center; gap: 7px; }
+.toast-kind { font-size: 12px; font-weight: 600; color: var(--title); }
+.toast-head .icon-button { width: 20px; height: 20px; font-size: 11px; }
+.toast-subject { margin: 4px 0 2px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.toast-title {
+  font-size: 12.5px; color: var(--prose); line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.toast-actions { display: flex; align-items: center; margin-top: 8px; }
+:root[data-theme='light'] .toast { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); }
+.toast-more { align-self: flex-end; font-size: 11.5px; }
+
+/* --- Dictation (item 88) ------------------------------------------------------
+   A pill bottom-centre, above the status bar: live words while you speak.
+   Listening is amber, the colour of something running (rule 3: red only if it
+   failed). Over panes but under sheets (like toasts) — except the run sheet's
+   own prompt is dictated into from inside a sheet, so the pill rides above
+   sheets too; it never takes focus, so it can't get in the way of one. */
+.dictation-pill {
+  position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 30;
+  width: min(560px, calc(100vw - 48px)); padding: 10px 12px;
+  background: var(--card); border: 1px solid var(--hair-strong); border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
+}
+:root[data-theme='light'] .dictation-pill { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14); }
+.dictation-head { display: flex; align-items: center; gap: 8px; color: var(--running); }
+.dictation-pill.done .dictation-head, .dictation-pill.error .dictation-head { color: var(--meta); }
+.dictation-state { font-size: 12px; font-weight: 600; color: var(--title); }
+.dictation-meter { display: flex; align-items: center; gap: 2px; height: 16px; }
+.dictation-meter span { width: 3px; border-radius: 2px; background: var(--running); transition: height 60ms linear; }
+@media (prefers-reduced-motion: reduce) { .dictation-meter span { transition: none; } }
+.dictation-locale { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.dictation-head .icon-button { width: 20px; height: 20px; font-size: 11px; }
+.dictation-text {
+  margin-top: 8px; max-height: 5.4em; overflow: hidden; display: flex; flex-direction: column-reverse;
+  font-size: 13px; line-height: 1.5; color: var(--prose);
+}
+.dictation-text.quiet-text { color: var(--dim); }
+.dictation-hint { margin-top: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+.dictation-error { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 12.5px; color: var(--prose); }
+.dictation-error span { flex: 1; }
+
+/* The run sheet prompt's mic, in the field's top-right corner. */
+.prompt-field { position: relative; display: block; }
+.prompt-field .dictate-button { position: absolute; top: 6px; right: 10px; color: var(--muted); }
+.prompt-field .dictate-button:hover { color: var(--title); }
+.prompt-field textarea { padding-right: 36px; }
+.settings-field { display: flex; flex-direction: column; gap: 5px; margin: 6px 0 8px; max-width: 420px; }
+.settings-field span { color: var(--muted); font-size: 11.5px; }
+.settings-field select {
+  background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 8px;
+  padding: 7px 10px; color: var(--prose); font: inherit; font-size: 12.5px;
+}
+.dictation-permissions { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; font-size: 12px; color: var(--meta); }
+.dictation-permissions strong { font-weight: 500; color: var(--prose); }
+.dictation-permissions .link { margin-left: 8px; }
+
+/* Reordering the rail (item 89): the same clay line as Sessions and the
+   workspace's folders, between icons, and the icon being moved steps back.
+   `::after`, because `::before` is the active tab's clay bar. */
+.rail-item.drop-before::after, .rail-item.drop-after::after {
+  content: ''; position: absolute; left: 4px; right: 4px; height: 2px;
+  border-radius: 1px; background: var(--clay); pointer-events: none;
+}
+.rail-item.drop-before::after { top: -3px; }
+.rail-item.drop-after::after { bottom: -3px; }
+.rail-item.dragged { opacity: 0.45; }

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useMenuDismiss } from './menuDismiss';
-import { DEFAULT_PULL_SORT, formatAge, isBlocked, PULL_SORTS, sortPulls, type PullSort } from '@baton/core';
+import { DEFAULT_PULL_SORT, formatAge, isBlocked, moveBy, moveItem, PULL_SORTS, sortPulls, type PullSort } from '@baton/core';
 import type {
   JiraIssue, PolledProvider, PullSummary, RunKind, RunTarget, SentryFrame, SentryIssue,
   SessionInfo, Snapshot, ThemeChoice
@@ -16,22 +16,37 @@ import { RunningAgentsPane, RunningAgentsRow, idleAgents, useRunningAgents } fro
 import { Resizer } from './Resizer';
 import { useTerminalFontSize } from './terminalFontSize';
 import { findSubject, type Selection, SessionName } from './sessionSubject';
+import { ErrorBoundary } from './ErrorBoundary';
+import { ActivityList, ActivityToasts, useActivity } from './Activity';
+import { DictationLayer } from './Dictation';
+import { useRailOrder } from './railOrder';
+import type { ActivityEvent } from './types';
+
+/** What the detail pane is showing, in words — for its error card and the log (item 83). */
+function paneWhere(selected: Selection): string {
+  if (selected.pull) return `pull request ${selected.pull.repo}#${selected.pull.number}`;
+  if (selected.issue) return `ticket ${selected.issue.key}`;
+  if (selected.sentry) return `Sentry issue ${selected.sentry.shortId}`;
+  return 'the detail pane';
+}
 import {
   activateTab, detachSession, focusSession, moveSession, pruneTree, resizeSplit,
   type DropZone, type PaneTree
 } from './paneTree';
 import { PaneView, type DragHandlers, type DragState } from './PaneView';
 import {
-  PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon, SentryIcon, AgentsIcon,
+  PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon, SentryIcon, AgentsIcon, BellIcon,
   RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon, CloseIcon
 } from './icons';
 
-type ViewId = 'pulls' | 'tickets' | 'sentry' | 'workspace' | 'sessions' | 'agents';
+type ViewId = 'pulls' | 'tickets' | 'sentry' | 'activity' | 'workspace' | 'sessions' | 'agents';
 
 const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JSX.Element }[] = [
   { id: 'pulls', label: 'Pull requests', icon: PullRequestIcon },
   { id: 'tickets', label: 'Tickets', icon: TicketIcon },
   { id: 'sentry', label: 'Sentry errors', icon: SentryIcon },
+  // Item 86: what happened to you — review requests, approvals, new tickets.
+  { id: 'activity', label: 'Activity', icon: BellIcon },
   { id: 'workspace', label: 'Workspace', icon: WorkspaceIcon },
   { id: 'sessions', label: 'Sessions', icon: TerminalIcon },
   // Running agents and token usage used to sit on top of the Sessions list;
@@ -39,6 +54,8 @@ const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JS
   // are about to pick, so they get their own tab and Sessions stays a list.
   { id: 'agents', label: 'Agents and usage', icon: AgentsIcon }
 ];
+
+const VIEW_IDS = VIEWS.map((v) => v.id);
 
 const EMPTY: Snapshot = {
   at: 0, viewer: '', blocked: [], mine: [], reviewRequested: [],
@@ -617,6 +634,10 @@ export function App() {
   // back, since that view's list is what you went there for.
   const [queueHidden, setQueueHidden] = useState(false);
   useEffect(() => setQueueHidden(false), [view]);
+  // The workspace view is mounted on its first visit and kept from then on;
+  // see `keep-alive` below. Not before: opening Baton must not scan folders.
+  const [workspaceSeen, setWorkspaceSeen] = useState(false);
+  useEffect(() => { if (view === 'workspace') setWorkspaceSeen(true); }, [view]);
 
   // Cmd+F puts you in the sidebar's filter — what the ⌘F badge in it promises.
   // Left alone inside the code editor, which has its own find, and on views
@@ -747,10 +768,99 @@ export function App() {
 
   const refresh = useCallback(() => void window.baton.refresh(), []);
 
+  // --- Rail order (item 89) -------------------------------------------------
+  // Drag an icon up or down, or ⌥↑ / ⌥↓ on a focused one; the same clay line
+  // and dimmed item as reordering Sessions and the workspace's folders.
+  const [railOrder, setRailOrder] = useRailOrder(VIEW_IDS);
+  const [railDrag, setRailDrag] = useState<{ id: ViewId; moving: boolean; target?: ViewId; after?: boolean }>();
+  const railDragged = useRef(false);
+
+  const moveRailItem = useCallback((id: ViewId, delta: -1 | 1) => {
+    setRailOrder(moveBy(railOrder, id, delta));
+    // Moving a node can drop its focus; keep it, so ⌥↓ can be pressed again.
+    requestAnimationFrame(() => (document.querySelector(`.rail-item[data-view="${id}"]`) as HTMLElement | null)?.focus());
+  }, [railOrder, setRailOrder]);
+
+  const startRailDrag = useCallback((event: ReactPointerEvent, id: ViewId) => {
+    if (event.button !== 0) return;
+    const startY = event.clientY;
+    let moving = false;
+    let target: { id: ViewId; after: boolean } | undefined;
+    railDragged.current = false;
+    const move = (e: PointerEvent) => {
+      if (!moving && Math.abs(e.clientY - startY) < 4) return;
+      if (!moving) {
+        moving = true;
+        document.body.classList.add('dragging-row');
+      }
+      const over = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)
+        ?.closest('.rail-item[data-view]') as HTMLElement | null;
+      const overId = over?.dataset['view'] as ViewId | undefined;
+      if (over && overId && overId !== id) {
+        const rect = over.getBoundingClientRect();
+        target = { id: overId, after: e.clientY > rect.top + rect.height / 2 };
+      } else if (!over) {
+        target = undefined;
+      }
+      setRailDrag({ id, moving: true, ...(target ? { target: target.id, after: target.after } : {}) });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.classList.remove('dragging-row');
+      if (moving) {
+        railDragged.current = true;
+        // Cleared after the click this pointerup is about to cause.
+        setTimeout(() => { railDragged.current = false; }, 0);
+        if (target) setRailOrder(moveItem(railOrder, id, target.id, target.after));
+      }
+      setRailDrag(undefined);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }, [railOrder, setRailOrder]);
+
+  // --- Activity inbox (item 86) ---------------------------------------------
+  const activity = useActivity();
+  const [activityId, setActivityId] = useState<string>();
+  /** A subject to open in Activity once the snapshot can find it ('' = just the tab). */
+  const [activityRequest, setActivityRequest] = useState<string>();
+
+  /** An event, clicked in the inbox or on a toast: read it and show it beside the inbox. */
+  const openEvent = useCallback((event: ActivityEvent) => {
+    if (!event.read) activity.markRead([event.id]);
+    setView('activity');
+    setActivityId(event.id);
+    const match = findSubject(event.subject, snapshot);
+    if (match) setSelected(match);
+    // Merged and aged out, or resolved: not in any list Baton holds any more.
+    else void window.baton.openExternal(event.url);
+  }, [activity, snapshot]);
+
+  // A clicked macOS notification, now or from before this window existed.
+  useEffect(() => {
+    if (activity.launchOpen !== undefined) setActivityRequest(activity.launchOpen);
+  }, [activity.launchOpen]);
+  useEffect(() => window.baton.onActivityOpen((subject) => setActivityRequest(subject)), []);
+  useEffect(() => {
+    if (activityRequest === undefined) return;
+    setView('activity');
+    if (activityRequest === '') {
+      setActivityRequest(undefined);
+      return;
+    }
+    const event = activity.inbox.find((e) => e.subject === activityRequest);
+    if (event && snapshot.at > 0) {
+      setActivityRequest(undefined);
+      openEvent(event);
+    }
+  }, [activityRequest, activity.inbox, snapshot.at, openEvent]);
+
   const counts = useMemo(() => ({
     pulls: snapshot.blocked.length + snapshot.reviewRequested.length,
     tickets: snapshot.tickets.length,
     sentry: snapshot.sentryIssues.length,
+    activity: 0,
     workspace: 0,
     sessions: sessions.filter((s) => s.running).length,
     agents: 0
@@ -970,23 +1080,41 @@ export function App() {
       ) : (
         <div className={queueHidden ? 'body queue-hidden' : 'body'}>
           <nav className="rail" aria-label="Sections">
-            {VIEWS.map((v) => {
+            {railOrder.map((id) => VIEWS.find((x) => x.id === id)!).map((v) => {
               const Icon = v.icon;
               const n = counts[v.id];
+              const drop = railDrag?.target === v.id ? (railDrag.after ? ' drop-after' : ' drop-before') : '';
               return (
                 <button
                   key={v.id}
                   type="button"
+                  data-view={v.id}
                   aria-label={v.label}
                   aria-current={v.id === view ? 'page' : undefined}
                   aria-expanded={v.id === view ? !queueHidden : undefined}
-                  title={v.id === view ? (queueHidden ? `Show ${v.label}` : `Hide ${v.label}`) : v.label}
-                  className={v.id === view ? 'rail-item active' : 'rail-item'}
-                  onClick={() => (v.id === view ? setQueueHidden((hidden) => !hidden) : setView(v.id))}
+                  title={`${v.id === view ? (queueHidden ? `Show ${v.label}` : `Hide ${v.label}`) : v.label} — drag or ⌥↑/⌥↓ to reorder`}
+                  className={`rail-item${v.id === view ? ' active' : ''}${railDrag?.id === v.id && railDrag.moving ? ' dragged' : ''}${drop}`}
+                  onPointerDown={(e) => startRailDrag(e, v.id)}
+                  onKeyDown={(e) => {
+                    if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+                    e.preventDefault();
+                    moveRailItem(v.id, e.key === 'ArrowUp' ? -1 : 1);
+                  }}
+                  onClick={() => {
+                    // The click that ends a drag isn't a click on the tab.
+                    if (railDragged.current) return;
+                    if (v.id === view) setQueueHidden((hidden) => !hidden);
+                    else setView(v.id);
+                  }}
                 >
                   <Icon />
                   {v.id === 'pulls' && n > 0 && <span className="rail-pip" />}
                   {v.id === 'sessions' && n > 0 && <span className="rail-pip live" />}
+                  {v.id === 'activity' && activity.unread > 0 && (
+                    <span className="rail-count" title={`${activity.unread} unread`}>
+                      {activity.unread > 99 ? '99+' : activity.unread}
+                    </span>
+                  )}
                   {v.id === 'agents' && idleCount > 0 && (
                     <span className="rail-pip idle" title={`${idleCount} idle agent${idleCount === 1 ? '' : 's'}`} />
                   )}
@@ -1002,6 +1130,15 @@ export function App() {
             </button>
           </nav>
 
+          {/* Mounted on first visit, then only hidden, so it keeps its
+              state across rail switches. `display: contents` leaves its
+              aside and main as the body's own flex items. */}
+          {workspaceSeen && (
+            <div className={view === 'workspace' ? 'keep-alive' : 'keep-alive hidden'}>
+              <WorkspaceView onTerminal={openTerminal} visible={view === 'workspace'} />
+            </div>
+          )}
+
           {view === 'sessions' ? (
             <Sessions
               sessions={sessions} sessionsReady={sessionsReady} active={activeSession} onSelect={setActiveSession}
@@ -1015,9 +1152,7 @@ export function App() {
               snapshot={snapshot} onOpenSubject={openSubject}
               onOpenSession={(id) => { setActiveSession(id); setView('sessions'); }}
             />
-          ) : view === 'workspace' ? (
-            <WorkspaceView onTerminal={openTerminal} />
-          ) : (
+          ) : view === 'workspace' ? null : (
             <>
               <aside className="queue" aria-label={current.label}>
                 <div className="queue-head">
@@ -1044,6 +1179,12 @@ export function App() {
                         />
                         <PullSortMenu value={pullSort} onChange={setPullSort} />
                       </>
+                    ) : view === 'activity' ? (
+                      activity.unread > 0 && (
+                        <button type="button" className="link" onClick={() => activity.markRead('all')}>
+                          Mark all read
+                        </button>
+                      )
                     ) : null}
                   </div>
                   <div className="search">
@@ -1058,7 +1199,11 @@ export function App() {
                 </div>
 
                 <div className="queue-list">
-                  {view === 'sentry' ? (
+                  {view === 'activity' ? (
+                    <ActivityList
+                      inbox={activity.inbox} filter={filter} selectedId={activityId} onOpen={openEvent}
+                    />
+                  ) : view === 'sentry' ? (
                     sentryIssues.length === 0 ? (
                       <p className="quiet">{filter ? 'No errors match.' : 'No Sentry errors.'}</p>
                     ) : (
@@ -1189,6 +1334,10 @@ export function App() {
               <Resizer />
 
               <main className="pane">
+                <ErrorBoundary
+                  where={paneWhere(selected)}
+                  resetKey={paneWhere(selected)}
+                >
                 {selected.pull ? (
                   <PullPane
                     pull={selected.pull}
@@ -1223,6 +1372,7 @@ export function App() {
                     Pick a row to see it, and to hand it to an agent.
                   </p>
                 )}
+                </ErrorBoundary>
               </main>
             </>
           )}
@@ -1230,6 +1380,8 @@ export function App() {
       )}
 
       <StatusBar snapshot={snapshot} sessions={sessions} onView={setView} />
+      <ActivityToasts onOpen={openEvent} onShowAll={() => setView('activity')} />
+      <DictationLayer />
 
       {connecting && (
         <Settings

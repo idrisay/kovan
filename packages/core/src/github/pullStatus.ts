@@ -36,6 +36,15 @@ export interface PullSummary {
   mergedAt?: string;
   /** The branch it merges from — where a ticket key usually is (`fix/ACME-2409-…`). */
   headRef?: string;
+  /**
+   * Every comment on it: the conversation's plus those in review threads on
+   * the code. Only rises, so a rise is "somebody said something" (item 86).
+   * Absent when the query didn't ask.
+   */
+  commentCount?: number;
+  /** Who wrote the most recent of those, and when — so your own comment isn't news to you. */
+  lastCommenter?: string;
+  lastCommentAt?: string;
 }
 
 export type PullFlagId =
@@ -47,13 +56,17 @@ export type PullFlagId =
   | 'approved'
   | 'checks-pending'
   | 'awaiting-review'
-  | 'draft';
+  | 'draft'
+  /** None of the above: open, with nothing to say about it. Only `primaryFlag` returns it. */
+  | 'open';
 
 export interface PullFlag {
   id: PullFlagId;
   label: string;
   icon: string;
   color?: string;
+  /** What the label means, in a sentence — the tooltip, for the ones a word can't explain. */
+  hint?: string;
 }
 
 /**
@@ -128,11 +141,15 @@ export function pullFlags(pull: PullState): PullFlag[] {
     flags.push({ id: 'checks-failing', label: 'Checks failing', icon: 'error', color: 'charts.red' });
   }
   if (pull.unresolvedThreads > 0) {
+    const n = pull.unresolvedThreads;
     flags.push({
       id: 'unresolved',
-      label: `${pull.unresolvedThreads} unresolved`,
+      label: `${n} unresolved ${n === 1 ? 'comment' : 'comments'}`,
       icon: 'comment-unresolved',
-      color: 'charts.orange'
+      color: 'charts.orange',
+      hint:
+        `${n === 1 ? 'A review comment thread' : `${n} review comment threads`} on the code that ` +
+        `nobody has marked resolved yet. Reply or fix, then resolve ${n === 1 ? 'it' : 'them'} on GitHub.`
     });
   }
   if (pull.reviewDecision === 'approved') {
@@ -157,14 +174,23 @@ export function pullFlags(pull: PullState): PullFlag[] {
   return flags;
 }
 
+/**
+ * Its own id, not a borrowed one. It used to be `awaiting-review`, which would
+ * colour a pull request nobody has been asked to review as if somebody had.
+ */
 const PLAIN_OPEN: PullFlag = {
-  id: 'awaiting-review',
+  id: 'open',
   label: 'Open',
   icon: 'git-pull-request',
-  color: 'charts.green'
+  hint: 'Open, with no review decision, no checks and no conflicts to report.'
 };
 
-/** The flag that drives the row icon. Never undefined, so callers stay simple. */
+/**
+ * The flag that drives the row icon and the detail pane's pill. Never
+ * undefined, so callers stay simple — use this, not `pullFlags(pull)[0]`: a
+ * pull request with no review rule, no checks and no conflicts has no flags at
+ * all, and indexing into that empty list is what blanked the whole window.
+ */
 export function primaryFlag(pull: PullState): PullFlag {
   return pullFlags(pull)[0] ?? PLAIN_OPEN;
 }
@@ -335,6 +361,36 @@ export function checksFromRollup(value: string | null | undefined): CheckRollup 
   }
 }
 
+/** `comments(last: 1) { totalCount nodes { author createdAt } }` */
+export interface ApiCommentPage {
+  totalCount?: number;
+  nodes?: ({ author?: { login?: string } | null; createdAt?: string } | null)[] | null;
+}
+
+/**
+ * How many comments a pull request has in all, and the newest one's author,
+ * from the conversation page and every review thread's page. Undefined when
+ * the query didn't ask for comments at all.
+ */
+function commentsOf(node: ApiPullNode): Pick<PullSummary, 'commentCount' | 'lastCommenter' | 'lastCommentAt'> {
+  const pages = [node.comments, ...(node.reviewThreads?.nodes ?? []).map((t) => t?.comments)]
+    .filter((page): page is ApiCommentPage => Boolean(page));
+  if (!node.comments) return {};
+  let total = 0;
+  let last: { author: string; at: string } | undefined;
+  for (const page of pages) {
+    total += page.totalCount ?? 0;
+    const newest = page.nodes?.[page.nodes.length - 1];
+    if (newest?.createdAt && (!last || newest.createdAt > last.at)) {
+      last = { author: newest.author?.login ?? '', at: newest.createdAt };
+    }
+  }
+  return {
+    commentCount: total,
+    ...(last ? { lastCommenter: last.author, lastCommentAt: last.at } : {})
+  };
+}
+
 /** One `PullRequest` node as the GraphQL query asks for it. */
 export interface ApiPullNode {
   number: number;
@@ -358,7 +414,10 @@ export interface ApiPullNode {
   reviewRequests?: {
     nodes?: ({ requestedReviewer?: { login?: string } | null } | null)[] | null;
   } | null;
-  reviewThreads?: { nodes?: ({ isResolved?: boolean } | null)[] | null } | null;
+  reviewThreads?: {
+    nodes?: ({ isResolved?: boolean; comments?: ApiCommentPage | null } | null)[] | null;
+  } | null;
+  comments?: ApiCommentPage | null;
   commits?: {
     nodes?: ({ commit?: { statusCheckRollup?: { state?: string } | null } } | null)[] | null;
   } | null;
@@ -388,7 +447,8 @@ export function summaryFromApi(node: ApiPullNode): PullSummary {
     // explicit `mergedAt: undefined` survives a structuredClone over IPC as a
     // present key, which `'mergedAt' in pull` would then believe.
     ...(node.mergedAt ? { mergedAt: node.mergedAt } : {}),
-    ...(node.headRefName ? { headRef: node.headRefName } : {})
+    ...(node.headRefName ? { headRef: node.headRefName } : {}),
+    ...commentsOf(node)
   };
 }
 

@@ -26,12 +26,20 @@ export function Diff({
   path,
   side,
   from,
-  diff
+  diff,
+  whole,
+  onWhole,
+  onOpenFile
 }: {
   path: string;
   side: DiffSide;
   from?: string;
   diff: FileDiff;
+  /** Every line of the file, not just three around each change (VS Code's default view). */
+  whole: boolean;
+  onWhole: () => void;
+  /** Opens the file itself in the editor; absent when there is nothing to open. */
+  onOpenFile?: () => void;
 }) {
   /**
    * Highlighting runs per hunk, not per file.
@@ -66,7 +74,20 @@ export function Diff({
     return <p className="quiet centred">Binary file — no textual diff.</p>;
   }
   if (diff.empty) {
-    return <p className="quiet centred">No changes in this file.</p>;
+    // Said plainly, because the list beside it may still say "modified" for a
+    // moment: git was just asked again, and this is its answer now.
+    return (
+      <div className="diff-empty centred">
+        <p className="quiet">
+          No {side === 'staged' ? 'staged ' : ''}changes in this file right now.
+        </p>
+        <p className="diff-empty-note">
+          It was probably committed, stashed or reverted after the list was read.
+          The list has been refreshed.
+        </p>
+        {onOpenFile && <button className="ghost" onClick={onOpenFile}>Open file</button>}
+      </div>
+    );
   }
 
   return (
@@ -81,6 +102,19 @@ export function Diff({
         <span className="spacer" />
         <span className="adds">+{diff.additions}</span>
         <span className="dels">−{diff.deletions}</span>
+        <span className="diff-head-rule" />
+        <button
+          type="button" className={whole ? 'diff-toggle on' : 'diff-toggle'}
+          aria-pressed={whole} onClick={onWhole}
+          title={whole ? 'Show only the changed parts' : 'Show every line of the file'}
+        >
+          Whole file
+        </button>
+        {onOpenFile && (
+          <button type="button" className="ghost diff-open" onClick={onOpenFile} title="Open this file in the editor">
+            Open file
+          </button>
+        )}
       </div>
 
       {rendered.map((hunk, h) => (

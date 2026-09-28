@@ -85,7 +85,10 @@ const PULL_FIELDS = `
   viewerLatestReview { state }
   latestOpinionatedReviews(first: 20) { nodes { state author { login } } }
   reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
-  reviewThreads(first: 100) { nodes { isResolved } }
+  reviewThreads(first: 100) {
+    nodes { isResolved comments(last: 1) { totalCount nodes { author { login } createdAt } } }
+  }
+  comments(last: 1) { totalCount nodes { author { login } createdAt } }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
 `;
 

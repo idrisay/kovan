@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Embedded in the baton-dictate binary (__TEXT,__info_plist). Speech and
+     AVFoundation refuse to run without these usage descriptions, and a bare
+     command-line tool has no bundle to carry them. Baton.app's own Info.plist
+     has the same two keys, because macOS asks on behalf of the app. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.idrisay.baton.dictate</string>
+  <key>CFBundleName</key>
+  <string>baton-dictate</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Baton listens only while you dictate: double-tap ⌘ to start, and again to stop.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Baton turns what you dictate into text on this Mac.</string>
+</dict>
+</plist>

@@ -94,10 +94,16 @@ the existing vertical rule, not with space alone.
   hover** (`display: none` → `grid` on `:hover` / `:focus-within`), so names
   aren't truncated. The row is already as tall as those icons (20px), so a
   hover never changes its height and the list never jumps.
-- **Reorderable lists** (Sessions): drag a row within the list; a straight
-  clay line between rows shows where it lands; ⌥↑ / ⌥↓ does the same from the
-  keyboard. The order is a per-window preference (localStorage), and new items
-  arrive on top.
+- **Reorderable lists** (Sessions, the Workspace's folders, the rail's tabs): drag a row within
+  the list; a straight clay line between rows shows where it lands and the
+  dragged row dims; ⌥↑ / ⌥↓ does the same from the keyboard. Sessions keep
+  the order as a per-window preference (localStorage) and new ones arrive on
+  top. A workspace's folder order is part of the workspace (`folders`),
+  stored by main, which only accepts a reordering of the same folders
+  (`isReordering` in core). A drag never also clicks the row it started on.
+  The rail's order is a per-window preference too (`railOrder.ts`, Settings
+  pinned below it); `reconcileOrder` in core keeps a saved order valid when a
+  tab is added or removed, placing a new one beside its default neighbour.
 - **Settings sections**: an `h3`, a `.settings-note` explaining what it does in
   plain words, then controls. Steppers use `.font-size-control`.
 - **Split quick button** (`.quick-split`): the label half runs the action, and
@@ -116,6 +122,35 @@ the existing vertical rule, not with space alone.
   remembered per card and per PR or ticket (`useFold` in `folds.ts`).
 - **Headline state**: a detail pane's pill says the most important state; the
   line under it lists the others and never repeats the pill.
+- **Repository rows** (Workspace): chevron, `owner/` dimmed then the
+  repository's name, then the branch in mono. Every name starts at the same
+  x; the branch truncates before the name does. State on the right is a count
+  pill when there are uncommitted changes, otherwise a green dot with "Clean"
+  in its tooltip. Terminal and remove are hover-revealed like other rows.
+- **Kept-alive views** (`.keep-alive`): the Workspace view is mounted on its
+  first visit and only hidden after that, so leaving and coming back keeps
+  the Files/Changes tab, open repositories, editor tabs and unsaved edits.
+  Coming back re-reads git status only.
+- **Diff view** (`Diff`): the head has +/− counts, a **Whole file** toggle
+  (remembered) and **Open file**. An empty diff says it's empty *now*, why
+  that happens, and refreshes the list beside it.
+- **Editor change bars** (`Editor`, `changeMarks` in core): VS Code's quick
+  diff in the gutter against git's copy — green added, blue changed, a red
+  notch where lines were removed — and a count in the status bar. Bars move
+  with your typing and are re-read after each save.
+- **Open tabs follow git and the disk.** The workspace bumps a revision each
+  time it re-reads git status (Refresh, coming back to the view, window
+  focus, clicking an already-open change, a revert). The open diff re-reads
+  itself; an editor with no edits of its own reloads from disk, and one with
+  edits shows the "changed on disk" bar instead. Nothing watches the
+  filesystem.
+- **Screenshot lightbox** (`RunViewer`): the picture takes the room, with a
+  caption bar under it — file name, "Taken <date, time>" (the file's own
+  time), "3 of 8", the keys, **Show in Finder** and ✕. ← → (and ↑ ↓, Space)
+  move, Home / End jump, Esc closes only the lightbox; the keys are caught on
+  the window in the capture phase so a focused terminal can't swallow them.
+  Thumbnails carry their name and time. "in Finder" always means revealed in
+  Finder (`runReveal`, run files only), never opened in another app.
 - **Group actions** (Revert all) sit in the group's own header as an icon,
   not on a line of their own.
 - **Job rows** (`QuickJobRow`): running is an amber pulsing dot and a live
@@ -133,6 +168,49 @@ the existing vertical rule, not with space alone.
 - **Multi-choice field** (`FolderField`): a select-looking button opening a
   checklist. When one choice is special, it's labelled in the row
   ("starts here").
+- **Pull request rows** (`PullRow`): number and title, then the state words
+  on the second line and, beside the age, the repository's name without its
+  owner (`RepoLabel`, mono, full `owner/name` in the tooltip). The repo gives
+  way before the state does. A pull request with nothing to report says
+  **Open** with a grey dot rather than leaving the line empty. Any label a
+  word can't explain carries a `hint` from core, shown as its tooltip
+  ("2 unresolved comments" says which comments).
+- **Activity inbox** (`Activity.tsx`, `main/activityFeed.ts`, `diffActivity`
+  in core): a rail tab (bell) listing what happened to you — review
+  requested, approved, changes requested, new ticket, new comment — grouped
+  Today / Yesterday / Earlier, unread first in weight, read dimmed. The unread
+  count sits on the bell in the "waiting" blue (a state, so not clay). A click
+  opens the pull request or ticket in the pane beside the list, and reads it.
+  Detection is in main and compares each poll with the last; a provider that
+  didn't answer is never compared, and more than `FLOOD` of one kind at once
+  re-baselines instead of reporting. Each kind can be turned off in Settings.
+- **Toasts** (`ActivityToasts`): new activity while the window is in front —
+  bottom right, newest on top, at most three plus "+N more in Activity",
+  gone after 8 s unless hovered. ✕ dismisses the toast only; the event stays
+  unread in the inbox. They sit over panes but under sheets (z 8): a toast
+  must never cover a form. When the window isn't in front, the same event is
+  a macOS notification instead (never both, and never during a smoke run).
+- **Dictation** (`Dictation.tsx`, `main/dictation.ts`, `native/dictate`):
+  double-tap ⌘ (⌘ alone, twice, quickly — `DoubleTap` in core, so ⌘C and
+  friends never start it), speak, double-tap ⌘ again. A pill bottom-centre
+  shows the live words, a level meter in amber (running, not red), where the
+  text will go and the language (`· online` when it isn't on-device). The
+  target is fixed at the start: a terminal gets it typed and **never** gets
+  Enter; a field or editor gets it at the caret through `insertText` so ⌘Z
+  undoes it; nothing focused means the clipboard, said in the pill. Nothing
+  is inserted until you finish. Esc cancels, and only cancels. A text field
+  that deserves a mic gets `DictateButton` (the run sheet's prompt has one),
+  with `htmlFor` on its label so the button isn't what the label activates.
+  The recogniser is Apple's, on-device where the language allows, in the
+  `baton-dictate` Swift helper (Chromium's speech API doesn't work in
+  Electron); it exits on stdin EOF, so the mic can't outlive Baton.
+- **Error card** (`ErrorBoundary`): what a pane shows instead of itself when
+  it throws — a red dot (a crash is a failure), what broke in mono, then
+  **Try again**, **Show log in Finder** and **Copy details**. Every detail pane
+  sits inside one, keyed by what's selected, so picking another row recovers;
+  a last-resort one wraps the whole window. Never let a render error reach
+  the root: without a boundary React unmounts everything and the window goes
+  black.
 
 Form controls inside a `.menu` aren't styled by the sheet rules. Give them
 the shared control look explicitly, and scope sheet-wide rules such as
@@ -208,6 +286,17 @@ visible focus state.
 A new IPC channel touches four places: the handler in `main/index.ts`, the
 bridge in `preload/index.ts`, the type in `renderer/types.ts`, and the
 renderer call. Name it `baton:<noun>-<verb>`.
+
+### The log
+
+Everything `host.log` writes, anything that throws in main, the window's
+process going away, and every error in the window (render errors with their
+component stack, uncaught errors, unhandled rejections) goes to
+`~/Library/Logs/Baton/baton.log` (`main/logFile.ts`), rolled to `baton.1.log`
+at 1 MB. A smoke run with `BATON_USER_DATA` logs under that folder instead.
+When something breaks, read the log before guessing. Take the headline flag
+with `primaryFlag(pull)`, never `pullFlags(pull)[0]!`: a pull request can
+have no flags at all.
 
 ### Safety
 

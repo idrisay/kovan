@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { DictateButton } from './Dictation';
 import { useMenuDismiss } from './menuDismiss';
 import { formatAge, modelFamily, type ModelFamily } from '@baton/core';
 import type {
@@ -179,7 +180,8 @@ export function RunSheet({
 
         <TestEnvironmentPicker kind={kind} onChange={onTestChange} />
 
-        <label className="prompt-label">
+        {/* htmlFor, so the mic button inside isn't what the label activates. */}
+        <label className="prompt-label" htmlFor="run-prompt">
           <span>
             Prompt — edit before sending if you want
             {stale && (
@@ -189,12 +191,16 @@ export function RunSheet({
               </>
             )}
           </span>
-          <textarea
-            value={prompt}
-            onChange={(e) => { setPrompt(e.target.value); setEdited(true); }}
-            spellCheck={false}
-            rows={18}
-          />
+          <span className="prompt-field">
+            <textarea
+              id="run-prompt"
+              value={prompt}
+              onChange={(e) => { setPrompt(e.target.value); setEdited(true); }}
+              spellCheck={false}
+              rows={18}
+            />
+            <DictateButton field={() => document.getElementById('run-prompt')} label="Dictate into the prompt" />
+          </span>
         </label>
 
         {error && <div className="error boxed">{error}</div>}

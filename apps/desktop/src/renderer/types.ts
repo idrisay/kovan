@@ -1,5 +1,5 @@
 import type {
-  JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport
+  ActivityEvent, JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport
 } from '@baton/core';
 import type { PullDetail, ReviewComment, ReviewThread, Reviewer } from '@baton/providers';
 import type { AgentRun, RunFile, Runner, RunKind } from '@baton/agent';
@@ -14,7 +14,7 @@ import type { ModelList } from '../main/modelSearch';
 
 export type {
   PullDetail, ReviewComment, ReviewThread, Reviewer, AgentRun, RunFile, Runner, RunKind, RunTarget,
-  JiraIssue, PullSummary, SentryIssue, SentryFrame
+  ActivityEvent, JiraIssue, PullSummary, SentryIssue, SentryFrame
 };
 export type { TestEnvironmentSave, TestEnvironmentState, TestSelection };
 export type { ModelList };
@@ -181,6 +181,28 @@ export interface BatonApi {
   /** A run's own report.md or prompt.md — validated server-side to actually belong to a run. */
   runText(file: string): Promise<string>;
   /** A run's own screenshot, as a `data:image/...` URL ready for an `<img src>`. */
+  /** Shows a run's file or folder selected in Finder. */
+  runReveal(file: string): Promise<void>;
+  /** Starts listening (item 88); words arrive through `onDictation`. */
+  dictationStart(): Promise<{ ok: true } | { ok: false; message: string }>;
+  dictationStop(): Promise<void>;
+  dictationCancel(): Promise<void>;
+  dictationStatus(refresh?: boolean): Promise<DictationStatus>;
+  privacyOpen(pane: 'mic' | 'speech'): Promise<void>;
+  onDictation(listener: (event: DictationEvent) => void): () => void;
+  /** The Activity inbox, and a subject a clicked notification asked to open. */
+  activity(): Promise<{ inbox: ActivityEvent[]; open?: string }>;
+  /** Marks events read; returns the inbox after. */
+  activityRead(ids: string[] | 'all'): Promise<ActivityEvent[]>;
+  onActivity(listener: (inbox: ActivityEvent[]) => void): () => void;
+  /** New events while the window is in front: show them as toasts. */
+  onActivityToast(listener: (events: ActivityEvent[]) => void): () => void;
+  /** A notification was clicked: open this subject ('' = the inbox). */
+  onActivityOpen(listener: (subject: string) => void): () => void;
+  /** Writes what threw to `~/Library/Logs/Baton/baton.log` (item 83). */
+  logError(report: RendererErrorReport): Promise<void>;
+  /** Shows the log file selected in Finder. */
+  revealLog(): Promise<void>;
   runImage(file: string): Promise<string>;
 
   workspaces(): Promise<{ list: Workspace[]; active?: string }>;
@@ -188,12 +210,17 @@ export interface BatonApi {
   workspaceActivate(id: string): Promise<void>;
   workspaceAddFolder(id: string): Promise<Workspace | undefined>;
   workspaceRemoveFolder(id: string, folder: string): Promise<Workspace | undefined>;
+  /** Same folders in a new order; anything else is refused and returns undefined. */
+  workspaceReorder(id: string, folders: string[]): Promise<Workspace | undefined>;
   workspaceForget(id: string): Promise<void>;
   workspaceRepos(id: string, force?: boolean): Promise<WorkspaceRepo[]>;
   workspaceRoots(id: string, force?: boolean): Promise<Root[]>;
   workspaceRename(id: string, name: string): Promise<Workspace | undefined>;
   workspaceStatus(repo: string): Promise<WorkspaceStatus>;
-  workspaceDiff(repo: string, file: string, side: DiffSide, from?: string): Promise<FileDiff>;
+  /** `context`: lines around each change (default 3); a huge number shows the whole file. */
+  workspaceDiff(
+    repo: string, file: string, side: DiffSide, from?: string, context?: number
+  ): Promise<FileDiff>;
   workspaceRevert(repo: string, changes: FileChange[]): Promise<void>;
   workspaceTree(dir: string): Promise<Entry[]>;
   workspaceRead(file: string): Promise<FileBody>;
@@ -215,4 +242,31 @@ declare global {
   interface Window {
     baton: BatonApi;
   }
+}
+
+/** What the window sends main when something in it throws. */
+export interface RendererErrorReport {
+  kind: 'render' | 'error' | 'rejection';
+  message: string;
+  stack?: string;
+  componentStack?: string;
+  /** Which pane, or which row was open, when it happened. */
+  where?: string;
+}
+
+export type DictationEvent =
+  | { type: 'ready'; locale: string; onDevice: boolean }
+  | { type: 'level'; value: number }
+  | { type: 'partial'; text: string }
+  | { type: 'final'; text: string }
+  | { type: 'error'; code: string; message: string }
+  | { type: 'ended' };
+
+export interface DictationStatus {
+  available: boolean;
+  mic: string;
+  speech: string;
+  system: string;
+  locale: string;
+  locales: { id: string; name: string; onDevice: boolean }[];
 }

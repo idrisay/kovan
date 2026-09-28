@@ -13,11 +13,12 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { EditorState, type Extension } from '@codemirror/state';
+import { EditorState, RangeSet, StateEffect, StateField, type Extension } from '@codemirror/state';
 import {
-  EditorView, highlightActiveLine, highlightActiveLineGutter,
+  EditorView, GutterMarker, gutter, highlightActiveLine, highlightActiveLineGutter,
   highlightSpecialChars, keymap, lineNumbers, rectangularSelection
 } from '@codemirror/view';
+import type { ChangeMark, ChangeMarkKind } from '@baton/core';
 import {
   bracketMatching, foldGutter, indentOnInput, syntaxHighlighting
 } from '@codemirror/language';
@@ -78,9 +79,65 @@ const look = EditorView.theme({
   '.cm-searchMatch-selected': { backgroundColor: 'rgba(217, 119, 87, 0.4)' }
 });
 
+// --- Change bars (VS Code's quick diff) ----------------------------------------
+
+const CHANGE_LABEL: Record<ChangeMarkKind, string> = {
+  added: 'Added since the last commit',
+  modified: 'Changed since the last commit',
+  deleted: 'Lines removed here'
+};
+
+class ChangeBar extends GutterMarker {
+  constructor(readonly kind: ChangeMarkKind) { super(); }
+  override eq(other: ChangeBar) { return other.kind === this.kind; }
+  override toDOM() {
+    const bar = document.createElement('div');
+    bar.className = `cm-change-bar ${this.kind}`;
+    bar.title = CHANGE_LABEL[this.kind];
+    return bar;
+  }
+}
+
+const BARS: Record<ChangeMarkKind, ChangeBar> = {
+  added: new ChangeBar('added'), modified: new ChangeBar('modified'), deleted: new ChangeBar('deleted')
+};
+
+const setMarks = StateEffect.define<ChangeMark[]>();
+
+/**
+ * The bars, as positions in the document. Mapped through every edit, so
+ * typing above a changed line carries its bar down with it until the next
+ * diff (after a save) replaces them all.
+ */
+const marksField = StateField.define<RangeSet<GutterMarker>>({
+  create: () => RangeSet.empty,
+  update(value, transaction) {
+    let next = value.map(transaction.changes);
+    for (const effect of transaction.effects) {
+      if (!effect.is(setMarks)) continue;
+      const doc = transaction.state.doc;
+      const ranges = effect.value
+        // A deletion at the very end points one past the last line.
+        .map((m) => ({ ...m, line: Math.min(m.line, doc.lines) }))
+        .filter((m) => m.line >= 1)
+        .sort((a, b) => a.line - b.line)
+        .map((m) => BARS[m.kind].range(doc.line(m.line).from));
+      next = RangeSet.of(ranges, true);
+    }
+    return next;
+  }
+});
+
+const changeGutter: Extension = [
+  marksField,
+  gutter({ class: 'cm-change-gutter', markers: (view) => view.state.field(marksField) })
+];
+
 export function Editor({
   path,
   body,
+  marks,
+  revision,
   onDirtyChange,
   onCursor,
   registerSave,
@@ -88,6 +145,10 @@ export function Editor({
 }: {
   path: string;
   body: FileBody;
+  /** Lines that differ from git's copy, for the change bars. */
+  marks?: ChangeMark[];
+  /** Bumped when the workspace re-reads git; the editor then checks the disk. */
+  revision: number;
   onDirtyChange: (dirty: boolean) => void;
   onCursor: (position: { line: number; column: number; selected: number }) => void;
   registerSave: (save: (() => void) | undefined) => void;
@@ -108,6 +169,8 @@ export function Editor({
     <CodeEditor
       path={path}
       body={body}
+      marks={marks}
+      revision={revision}
       onDirtyChange={onDirtyChange}
       onCursor={onCursor}
       registerSave={registerSave}
@@ -119,6 +182,8 @@ export function Editor({
 function CodeEditor({
   path,
   body,
+  marks,
+  revision,
   onDirtyChange,
   onCursor,
   registerSave,
@@ -126,6 +191,8 @@ function CodeEditor({
 }: {
   path: string;
   body: Extract<FileBody, { kind: 'text' }>;
+  marks?: ChangeMark[];
+  revision: number;
   onDirtyChange: (dirty: boolean) => void;
   onCursor: (position: { line: number; column: number; selected: number }) => void;
   registerSave: (save: (() => void) | undefined) => void;
@@ -198,6 +265,7 @@ function CodeEditor({
     const language = languageExtension(path);
     const extensions: Extension[] = [
       lineNumbers(),
+      changeGutter,
       highlightActiveLineGutter(),
       highlightActiveLine(),
       highlightSpecialChars(),
@@ -235,12 +303,59 @@ function CodeEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
+  // Kept in a ref as well: replacing the whole document (a reload) maps every
+  // bar away, so the reload puts the latest ones back itself.
+  const marksNow = useRef(marks);
+  marksNow.current = marks;
+  useEffect(() => {
+    view.current?.dispatch({ effects: setMarks.of(marks ?? []) });
+  }, [marks]);
+
+  /**
+   * Picks up a change on disk, as VS Code does. With no edits of your own the
+   * new text simply replaces the old (the cursor stays where it was, as near
+   * as the new text allows). With edits, nothing is overwritten: the "changed
+   * on disk" bar asks which one wins. Before this, a file an agent had just
+   * changed kept showing what it said when its tab was opened.
+   */
+  const firstRevision = useRef(revision);
+  useEffect(() => {
+    if (revision === firstRevision.current) return undefined;
+    let cancelled = false;
+    void window.baton.workspaceRead(path).then((fresh) => {
+      const current = view.current;
+      if (cancelled || fresh.kind !== 'text' || !current) return;
+      if (fresh.text === saved.current) {
+        stamp.current = { mtimeMs: fresh.mtimeMs, bytes: fresh.bytes };
+        return;
+      }
+      const clean = current.state.doc.toString() === saved.current;
+      if (!clean) {
+        setConflict({ mtimeMs: fresh.mtimeMs, bytes: fresh.bytes });
+        return;
+      }
+      const head = Math.min(current.state.selection.main.head, fresh.text.length);
+      current.dispatch({
+        changes: { from: 0, to: current.state.doc.length, insert: fresh.text },
+        selection: { anchor: head },
+        effects: setMarks.of(marksNow.current ?? [])
+      });
+      saved.current = fresh.text;
+      stamp.current = { mtimeMs: fresh.mtimeMs, bytes: fresh.bytes };
+      onDirtyChange(false);
+      onSaved(stamp.current);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revision, path]);
+
   const reload = async () => {
     const fresh = await window.baton.workspaceRead(path);
     const current = view.current;
     if (fresh.kind !== 'text' || !current) return;
     current.dispatch({
-      changes: { from: 0, to: current.state.doc.length, insert: fresh.text }
+      changes: { from: 0, to: current.state.doc.length, insert: fresh.text },
+      effects: setMarks.of(marksNow.current ?? [])
     });
     saved.current = fresh.text;
     stamp.current = { mtimeMs: fresh.mtimeMs, bytes: fresh.bytes };
