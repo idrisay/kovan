@@ -1,5 +1,6 @@
 export * from './types';
 export * from './settings';
+export * from './appearance';
 
 export * from './github/pullStatus';
 export * from './github/endpoints';
@@ -46,3 +47,9 @@ export * from './processes';
 export * from './terminalTitle';
 export * from './shellPath';
 export * from './dictation';
+export * from './quickCommands';
+export * from './viewPrefs';
+export * from './runChoices';
+export * from './quickOpen';
+export * from './runPages';
+export * from './limits';

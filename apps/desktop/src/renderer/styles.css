@@ -135,10 +135,10 @@
 :root[data-theme='light'] .primary.outline:hover:not(:disabled) { color: var(--clay-bright); }
 :root[data-theme='light'] .row:hover { background: rgba(20, 20, 19, 0.035); }
 :root[data-theme='light'] .row.blocked {
-  background: rgba(180, 84, 74, 0.08);
-  border-color: rgba(180, 84, 74, 0.20);
+  background: color-mix(in srgb, var(--blocked) 8%, transparent);
+  border-color: color-mix(in srgb, var(--blocked) 20%, transparent);
 }
-:root[data-theme='light'] .errors { background: rgba(180, 84, 74, 0.08); }
+:root[data-theme='light'] .errors { background: color-mix(in srgb, var(--blocked) 8%, transparent); }
 :root[data-theme='light'] .error { color: #a5473e; }
 :root[data-theme='light'] .search,
 :root[data-theme='light'] .rail-item:hover { background: rgba(20, 20, 19, 0.04); }
@@ -146,7 +146,125 @@
 :root[data-theme='light'] .sheet-backdrop { background: rgba(60, 58, 54, 0.35); }
 :root[data-theme='light'] .prose code,
 :root[data-theme='light'] .prose th { background: rgba(20, 20, 19, 0.05); }
-:root[data-theme='light'] .badge { background: rgba(78, 138, 98, 0.14); color: #3e7350; }
+/* ...but not the code inside a block, which the block already frames: the tint
+   above landed on each line of it as a separate band. */
+:root[data-theme='light'] .prose pre code { background: none; }
+:root[data-theme='light'] .badge { background: color-mix(in srgb, var(--pass) 14%, transparent); color: #3e7350; }
+
+/**
+ * The extra themes (item 96), picked from the reviewers' proposals on the
+ * themes design page. Each is a palette over one of the two tones above:
+ * `data-theme` still says light or dark, so every `data-theme='light'` rule
+ * keeps applying, and `data-palette` only swaps the tokens. Each keeps the
+ * elevation order (rail darkest → card brightest) and clay's meaning.
+ */
+
+/* OLED Black: true black for dark rooms. Status colours are lifted a little
+   so they still hold on pure black. */
+:root[data-palette='oled'] {
+  --rail: #000000; --sidebar: #070809; --editor: #0c0d0f; --card: #131519;
+  --title: #f7f7f5; --strong: #f1f1ef; --body: #e4e4e1; --prose: #d5d5d1;
+  --secondary: #c3c3bf; --meta: #9d9e9a; --muted: #92938f; --dim: #6f706c;
+  --clay: #e47e5d; --clay-bright: #f09a78; --merged: #a68ad3;
+  --pass: #77b98b; --running: #d9aa5f; --blocked: #d36a61; --blocked-bright: #e07d73; --waiting: #82aadd;
+  --hair: rgba(255, 255, 255, 0.10); --hair-strong: rgba(255, 255, 255, 0.14); --wash: rgba(255, 255, 255, 0.045);
+}
+
+/* Cool Graphite: a blue-grey dark, for anyone who finds the warm default
+   muddy beside macOS and other editors. */
+:root[data-palette='graphite'] {
+  --rail: #0e1116; --sidebar: #141820; --editor: #1a1f28; --card: #222832;
+  --title: #f3f6fa; --strong: #eaeef3; --body: #dde3ea; --prose: #ccd3dc;
+  --secondary: #b8c0ca; --meta: #939ca8; --muted: #838d99; --dim: #646d78;
+  --clay: #e07857; --clay-bright: #ec9372; --merged: #a087cc;
+  --pass: #72b58a; --running: #d6a858; --blocked: #cc675f; --blocked-bright: #da7a71; --waiting: #79a6d8;
+  --hair: rgba(220, 230, 240, 0.09); --hair-strong: rgba(220, 230, 240, 0.13); --wash: rgba(220, 230, 240, 0.045);
+}
+
+/* Ember Low Light: deliberately dim and warm, for long evenings. Code
+   highlighting is not dimmed with it. */
+:root[data-palette='ember'] {
+  --rail: #100f0e; --sidebar: #161513; --editor: #1c1a18; --card: #23201d;
+  --title: #e8e1d7; --strong: #e0d9ce; --body: #d2c9bd; --prose: #c4bbaf;
+  --secondary: #b0a89c; --meta: #8f877c; --muted: #827a70; --dim: #635c54;
+  --clay: #d17759; --clay-bright: #dc8e71; --merged: #927aac;
+  --pass: #76a184; --running: #c29a60; --blocked: #ba625b; --blocked-bright: #c8746c; --waiting: #7895b8;
+  --hair: rgba(235, 220, 200, 0.07); --hair-strong: rgba(235, 220, 200, 0.10); --wash: rgba(235, 220, 200, 0.04);
+}
+
+/* Focus High Contrast: bright rooms, projectors, low vision. Status always
+   gets a shape as well (see `data-shapes` below). */
+:root[data-palette='contrast'] {
+  --rail: #000000; --sidebar: #08090a; --editor: #101114; --card: #191b1f;
+  --title: #ffffff; --strong: #ffffff; --body: #f2f3f5; --prose: #e8eaed;
+  --secondary: #d5d8dd; --meta: #b8bcc3; --muted: #adb2ba; --dim: #8e939b;
+  --clay: #ff8a5b; --clay-bright: #ffa27d; --merged: #c49bff;
+  --pass: #70d795; --running: #ffd166; --blocked: #ff6b66; --blocked-bright: #ff807b; --waiting: #79b8ff;
+  --hair: rgba(255, 255, 255, 0.18); --hair-strong: rgba(255, 255, 255, 0.26); --wash: rgba(255, 255, 255, 0.07);
+}
+
+/* Paper Soft: a lower-contrast light theme for glare-sensitive eyes. */
+:root[data-palette='paper'] {
+  --rail: #eae7df; --sidebar: #f0eee9; --editor: #f7f6f1; --card: #fdfcf9;
+  --title: #16171a; --strong: #242529; --body: #3a3834; --prose: #4a4742;
+  --secondary: #5a5751; --meta: #6e6b65; --muted: #8f8c85; --dim: #a09d96;
+  --hair: rgba(22, 23, 26, 0.07); --hair-strong: rgba(22, 23, 26, 0.11); --wash: rgba(22, 23, 26, 0.04);
+}
+
+/**
+ * Accent choice. Still only for selection, the primary action and links.
+ * Each has a dark and a light shade; "bright" is the hover step. The macOS
+ * accent arrives as an inline `--clay` from App.tsx instead of a rule here.
+ */
+:root[data-accent='rose'] { --clay: #d9749a; --clay-bright: #e690b1; }
+:root[data-accent='teal'] { --clay: #3fb0a0; --clay-bright: #5ec5b6; }
+:root[data-accent='violet'] { --clay: #a98be0; --clay-bright: #bea5ea; }
+:root[data-accent='ocean'] { --clay: #5a9bd8; --clay-bright: #7ab2e4; }
+:root[data-accent='slate'] { --clay: #7d97b0; --clay-bright: #98aec3; }
+:root[data-accent='ochre'] { --clay: #c9a040; --clay-bright: #d8b562; }
+:root[data-theme='light'][data-accent='rose'] { --clay: #b8517a; --clay-bright: #9c4066; }
+:root[data-theme='light'][data-accent='teal'] { --clay: #2a8a7c; --clay-bright: #217267; }
+:root[data-theme='light'][data-accent='violet'] { --clay: #7a5ac0; --clay-bright: #6547a6; }
+:root[data-theme='light'][data-accent='ocean'] { --clay: #3f78b4; --clay-bright: #33649a; }
+:root[data-theme='light'][data-accent='slate'] { --clay: #5a7d9a; --clay-bright: #486882; }
+:root[data-theme='light'][data-accent='ochre'] { --clay: #a8842c; --clay-bright: #8d6e22; }
+
+/* Colour-safe status: the five status hues pushed further apart, so they
+   stay distinct for colour-blind eyes. Laid over whichever theme is on. */
+:root[data-status='safe'] {
+  --pass: #4a9e6e; --running: #e0a030; --blocked: #d64545; --blocked-bright: #e25a5a; --waiting: #5a8fd4; --merged: #8b6fb8;
+}
+:root[data-theme='light'][data-status='safe'] {
+  --pass: #2f7d52; --running: #a86f10; --blocked: #b83232; --blocked-bright: #a52a2a; --waiting: #3a6cb0; --merged: #6d4f9e;
+}
+
+/* Status shapes: every status dot becomes a small glyph in the same colour,
+   so colour is never the only signal (rule 6, taken one step further). */
+:root[data-shapes] .dot {
+  width: auto; min-width: 8px; height: auto; border-radius: 0;
+  background: none; box-shadow: none; color: var(--dim);
+  font-size: 10px; font-weight: 600; line-height: 1; text-align: center;
+}
+:root[data-shapes] .dot::before { content: '○'; }
+:root[data-shapes] .dot.pass { color: var(--pass); }
+:root[data-shapes] .dot.pass::before { content: '✓'; }
+:root[data-shapes] .dot.running { color: var(--running); }
+:root[data-shapes] .dot.running::before { content: '⟳'; }
+:root[data-shapes] .dot.fail { color: var(--blocked-bright); }
+:root[data-shapes] .dot.fail::before { content: '!'; }
+:root[data-shapes] .dot.waiting { color: var(--waiting); }
+:root[data-shapes] .dot.waiting::before { content: '◷'; }
+:root[data-shapes] .dot.merged { color: var(--merged); }
+:root[data-shapes] .dot.merged::before { content: '⇄'; }
+:root[data-shapes] .dot.live { color: var(--pass); }
+:root[data-shapes] .dot.live::before { content: '▸'; }
+
+/* Compact density: tighter list rows, more on screen. Comfortable stays the
+   default; it changes spacing only, never a colour. */
+:root[data-density='compact'] .row { padding-top: 5px; padding-bottom: 5px; }
+:root[data-density='compact'] .row-state { margin-top: 3px; }
+:root[data-density='compact'] .row.one-line,
+:root[data-density='compact'] .row.shipped { padding-top: 3px; padding-bottom: 3px; }
 
 * { box-sizing: border-box; }
 
@@ -188,9 +306,9 @@ button { font: inherit; cursor: pointer; }
  */
 .statusbar {
   display: flex; align-items: center; gap: 4px;
-  height: 24px; flex: none; padding: 0 10px;
+  min-height: 26px; flex: none; padding: 0 10px;
   background: var(--rail); border-top: 1px solid var(--hair);
-  font-family: var(--mono); font-size: 10.5px; color: var(--dim);
+  font-family: var(--mono); font-size: 11.5px; color: var(--muted);
 }
 .statusbar-group { display: flex; align-items: center; gap: 2px; }
 .statusbar-item {
@@ -240,10 +358,10 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
      does not make this button taller or wider than the solid one beside it. */
   padding: 5.5px 11.5px;
   background: transparent; color: var(--clay);
-  border: 1.5px solid rgba(217, 119, 87, 0.55);
+  border: 1.5px solid color-mix(in srgb, var(--clay) 55%, transparent);
 }
 .primary.outline:hover:not(:disabled) {
-  background: rgba(217, 119, 87, 0.1); color: var(--clay-bright);
+  background: color-mix(in srgb, var(--clay) 10%, transparent); color: var(--clay-bright);
   border-color: var(--clay);
 }
 
@@ -253,11 +371,11 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
 }
 .link:hover { color: #f0a183; }
 
-.errors { padding: 7px 14px; background: rgba(196, 99, 90, 0.10); flex: none; }
+.errors { padding: 7px 14px; background: color-mix(in srgb, var(--blocked) 10%, transparent); flex: none; }
 .error { color: #e19187; font-size: 11.5px; }
 .error.boxed {
-  background: rgba(196, 99, 90, 0.10);
-  border: 1px solid rgba(196, 99, 90, 0.20);
+  background: color-mix(in srgb, var(--blocked) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--blocked) 20%, transparent);
   border-radius: 8px; padding: 8px 10px; margin: 10px 0;
 }
 
@@ -335,13 +453,13 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
   background: transparent; border: 0; border-radius: 6px; color: var(--dim);
 }
 .icon-button:hover { color: var(--secondary); background: rgba(255, 255, 255, 0.05); }
-.icon-button.active { color: rgb(217, 119, 87); background: rgba(217, 119, 87, 0.12); }
+.icon-button.active { color: var(--clay); background: color-mix(in srgb, var(--clay) 12%, transparent); }
 
 /* --- The ticket filter menu --- */
 .filter-menu-host { position: relative; display: flex; }
 .filter-count {
   position: absolute; top: -3px; right: -3px; min-width: 13px; height: 13px;
-  padding: 0 3px; border-radius: 7px; background: rgb(217, 119, 87); color: #1a1310;
+  padding: 0 3px; border-radius: 7px; background: var(--clay); color: #1a1310;
   font-family: var(--mono); font-size: 9px; font-weight: 600;
   display: grid; place-items: center;
 }
@@ -360,7 +478,7 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--hair);
 }
-.search:focus-within { border-color: rgba(217, 119, 87, 0.45); }
+.search:focus-within { border-color: color-mix(in srgb, var(--clay) 45%, transparent); }
 .search input {
   flex: 1; min-width: 0; background: none; border: 0; outline: none;
   color: var(--prose); font: inherit; font-size: 12px;
@@ -412,8 +530,8 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
   color: var(--dim); text-transform: none;
 }
 .group-head.tint { color: var(--blocked-bright); }
-.group-head.tint .group-rule { background: rgba(196, 99, 90, 0.28); }
-.group-head.tint:hover .group-rule { background: rgba(196, 99, 90, 0.5); }
+.group-head.tint .group-rule { background: color-mix(in srgb, var(--blocked) 28%, transparent); }
+.group-head.tint:hover .group-rule { background: color-mix(in srgb, var(--blocked) 50%, transparent); }
 
 /* The footer under a windowed list. Quiet — it is a way to see more, not an
    action — but present, because a list that stops without saying so is a list
@@ -483,7 +601,7 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
 .row.one-line:focus-within .icon-button.session-close,
 .icon-button.session-close.armed { display: grid; }
 .icon-button.session-close:hover { opacity: 1; }
-.icon-button.session-close.armed { opacity: 1; color: var(--running); background: rgba(208, 160, 90, 0.14); }
+.icon-button.session-close.armed { opacity: 1; color: var(--running); background: color-mix(in srgb, var(--running) 14%, transparent); }
 .row.one-line:hover .icon-button.rename, .row.one-line:hover .icon-button.open-link,
 .row.one-line:focus-within .icon-button.rename, .row.one-line:focus-within .icon-button.open-link { display: grid; }
 .priority-tag {
@@ -491,14 +609,14 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
   color: var(--muted); background: rgba(255, 255, 255, 0.05);
   padding: 1px 6px; border-radius: 4px;
 }
-.priority-tag.fail { color: var(--blocked-bright); background: rgba(196, 99, 90, 0.14); }
-.priority-tag.running { color: var(--running); background: rgba(208, 160, 90, 0.14); }
+.priority-tag.fail { color: var(--blocked-bright); background: color-mix(in srgb, var(--blocked) 14%, transparent); }
+.priority-tag.running { color: var(--running); background: color-mix(in srgb, var(--running) 14%, transparent); }
 
 /* Only "blocked on you" is tinted. Everything else states itself in grey. */
 .row.blocked {
   padding-left: 13px;
-  background: rgba(196, 99, 90, 0.09);
-  border-color: rgba(196, 99, 90, 0.16);
+  background: color-mix(in srgb, var(--blocked) 9%, transparent);
+  border-color: color-mix(in srgb, var(--blocked) 16%, transparent);
 }
 .row.blocked::before {
   content: ''; position: absolute; left: 0; top: 11px; bottom: 11px;
@@ -524,7 +642,7 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
 .dot.waiting { background: var(--waiting); }
 .dot.live {
   background: var(--pass);
-  box-shadow: 0 0 0 3px rgba(111, 169, 127, 0.18);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pass) 18%, transparent);
 }
 
 /* --- Detail pane -------------------------------------------------------- */
@@ -647,11 +765,11 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .detail-related { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
 .detail-related-link {
   display: inline-flex; align-items: center; gap: 6px;
-  background: rgba(217, 119, 87, 0.08); border: 1px solid rgba(217, 119, 87, 0.22);
+  background: color-mix(in srgb, var(--clay) 8%, transparent); border: 1px solid color-mix(in srgb, var(--clay) 22%, transparent);
   border-radius: 7px; padding: 4px 10px; color: var(--clay);
   font-family: var(--mono); font-size: 11px;
 }
-.detail-related-link:hover { background: rgba(217, 119, 87, 0.14); color: var(--clay-bright); }
+.detail-related-link:hover { background: color-mix(in srgb, var(--clay) 14%, transparent); color: var(--clay-bright); }
 /* One row: the agent runs, then the escape hatch out to the web. */
 .detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 .run-buttons { display: contents; }
@@ -747,15 +865,15 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .checkbox-row input[type='checkbox'],
 .filter-option input[type='checkbox'] { cursor: pointer; margin: 0; }
 .checkbox-row input[type='checkbox']:hover,
-.filter-option input[type='checkbox']:hover { border-color: rgb(217, 119, 87); }
+.filter-option input[type='checkbox']:hover { border-color: var(--clay); }
 .checkbox-row input[type='checkbox']:focus-visible,
 .filter-option input[type='checkbox']:focus-visible {
-  outline: 2px solid rgba(217, 119, 87, 0.45); outline-offset: 1px;
+  outline: 2px solid color-mix(in srgb, var(--clay) 45%, transparent); outline-offset: 1px;
 }
 .prose input[type='checkbox']:checked,
 .checkbox-row input[type='checkbox']:checked,
 .filter-option input[type='checkbox']:checked {
-  background: rgb(217, 119, 87); border-color: rgb(217, 119, 87);
+  background: var(--clay); border-color: var(--clay);
 }
 .prose input[type='checkbox']:checked::after,
 .checkbox-row input[type='checkbox']:checked::after,
@@ -783,10 +901,10 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   background: rgba(255, 255, 255, 0.06); color: var(--secondary);
   font-size: 11.5px; font-weight: 600;
 }
-.status-pill.pass { background: rgba(111, 169, 127, 0.16); color: var(--pass); }
-.status-pill.fail { background: rgba(196, 99, 90, 0.16); color: var(--blocked-bright); }
-.status-pill.waiting { background: rgba(124, 160, 212, 0.16); color: var(--waiting); }
-.status-pill.running { background: rgba(208, 160, 90, 0.16); color: var(--running); }
+.status-pill.pass { background: color-mix(in srgb, var(--pass) 16%, transparent); color: var(--pass); }
+.status-pill.fail { background: color-mix(in srgb, var(--blocked) 16%, transparent); color: var(--blocked-bright); }
+.status-pill.waiting { background: color-mix(in srgb, var(--waiting) 16%, transparent); color: var(--waiting); }
+.status-pill.running { background: color-mix(in srgb, var(--running) 16%, transparent); color: var(--running); }
 .status-pill.merged { background: rgba(139, 95, 160, 0.18); color: var(--merged); }
 .detail-pill-repo { font-family: var(--mono); font-size: 12px; color: var(--dim); }
 .detail-meta code {
@@ -819,9 +937,9 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
 }
-.timeline-card-review.pass { background: rgba(111, 169, 127, 0.16); color: var(--pass); }
-.timeline-card-review.fail { background: rgba(196, 99, 90, 0.16); color: var(--blocked-bright); }
-.timeline-card-review.waiting { background: rgba(124, 160, 212, 0.16); color: var(--waiting); }
+.timeline-card-review.pass { background: color-mix(in srgb, var(--pass) 16%, transparent); color: var(--pass); }
+.timeline-card-review.fail { background: color-mix(in srgb, var(--blocked) 16%, transparent); color: var(--blocked-bright); }
+.timeline-card-review.waiting { background: color-mix(in srgb, var(--waiting) 16%, transparent); color: var(--waiting); }
 .timeline-card-path {
   font-family: var(--mono); font-size: 10.5px; color: var(--clay);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -947,7 +1065,7 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 }
 .badge {
   font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none;
-  color: #a8c9b2; background: rgba(111, 169, 127, 0.14);
+  color: #a8c9b2; background: color-mix(in srgb, var(--pass) 14%, transparent);
   padding: 2px 8px; border-radius: 999px;
 }
 .provider label, .run-controls label, .prompt-label {
@@ -962,36 +1080,67 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   width: 100%;
 }
 .provider input:focus, .run-controls select:focus, .run-controls input:focus, .prompt-label textarea:focus {
-  outline: none; border-color: rgba(217, 119, 87, 0.5);
+  outline: none; border-color: color-mix(in srgb, var(--clay) 50%, transparent);
 }
 .run-controls { display: flex; gap: 12px; }
 
-/* --- Settings: a sidebar of sections, not one long scrolling list -------- */
+/* --- Settings: one list you can search (item 99, option B) ---------------
+   Each section is one row saying its current values; it opens in place, one
+   at a time. Replaced a side nav that gave everyday settings one entry and
+   connections five, with "General" a single long scroll. */
 .sheet.settings {
-  max-width: 800px; padding: 0;
-  display: flex; flex-direction: column; height: 74vh; max-height: 620px;
+  max-width: 720px; padding: 0;
+  display: flex; flex-direction: column; height: 78vh; max-height: 720px;
 }
 .sheet.settings .sheet-head {
   margin: 0; padding: 16px 20px 13px; border-bottom: 1px solid var(--hair);
   flex: none;
 }
-.settings-layout { flex: 1; min-height: 0; display: flex; }
-.settings-nav {
-  flex: none; width: 190px; padding: 12px; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 2px;
-  border-right: 1px solid var(--hair);
+.settings-list { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px 20px; display: flex; flex-direction: column; gap: 6px; }
+.settings-search {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px; padding: 0 10px;
+  background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 8px; color: var(--dim);
 }
-.settings-nav button {
-  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
-  background: none; border: 0; border-radius: 7px; padding: 7px 9px;
-  color: var(--secondary); font-size: 12.5px;
+.settings-search:focus-within { border-color: color-mix(in srgb, var(--clay) 50%, transparent); }
+.settings-search input {
+  flex: 1; min-width: 0; background: none; border: 0; outline: none; padding: 8px 0;
+  color: var(--title); font: inherit; font-size: 13px;
 }
-.settings-nav button:hover { background: rgba(255, 255, 255, 0.05); color: var(--title); }
-.settings-nav button.active { background: rgba(217, 119, 87, 0.12); color: rgb(217, 119, 87); }
-.settings-nav button .badge { margin-left: auto; }
-.settings-body { flex: 1; min-width: 0; padding: 18px 22px; overflow-y: auto; }
-.settings-body .provider { border-top: 0; padding: 0; }
-.settings-body .provider h3:not(:first-child) { margin-top: 20px; }
+.settings-search input::placeholder { color: var(--dim); }
+.settings-row { border: 1px solid var(--hair); border-radius: 9px; background: var(--card); flex: none; }
+.settings-row.open { border-color: color-mix(in srgb, var(--clay) 35%, transparent); }
+.settings-row-head {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; text-align: left;
+  background: none; border: 0; border-radius: 9px; color: inherit; font: inherit; cursor: pointer;
+}
+.settings-row-head:hover { background: var(--wash); }
+.settings-row-head:focus-visible { outline: 1px solid var(--clay); outline-offset: -1px; }
+.settings-row-icon { flex: none; width: 18px; text-align: center; color: var(--muted); font-size: 12px; }
+.settings-row-title { flex: none; width: 128px; color: var(--title); font-weight: 500; font-size: 13px; }
+.settings-row.open .settings-row-title { color: var(--clay); }
+.settings-row-summary {
+  flex: 1; min-width: 0; color: var(--meta); font-size: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.settings-row-chevron { flex: none; color: var(--dim); display: grid; }
+.settings-row-body { border-top: 1px solid var(--hair); padding: 14px 16px 16px 40px; }
+.settings-row-body.provider { border-top: 1px solid var(--hair); }
+.settings-row-body > h3:first-child, .settings-row-body > .settings-connection:first-child h3 { margin-top: 0; }
+.settings-row-body h3:not(:first-child) { margin-top: 20px; }
+/* Dictation and Environments open with their own heading; the row says it. */
+.settings-row-body.own-heading > h3:first-child { display: none; }
+.settings-connection + .settings-connection { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--hair); }
+.settings-connection h3 { display: flex; align-items: center; gap: 8px; }
+.settings-hits { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 12px 10px 40px; }
+.settings-hit {
+  background: none; border: 1px solid var(--hair-strong); border-radius: 99px; padding: 1px 9px;
+  color: var(--secondary); font-size: 11.5px; cursor: pointer;
+}
+.settings-hit:hover { border-color: var(--clay); color: var(--clay); }
+.settings-none { color: var(--muted); padding: 10px 4px; margin: 0; }
+.settings-found { animation: settings-found 1.6s ease-out; border-radius: 6px; }
+@keyframes settings-found { from { background: color-mix(in srgb, var(--clay) 22%, transparent); } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .settings-found { animation: none; outline: 1px solid var(--clay); } }
 
 .theme-picker { display: flex; gap: 6px; }
 .theme-picker button {
@@ -1000,8 +1149,45 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 }
 .theme-picker button:hover { color: var(--title); }
 .theme-picker button.active {
-  background: rgba(217, 119, 87, 0.14); border-color: rgba(217, 119, 87, 0.5);
-  color: rgb(217, 119, 87);
+  background: color-mix(in srgb, var(--clay) 14%, transparent); border-color: color-mix(in srgb, var(--clay) 50%, transparent);
+  color: var(--clay);
+}
+
+/* Appearance (item 96): theme tiles with a small preview of each palette,
+   and the accent swatches. A swatch close to a status colour is dashed —
+   the same warning the design page gave. */
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.theme-grid button {
+  display: flex; flex-direction: column; gap: 6px; padding: 6px; text-align: left;
+  background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 9px;
+  color: var(--secondary); font-size: 11.5px; cursor: pointer;
+}
+.theme-grid button:hover { color: var(--title); border-color: color-mix(in srgb, var(--clay) 35%, transparent); }
+.theme-grid button.active {
+  border-color: var(--clay); color: var(--clay);
+  box-shadow: 0 0 0 1px var(--clay) inset;
+}
+.theme-preview { display: flex; height: 34px; border-radius: 5px; padding: 5px 0 0 12px; overflow: hidden; }
+.theme-grid .theme-preview > span {
+  flex: 1; display: flex; align-items: flex-start; gap: 6px; padding: 4px 7px;
+  border-radius: 4px 0 0 0; font-family: var(--display); font-size: 12px; font-weight: 600;
+}
+.theme-preview i { width: 18px; height: 6px; border-radius: 3px; margin-top: 5px; }
+.theme-grid .theme-name { color: inherit; font-size: inherit; padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.accent-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.accent-picker button {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 5px;
+  border-radius: 99px; border: 1px solid var(--hair-strong); background: transparent;
+  color: var(--secondary); font-size: 12px; cursor: pointer;
+}
+.accent-picker button.near { border-style: dashed; }
+.accent-picker button:hover { color: var(--title); }
+.accent-picker button.active { border-color: var(--title); border-style: solid; color: var(--title); }
+.accent-picker i { width: 14px; height: 14px; border-radius: 50%; }
+.schedule-times { display: flex; gap: 16px; }
+.schedule-times input[type='time'] {
+  background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 7px;
+  color: var(--body); font: inherit; font-family: var(--mono); padding: 5px 8px;
 }
 
 .provider .checkbox-row {
@@ -1047,7 +1233,7 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 8px;
   padding: 0; overflow: hidden; aspect-ratio: 4 / 3; display: block;
 }
-.run-shot:hover { border-color: rgb(217, 119, 87); }
+.run-shot:hover { border-color: var(--clay); }
 .run-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 .run-doc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -1173,14 +1359,14 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .term-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 7px 12px; border-bottom: 1px solid var(--hair); flex: none;
-  font-family: var(--mono); font-size: 10.5px; color: var(--dim);
+  font-family: var(--mono); font-size: 11.5px; color: var(--muted);
 }
 /* The session's own name first, the folder it runs in under it: a path alone
    says which clone, never which piece of work. */
 .term-head-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .term-head-title-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .term-title {
-  font-family: var(--sans); font-size: 12px; color: var(--prose);
+  font-family: var(--sans); font-size: 13px; color: var(--prose);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .term-cwd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1228,7 +1414,7 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .pane-divider.horizontal { height: 8px; margin: -4px 0; cursor: row-resize; }
 .pane-divider::after { content: ''; position: absolute; inset: 0 3px; background: transparent; transition: background 120ms ease; }
 .pane-divider.horizontal::after { inset: 3px 0; }
-.pane-divider:hover::after, .pane-divider.dragging::after { background: rgba(217, 119, 87, 0.35); }
+.pane-divider:hover::after, .pane-divider.dragging::after { background: color-mix(in srgb, var(--clay) 35%, transparent); }
 
 /* A pane's own tab strip — only once it actually holds more than one
    session; a lone tab looks exactly like the old single-pane view. */
@@ -1244,24 +1430,24 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .pane-tab:hover { color: var(--secondary); background: rgba(255, 255, 255, 0.03); }
 .pane-tab.active { color: var(--prose); border-bottom-color: var(--clay); background: var(--editor); }
 .pane-tab-title {
-  font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .pane-tab-close {
   flex: none; width: 16px; height: 16px; display: grid; place-items: center;
   background: none; border: 0; border-radius: 4px; color: var(--dim); opacity: 0;
 }
 .pane-tab:hover .pane-tab-close, .pane-tab-close:focus-visible { opacity: 1; }
-.pane-tab-close:hover { color: var(--blocked-bright); background: rgba(196, 99, 90, 0.14); }
+.pane-tab-close:hover { color: var(--blocked-bright); background: color-mix(in srgb, var(--blocked) 14%, transparent); }
 
 /* The five-zone drop overlay: a centred box is "move here as a tab", the
    strip beyond it on whichever edge is nearest is "split this way". */
 .pane-drop {
   position: absolute; inset: 0; z-index: 5; pointer-events: none;
-  background: rgba(217, 119, 87, 0.06);
+  background: color-mix(in srgb, var(--clay) 6%, transparent);
 }
 .pane-drop-target {
-  position: absolute; background: rgba(217, 119, 87, 0.32);
-  border: 1.5px solid rgba(217, 119, 87, 0.7); border-radius: 6px;
+  position: absolute; background: color-mix(in srgb, var(--clay) 32%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--clay) 70%, transparent); border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
   font-size: 11px; font-weight: 600; color: #fff7f2; letter-spacing: 0.01em;
 }
@@ -1295,7 +1481,7 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .rename-input {
   flex: 1; min-width: 0;
   padding: 1px 6px; border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(217, 119, 87, 0.45);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid color-mix(in srgb, var(--clay) 45%, transparent);
   color: var(--title); font: inherit; font-size: 12.5px; outline: none;
 }
 
@@ -1307,7 +1493,7 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   border-right: 1px solid var(--hair);
 }
 /* Standalone in Settings, not sitting beside another term-head button. */
-.settings-body .font-size-control { border-right: 0; padding-right: 0; margin-right: 0; }
+.settings-row-body .font-size-control { border-right: 0; padding-right: 0; margin-right: 0; }
 .font-size-control .icon-button { width: 20px; height: 20px; }
 .font-size-control .icon-button:disabled { opacity: 0.35; cursor: default; }
 .font-size-value {
@@ -1387,7 +1573,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 
 .ws-rename { padding: 4px 8px; }
 .ws-rename input {
-  width: 100%; background: var(--card); border: 1px solid rgba(217, 119, 87, 0.45);
+  width: 100%; background: var(--card); border: 1px solid color-mix(in srgb, var(--clay) 45%, transparent);
   border-radius: 6px; color: var(--title); padding: 5px 7px;
   font-family: var(--display); font-size: 12.5px; font-weight: 600;
 }
@@ -1397,7 +1583,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
  * next to a tree people click through quickly, and although it deletes nothing
  * it is still not something to hit by accident. */
 .icon-button.remove { color: var(--dim); }
-.icon-button.remove:hover { color: var(--blocked-bright); background: rgba(196, 99, 90, 0.12); }
+.icon-button.remove:hover { color: var(--blocked-bright); background: color-mix(in srgb, var(--blocked) 12%, transparent); }
 
 /* --- The overflow menu --- */
 .ws-menu-host { position: relative; display: flex; }
@@ -1414,8 +1600,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
   color: var(--body); font-size: 12px; text-align: left;
 }
 .menu button:hover { background: rgba(255, 255, 255, 0.06); color: var(--title); }
-.menu button.menu-warn:hover { background: rgba(196, 99, 90, 0.14); color: var(--blocked-bright); }
-.menu button.active { color: rgb(217, 119, 87); background: rgba(217, 119, 87, 0.1); }
+.menu button.menu-warn:hover { background: color-mix(in srgb, var(--blocked) 14%, transparent); color: var(--blocked-bright); }
+.menu button.active { color: var(--clay); background: color-mix(in srgb, var(--clay) 10%, transparent); }
 .menu .menu-note {
   margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--dim);
 }
@@ -1495,7 +1681,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 }
 /* Amber, not red: uncommitted work is the normal state of a working tree,
  * and rule 3 keeps red for something that failed. */
-.repo-pill.dirty { background: rgba(208, 160, 90, 0.16); color: var(--running); }
+.repo-pill.dirty { background: color-mix(in srgb, var(--running) 16%, transparent); color: var(--running); }
 .repo-pill.quiet-pill { color: var(--dim); }
 .repo-main .dot { flex: none; margin: 0 4px; opacity: 0.8; }
 /* Terminal and remove appear on hover and take no space until then, so the
@@ -1594,13 +1780,13 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .change-row .icon-button.revert { flex: none; opacity: 0; margin-right: 2px; }
 .change-row:hover .icon-button.revert,
 .change-row .icon-button.revert:focus-visible { opacity: 1; }
-.change-row .icon-button.revert:hover, .change-group-row .icon-button.revert-all:hover { color: var(--running); background: rgba(208, 160, 90, 0.14); }
+.change-row .icon-button.revert:hover, .change-group-row .icon-button.revert-all:hover { color: var(--running); background: color-mix(in srgb, var(--running) 14%, transparent); }
 .change {
   display: flex; align-items: baseline; gap: 7px; width: 100%; min-width: 0;
   background: none; border: 0; border-radius: 6px; padding: 3px 8px; text-align: left;
 }
 .change:hover { background: rgba(255, 255, 255, 0.03); }
-.change.selected { background: rgba(217, 119, 87, 0.14); }
+.change.selected { background: color-mix(in srgb, var(--clay) 14%, transparent); }
 .change.selected .change-name { color: var(--title); }
 
 .change-group-row { display: flex; align-items: center; }
@@ -1613,8 +1799,8 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .confirm-actions button {
   flex: 1; justify-content: center; border: 1px solid var(--hair-strong); border-radius: 6px;
 }
-.confirm-actions button.menu-warn { color: var(--running); border-color: rgba(208, 160, 90, 0.45); }
-.confirm-actions button.menu-warn:hover { background: rgba(208, 160, 90, 0.14); color: var(--running); }
+.confirm-actions button.menu-warn { color: var(--running); border-color: color-mix(in srgb, var(--running) 45%, transparent); }
+.confirm-actions button.menu-warn:hover { background: color-mix(in srgb, var(--running) 14%, transparent); color: var(--running); }
 .change-mark {
   font-family: var(--mono); font-size: 10.5px; font-weight: 500;
   width: 10px; flex: none; color: var(--meta);
@@ -1704,14 +1890,14 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 
 .conflict {
   flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px;
-  background: rgba(208, 160, 90, 0.12); border-bottom: 1px solid rgba(208, 160, 90, 0.28);
+  background: color-mix(in srgb, var(--running) 12%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--running) 28%, transparent);
   font-size: 11.5px; color: var(--body);
 }
 .conflict svg { color: var(--running); flex: none; }
 .conflict .grow { flex: 1; }
 .conflict .ghost, .conflict .primary { flex: none; padding: 4px 11px; font-size: 11px; }
 .conflict.error-bar {
-  background: rgba(196, 99, 90, 0.12); border-bottom-color: rgba(196, 99, 90, 0.3);
+  background: color-mix(in srgb, var(--blocked) 12%, transparent); border-bottom-color: color-mix(in srgb, var(--blocked) 30%, transparent);
   color: var(--blocked-bright);
 }
 
@@ -1778,9 +1964,9 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 /* Tint the surface, never box it — rule 4. Green and red here are the
  * conventional diff colours and the one sanctioned exception to rule 3: red in
  * a diff means "removed", which everybody already reads correctly. */
-.diff-add { background: rgba(111, 169, 127, 0.11); }
+.diff-add { background: color-mix(in srgb, var(--pass) 11%, transparent); }
 .diff-add .diff-mark { color: var(--pass); }
-.diff-del { background: rgba(196, 99, 90, 0.11); }
+.diff-del { background: color-mix(in srgb, var(--blocked) 11%, transparent); }
 .diff-del .diff-mark { color: var(--blocked-bright); }
 .diff-meta .code-line { color: var(--dim); font-style: italic; }
 
@@ -1831,8 +2017,8 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 :root[data-theme='light'] .icon-button.boxed:hover:not(:disabled) {
   background: rgba(20, 20, 19, 0.07);
 }
-:root[data-theme='light'] .diff-add { background: rgba(78, 138, 98, 0.13); }
-:root[data-theme='light'] .diff-del { background: rgba(180, 84, 74, 0.11); }
+:root[data-theme='light'] .diff-add { background: color-mix(in srgb, var(--pass) 13%, transparent); }
+:root[data-theme='light'] .diff-del { background: color-mix(in srgb, var(--blocked) 11%, transparent); }
 :root[data-theme='light'] .status-bar .save { color: #fff7f2; }
 
 :root[data-theme='light'] .status-pill { background: rgba(20, 20, 19, 0.05); }
@@ -1849,24 +2035,24 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .quick {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 11px; border-radius: 8px;
-  background: rgba(124, 160, 212, 0.10); color: #9dbbe4;
-  border: 1px dashed rgba(124, 160, 212, 0.55);
+  background: color-mix(in srgb, var(--waiting) 10%, transparent); color: #9dbbe4;
+  border: 1px dashed color-mix(in srgb, var(--waiting) 55%, transparent);
   font-size: 12px; font-weight: 500;
 }
-.quick:hover:not(:disabled) { background: rgba(124, 160, 212, 0.16); border-color: var(--waiting); }
+.quick:hover:not(:disabled) { background: color-mix(in srgb, var(--waiting) 16%, transparent); border-color: var(--waiting); }
 .quick:disabled { opacity: 0.75; cursor: default; }
 .quick-tag {
   font-size: 9.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
   padding: 1px 5px; border-radius: 4px;
-  background: rgba(124, 160, 212, 0.18); color: #9dbbe4;
+  background: color-mix(in srgb, var(--waiting) 18%, transparent); color: #9dbbe4;
 }
-.quick-tag.paid { background: rgba(217, 119, 87, 0.14); color: var(--clay-bright); text-transform: none; letter-spacing: 0; font-family: var(--mono); }
+.quick-tag.paid { background: color-mix(in srgb, var(--clay) 14%, transparent); color: var(--clay-bright); text-transform: none; letter-spacing: 0; font-family: var(--mono); }
 /* One pill, two buttons: the label runs it, the model tag picks the model. */
 .quick-split { position: relative; display: inline-flex; }
 .quick-split .quick-run { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right-style: none; }
 .quick-split .quick-model {
   border-top-left-radius: 0; border-bottom-left-radius: 0; padding-left: 8px; gap: 5px;
-  border-left: 1px solid rgba(124, 160, 212, 0.3);
+  border-left: 1px solid color-mix(in srgb, var(--waiting) 30%, transparent);
 }
 .quick-model-name { font-family: var(--mono); font-size: 11px; font-weight: 400; }
 .quick-model-menu { left: 0; right: auto; min-width: 300px; gap: 6px; padding: 6px 6px 8px; }
@@ -1879,24 +2065,24 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .menu .quick-model-other .ghost { width: auto; align-self: flex-end; padding: 4px 10px; font-size: 11.5px; }
 .menu .quick-model-other .ghost:disabled { opacity: 0.45; }
 .menu button.quick-model-type { color: var(--secondary); }
-.quick-model-other input:focus, .quick-model-field select:focus { outline: none; border-color: rgba(217, 119, 87, 0.5); }
+.quick-model-other input:focus, .quick-model-field select:focus { outline: none; border-color: color-mix(in srgb, var(--clay) 50%, transparent); }
 .quick-model-field select { padding: 5px 8px; }
 .quick-model-menu .menu-empty { margin: 2px 9px 0; }
 .detail-actions .action-divider { width: 1px; height: 20px; background: var(--hair-strong); margin: 0 2px; }
 
 .detail section.quick-card {
   margin-top: 22px; padding: 12px 15px;
-  border: 1px solid rgba(124, 160, 212, 0.35); border-radius: 10px;
-  background: rgba(124, 160, 212, 0.05);
+  border: 1px solid color-mix(in srgb, var(--waiting) 35%, transparent); border-radius: 10px;
+  background: color-mix(in srgb, var(--waiting) 5%, transparent);
 }
 .quick-card.stale .quick-card-body { opacity: 0.7; }
-.quick-card.failed { border-color: rgba(196, 99, 90, 0.4); background: rgba(196, 99, 90, 0.06); }
+.quick-card.failed { border-color: color-mix(in srgb, var(--blocked) 40%, transparent); background: color-mix(in srgb, var(--blocked) 6%, transparent); }
 .quick-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .quick-card-title { font-size: 13px; font-weight: 600; color: var(--strong); }
 .quick-card-meta { font-size: 11px; color: var(--muted); }
 .quick-stale {
   font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
-  background: rgba(208, 160, 90, 0.16); color: var(--running);
+  background: color-mix(in srgb, var(--running) 16%, transparent); color: var(--running);
 }
 .quick-card-body { margin-top: 8px; }
 .quick-card-body .prose ul { margin: 0; padding-left: 18px; }
@@ -1910,9 +2096,9 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
   text-transform: uppercase; color: var(--dim);
 }
 
-:root[data-theme='light'] .quick { background: rgba(76, 116, 174, 0.07); color: var(--waiting); border-color: rgba(76, 116, 174, 0.5); }
-:root[data-theme='light'] .quick-tag { background: rgba(76, 116, 174, 0.12); color: var(--waiting); }
-:root[data-theme='light'] .detail section.quick-card { background: rgba(76, 116, 174, 0.05); border-color: rgba(76, 116, 174, 0.3); }
+:root[data-theme='light'] .quick { background: color-mix(in srgb, var(--waiting) 7%, transparent); color: var(--waiting); border-color: color-mix(in srgb, var(--waiting) 50%, transparent); }
+:root[data-theme='light'] .quick-tag { background: color-mix(in srgb, var(--waiting) 12%, transparent); color: var(--waiting); }
+:root[data-theme='light'] .detail section.quick-card { background: color-mix(in srgb, var(--waiting) 5%, transparent); border-color: color-mix(in srgb, var(--waiting) 30%, transparent); }
 .quick-test-row { display: flex; align-items: center; gap: 12px; }
 .quick-test-row .settings-note { margin: 0; }
 
@@ -1992,7 +2178,7 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .price-check-table strong { color: var(--clay-bright); font-weight: 600; }
 .price-check-new {
   margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 10px;
-  color: var(--clay-bright); background: rgba(217, 119, 87, 0.12);
+  color: var(--clay-bright); background: color-mix(in srgb, var(--clay) 12%, transparent);
 }
 
 /* --- Review decision (#34) --------------------------------------------------- */
@@ -2135,7 +2321,7 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
   background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 8px;
   padding: 6px 9px; color: var(--prose); font-family: var(--mono); font-size: 11.5px;
 }
-.run-test-env-site:focus { outline: none; border-color: rgba(217, 119, 87, 0.5); }
+.run-test-env-site:focus { outline: none; border-color: color-mix(in srgb, var(--clay) 50%, transparent); }
 .run-test-env-site::placeholder { color: var(--dim); }
 .run-test-accounts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 10px; }
 .run-test-accounts .checkbox-row { display: flex; align-items: center; gap: 7px; margin: 0; }
@@ -2172,8 +2358,8 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .row.quick-job:hover .quick-job-state:not(.running), .row.quick-job:focus-within .quick-job-state:not(.running) { display: none; }
 .dot.pulse { animation: dot-pulse 1.4s ease-in-out infinite; }
 @keyframes dot-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(208, 160, 90, 0.45); }
-  50% { box-shadow: 0 0 0 4px rgba(208, 160, 90, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--running) 45%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--running) 0%, transparent); }
 }
 @media (prefers-reduced-motion: reduce) { .dot.pulse { animation: none; } }
 
@@ -2182,7 +2368,7 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .session-close-confirm { z-index: 40; width: 260px; }
 .session-close-confirm p strong { color: var(--title); font-weight: 600; }
 .session-close-confirm button.menu-warn { color: var(--running); font-weight: 500; }
-.session-close-confirm button.menu-warn:hover { background: rgba(208, 160, 90, 0.14); color: var(--running); }
+.session-close-confirm button.menu-warn:hover { background: color-mix(in srgb, var(--running) 14%, transparent); color: var(--running); }
 
 /* Ticket status filter: every workflow status, with how many tickets are in it. */
 .filter-option-name { flex: 1; min-width: 0; }
@@ -2194,7 +2380,7 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 
 /* A quick card's Copy: small, beside Refresh. Turns green for a moment once done. */
 .ghost.quick-copy { padding: 2px 8px; font-size: 11px; gap: 5px; }
-.ghost.quick-copy.copied { color: var(--pass); border-color: rgba(111, 169, 127, 0.4); }
+.ghost.quick-copy.copied { color: var(--pass); border-color: color-mix(in srgb, var(--pass) 40%, transparent); }
 .quick-card-actions { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .quick-card-actions .quick-card-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .quick-card-actions > :not(.quick-card-meta) { flex: none; }
@@ -2234,10 +2420,10 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
    not the quick card's blue: it came from an agent run (the clay buttons). */
 .detail section.agent-report {
   margin-top: 22px; padding: 12px 15px;
-  border: 1px solid rgba(217, 119, 87, 0.3); border-radius: 10px;
-  background: rgba(217, 119, 87, 0.04);
+  border: 1px solid color-mix(in srgb, var(--clay) 30%, transparent); border-radius: 10px;
+  background: color-mix(in srgb, var(--clay) 4%, transparent);
 }
-.agent-report-tag { background: rgba(217, 119, 87, 0.14); color: var(--clay-bright); }
+.agent-report-tag { background: color-mix(in srgb, var(--clay) 14%, transparent); color: var(--clay-bright); }
 .agent-report-verdict { font-size: 11.5px; font-weight: 600; color: var(--meta); }
 .agent-report-verdict.pass { color: var(--pass); }
 .agent-report-verdict.running { color: var(--running); }
@@ -2391,3 +2577,212 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .rail-item.drop-before::after { top: -3px; }
 .rail-item.drop-after::after { bottom: -3px; }
 .rail-item.dragged { opacity: 0.45; }
+
+/* --- Live screenshots and Open in browser (item 90, C + D) -------------------
+   While a run's agent is still going, its viewer leads with "Now": the newest
+   screenshot large, and the step the agent says it's on. Live is the green
+   of something running, a dot plus a word (rule 6). */
+.run-viewer .sheet-head { gap: 10px; justify-content: flex-start; }
+.run-live { font-size: 11.5px; color: var(--meta); }
+.run-site-open { font-size: 12px; }
+.run-now { margin-bottom: 18px; }
+.run-now .run-section-head { gap: 12px; }
+.run-now-step {
+  flex: 1; min-width: 0; font-size: 12.5px; color: var(--prose);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.run-now-shot {
+  display: block; width: 100%; padding: 0; overflow: hidden; cursor: zoom-in;
+  background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 10px;
+}
+.run-now-shot img { display: block; width: 100%; max-height: 52vh; object-fit: contain; background: var(--rail); }
+.run-now-caption {
+  display: flex; gap: 10px; align-items: baseline; padding: 7px 10px;
+  border-top: 1px solid var(--hair); text-align: left;
+}
+/* A screenshot that just arrived: a brief ring in the live green (clay is for selection, rule 2). */
+.run-shot-item.fresh .run-shot { box-shadow: 0 0 0 2px var(--pass); transition: box-shadow 400ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .run-shot-item.fresh .run-shot { transition: none; } }
+
+/* --- Quick commands (item 91) -------------------------------------------------
+   A split button in the title bar (▶ last command | ⌄ list), and its menu:
+   search, rows of name + command (mono, rule 5), actions on hover only, and an
+   inline editor. The menu sits inside the title bar's drag region, so all of
+   it opts out — or a click in the textarea would move the window. */
+.quick-commands, .qc-menu, .qc-menu * { -webkit-app-region: no-drag; }
+.qc-split {
+  display: flex; align-items: stretch; height: 26px;
+  border: 1px solid var(--hair-strong); border-radius: 7px; overflow: hidden;
+}
+.qc-split button {
+  background: none; border: 0; color: var(--meta); font-size: 12px;
+  display: inline-flex; align-items: center; gap: 7px;
+}
+.qc-split button:hover { color: var(--title); background: rgba(255, 255, 255, 0.05); }
+.qc-run { padding: 0 10px; max-width: 220px; }
+.qc-run-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qc-toggle { padding: 0 7px; border-left: 1px solid var(--hair-strong) !important; }
+
+.menu.qc-menu { width: 400px; max-height: 70vh; overflow-y: auto; padding: 6px; }
+.qc-search {
+  display: flex; align-items: center; gap: 8px; padding: 4px 6px 8px 8px;
+  border-bottom: 1px solid var(--hair); margin-bottom: 5px; color: var(--dim);
+}
+.qc-search input {
+  flex: 1; min-width: 0; background: none; border: 0; outline: none;
+  color: var(--prose); font: inherit; font-size: 12.5px;
+}
+.qc-menu .icon-button { width: 22px; height: 22px; padding: 0; display: grid; place-items: center; flex: none; }
+.qc-list { list-style: none; margin: 0; padding: 0; }
+.qc-row { display: flex; align-items: center; border-radius: 7px; }
+.qc-row.active { background: rgba(255, 255, 255, 0.05); }
+.menu .qc-row-run {
+  flex: 1; min-width: 0; align-items: flex-start; gap: 9px; padding: 7px 8px;
+  background: none !important;
+}
+.qc-row-play { color: var(--dim); padding-top: 3px; flex: none; }
+.qc-row.active .qc-row-play { color: var(--pass); }
+.qc-row-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.qc-row-name { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--title); }
+.qc-row-name .state { font-size: 10.5px; color: var(--meta); }
+.qc-row-command {
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Take no space until hover, so the command isn't cut short for icons (DESIGN: rows). */
+.qc-row-actions { display: none; gap: 2px; padding-right: 4px; }
+.qc-row:hover .qc-row-actions, .qc-row:focus-within .qc-row-actions { display: flex; }
+.menu .qc-row-actions .icon-button { width: 24px; color: var(--muted); }
+.menu .qc-row-actions .icon-button:hover { color: var(--title); }
+/* "Are you sure" is amber, not red: nothing has failed (rule 3). */
+.qc-confirm {
+  display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 10px; border-radius: 7px;
+  background: rgba(217, 169, 87, 0.1); font-size: 12px; color: var(--prose);
+}
+.menu .qc-confirm button { width: auto; }
+.menu .qc-delete { color: var(--running) !important; border: 1px solid rgba(217, 169, 87, 0.4) !important; }
+.menu .qc-add { margin-top: 4px; color: var(--meta); border-top: 1px solid var(--hair); border-radius: 0 0 6px 6px; padding: 8px 9px; }
+.qc-empty { margin: 8px 10px 10px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.qc-error { margin: 4px 8px 6px; font-size: 12px; color: var(--blocked-bright); }
+
+.qc-editor { display: flex; flex-direction: column; gap: 10px; padding: 6px 6px 4px; }
+.qc-editor-head { display: flex; align-items: center; font-size: 12.5px; color: var(--title); }
+.qc-editor label { display: flex; flex-direction: column; gap: 5px; }
+.qc-editor label > span:first-child { font-size: 11.5px; color: var(--muted); }
+.qc-editor em { font-style: normal; color: var(--dim); }
+.qc-editor input, .qc-editor textarea {
+  background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 7px;
+  padding: 7px 9px; color: var(--prose); font: inherit; font-size: 12.5px; width: 100%;
+}
+.qc-editor textarea { font-family: var(--mono); font-size: 11.5px; line-height: 1.5; resize: vertical; }
+.qc-editor input:focus, .qc-editor textarea:focus { outline: none; border-color: color-mix(in srgb, var(--clay) 50%, transparent); }
+.qc-folder { display: flex; gap: 6px; }
+.qc-folder input { font-family: var(--mono); font-size: 11.5px; }
+.menu .qc-editor .ghost, .menu .qc-editor .link { width: auto; }
+.qc-editor-actions { display: flex; align-items: center; gap: 10px; }
+.qc-hint { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+/* `.menu button` flattens every button into a row; these are real buttons. */
+.menu.qc-menu button.ghost {
+  display: inline-flex; width: auto; flex: none; padding: 5px 11px; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.10); color: var(--prose);
+}
+.menu.qc-menu button.ghost:hover:not(:disabled) { color: var(--title); border-color: var(--hair-strong); }
+:root[data-theme='light'] .menu.qc-menu button.ghost { background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.12); }
+.menu.qc-menu button.link { width: auto; padding: 0; background: none; }
+:root[data-theme='light'] .qc-row.active,
+:root[data-theme='light'] .qc-split button:hover { background: rgba(0, 0, 0, 0.05); }
+:root[data-theme='light'] .qc-confirm { background: rgba(190, 140, 50, 0.12); }
+
+/* Settings › Dictation › speech model (item 97). */
+.speech-row { display: flex; gap: 6px; align-items: center; }
+.speech-row > input, .speech-row > select { flex: 1; min-width: 0; }
+.speech-row > button { flex: none; }
+.speech-test { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 2px; }
+.speech-test-ok { color: var(--pass); font-size: 12px; }
+.speech-test-fail { color: var(--blocked-bright); font-size: 12px; }
+.settings-note.warn-note { color: var(--running); }
+
+/* ⌘P, go to file (item 100). Top-centre, as VS Code's picker sits; the
+   window stays visible behind it so it reads as a glance, not a page. */
+.quick-open-backdrop { position: fixed; inset: 0; z-index: 60; background: color-mix(in srgb, var(--rail) 35%, transparent); }
+.quick-open {
+  position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+  width: min(680px, calc(100vw - 32px)); max-height: min(560px, calc(100vh - 96px));
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--card); border: 1px solid var(--hair-strong); border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+:root[data-theme='light'] .quick-open { box-shadow: 0 18px 48px rgba(40, 36, 30, 0.22); }
+.quick-open-input {
+  margin: 8px; padding: 8px 10px; border-radius: 7px; font: inherit; font-size: 13.5px;
+  background: var(--rail); color: var(--title); border: 1px solid color-mix(in srgb, var(--clay) 55%, transparent); outline: none;
+}
+.quick-open-input::placeholder { color: var(--dim); }
+.quick-open-list { overflow-y: auto; padding: 0 6px 6px; }
+.quick-open-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer;
+  white-space: nowrap; min-width: 0;
+}
+.quick-open-row.active { background: color-mix(in srgb, var(--clay) 16%, transparent); }
+.quick-open-tag {
+  flex: none; width: 22px; text-align: center; font-family: var(--mono); font-size: 9.5px; font-weight: 500;
+  color: var(--muted);
+}
+.quick-open-name { flex: none; color: var(--title); font-size: 13px; }
+.quick-open-dir {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  color: var(--dim); font-size: 12px; direction: rtl; text-align: left;
+}
+.quick-open-dir > * { direction: ltr; unicode-bidi: embed; }
+.quick-open-note { flex: none; margin-left: auto; color: var(--muted); font-size: 11.5px; }
+.quick-open-row mark { background: none; color: var(--clay-bright); font-weight: 600; }
+.quick-open-empty { padding: 14px 10px; color: var(--muted); font-size: 12.5px; }
+.quick-open-foot { padding: 6px 14px; border-top: 1px solid var(--hair); color: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+
+/* Item 103: the small print around the work — terminal tabs, a session's
+   header, the status bar — follows its own text-size setting (Settings ›
+   Text & terminal, or ⌘+/⌘− after clicking in one of them). */
+.pane-tabs, .term-head, .statusbar { zoom: var(--chrome-zoom, 1); }
+
+/* Startup, service by service (item 101). Where the queues and panes will
+   be; the titlebar and status bar are already there around it. */
+.boot { flex: 1; min-height: 0; display: grid; place-items: center; background: var(--editor); }
+.boot-card { width: min(340px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 6px; }
+.boot-card h1 { margin: 0; font-family: var(--display); font-size: 18px; font-weight: 600; color: var(--title); }
+.boot-card p { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
+.boot-card ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.boot-step {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: var(--card); border: 1px solid var(--hair); border-radius: 9px;
+}
+.boot-step.failed { border-color: color-mix(in srgb, var(--blocked) 35%, transparent); background: color-mix(in srgb, var(--blocked) 7%, var(--card)); }
+.boot-name { flex: none; color: var(--title); font-size: 13px; }
+.boot-value {
+  margin-left: auto; min-width: 0; font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.boot-step.failed .boot-value { color: var(--blocked-bright); }
+.boot-mark { flex: none; width: 12px; text-align: center; font-size: 12px; font-weight: 600; }
+.boot-mark.pass { color: var(--pass); }
+.boot-mark.fail { color: var(--blocked-bright); }
+.boot-spin {
+  flex: none; width: 12px; height: 12px; border-radius: 50%;
+  border: 1.5px solid var(--hair-strong); border-top-color: var(--running);
+  animation: boot-spin 0.9s linear infinite;
+}
+@keyframes boot-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .boot-spin { animation: none; border-top-color: var(--running); } }
+
+/* Plan limits under the Agent picker (item 108): what the agent last wrote,
+   as meters. Green → amber at 70% → red at 90%; a passed window reads "reset". */
+.agent-limits { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
+.agent-limit { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--meta); }
+.agent-limit-label { flex: none; width: 46px; color: var(--muted); }
+.agent-limit-bar { flex: none; width: 56px; height: 4px; border-radius: 2px; background: var(--hair-strong); overflow: hidden; }
+.agent-limit-bar i { display: block; height: 100%; border-radius: 2px; background: var(--pass); }
+.agent-limit.running .agent-limit-bar i { background: var(--running); }
+.agent-limit.fail .agent-limit-bar i { background: var(--blocked-bright); }
+.agent-limit.fail .agent-limit-value { color: var(--blocked-bright); }
+.agent-limit.reset .agent-limit-bar i { background: var(--dim); }
+.agent-limit-value { flex: none; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agent-limits-age { font-size: 10px; color: var(--dim); }

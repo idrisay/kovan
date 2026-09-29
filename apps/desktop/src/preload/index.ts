@@ -19,6 +19,10 @@ const api = {
   loadMoreMerged: (limit: number) => ipcRenderer.invoke('baton:merged-more', limit),
   settings: () => ipcRenderer.invoke('baton:settings'),
   setSetting: (key: string, value: unknown) => ipcRenderer.invoke('baton:set-setting', key, value),
+  /** Native chrome's side of the painted theme — see `renderer/appearance.tsx`. */
+  setNativeTheme: (source: 'system' | 'light' | 'dark'): Promise<void> => ipcRenderer.invoke('baton:native-theme', source),
+  /** The accent colour chosen in System Settings, as "#rrggbb". */
+  systemAccent: (): Promise<string | undefined> => ipcRenderer.invoke('baton:system-accent'),
   setSecret: (key: string, value: string) => ipcRenderer.invoke('baton:set-secret', key, value),
   onSnapshot: (listener: (snapshot: unknown) => void) => {
     const handler = (_event: unknown, snapshot: unknown) => listener(snapshot);
@@ -106,12 +110,34 @@ const api = {
   runText: (file: string) => ipcRenderer.invoke('baton:run-text', file),
   runImage: (file: string) => ipcRenderer.invoke('baton:run-image', file),
   runReveal: (file: string) => ipcRenderer.invoke('baton:run-reveal', file),
+  runWatch: (directory: string, on: boolean) => ipcRenderer.invoke('baton:run-watch', directory, on),
+  agentLimits: () => ipcRenderer.invoke('baton:agent-limits'),
+  runSiteOpen: (directory: string, shot?: string) => ipcRenderer.invoke('baton:run-site-open', directory, shot),
+  onRunChanged: (listener: (directory: string) => void) => {
+    const handler = (_event: unknown, directory: string) => listener(directory);
+    ipcRenderer.on('baton:run-changed', handler);
+    return () => ipcRenderer.removeListener('baton:run-changed', handler);
+  },
+
+  // Quick commands (item 91)
+  commands: () => ipcRenderer.invoke('baton:commands'),
+  commandSave: (input: { id?: string; name: string; command: string; cwd: string }) =>
+    ipcRenderer.invoke('baton:command-save', input),
+  commandDuplicate: (id: string) => ipcRenderer.invoke('baton:command-duplicate', id),
+  commandDelete: (id: string) => ipcRenderer.invoke('baton:command-delete', id),
+  commandRun: (id: string) => ipcRenderer.invoke('baton:command-run', id),
+  commandFolder: () => ipcRenderer.invoke('baton:command-folder'),
 
   // Dictation (item 88)
   dictationStart: () => ipcRenderer.invoke('baton:dictation-start'),
   dictationStop: () => ipcRenderer.invoke('baton:dictation-stop'),
   dictationCancel: () => ipcRenderer.invoke('baton:dictation-cancel'),
   dictationStatus: (refresh?: boolean) => ipcRenderer.invoke('baton:dictation-status', refresh === true),
+  speechSetup: () => ipcRenderer.invoke('baton:speech-setup'),
+  quickOpenFiles: (force?: boolean) => ipcRenderer.invoke('baton:quick-open-files', force === true),
+  speechKey: (provider: string, key: string) => ipcRenderer.invoke('baton:speech-key', provider, key),
+  speechTest: (provider: string) => ipcRenderer.invoke('baton:speech-test', provider),
+  speechPickModel: () => ipcRenderer.invoke('baton:speech-pick-model'),
   privacyOpen: (pane: 'mic' | 'speech') => ipcRenderer.invoke('baton:privacy-open', pane),
   onDictation: (listener: (event: unknown) => void) => {
     const handler = (_event: unknown, payload: unknown) => listener(payload);

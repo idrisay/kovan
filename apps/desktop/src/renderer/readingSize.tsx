@@ -27,6 +27,9 @@ interface Scale {
 
 const READING: Scale = { key: 'baton.reading-size', variable: '--reading-zoom', event: 'baton:reading-size' };
 const SIDEBAR: Scale = { key: 'baton.sidebar-size', variable: '--sidebar-zoom', event: 'baton:sidebar-size' };
+/** Item 103: the terminal tab strip, a session's header and the status bar —
+ *  the small print around the work, too small to read on a large screen. */
+const CHROME: Scale = { key: 'baton.chrome-size', variable: '--chrome-zoom', event: 'baton:chrome-size' };
 
 function read(scale: Scale): number {
   try {
@@ -52,10 +55,12 @@ function step(scale: Scale, direction: number) {
 export function restoreReadingSize() {
   apply(READING, read(READING));
   apply(SIDEBAR, read(SIDEBAR));
+  apply(CHROME, read(CHROME));
 }
 
 export const stepReadingSize = (direction: number) => step(READING, direction);
 export const stepSidebarSize = (direction: number) => step(SIDEBAR, direction);
+export const stepChromeSize = (direction: number) => step(CHROME, direction);
 
 function useScale(scale: Scale): [number, (direction: number) => void] {
   const [percent, setPercent] = useState(() => read(scale));
@@ -72,6 +77,7 @@ function useScale(scale: Scale): [number, (direction: number) => void] {
 
 export const useReadingSize = () => useScale(READING);
 export const useSidebarSize = () => useScale(SIDEBAR);
+export const useChromeSize = () => useScale(CHROME);
 
 function ScaleControl({ label, noun, value, onBump }: { label: string; noun: string; value: number; onBump: (direction: number) => void }) {
   return (
@@ -90,6 +96,11 @@ function ScaleControl({ label, noun, value, onBump }: { label: string; noun: str
 export function ReadingSizeControl() {
   const [percent, bump] = useReadingSize();
   return <ScaleControl label="Ticket and pull request text size" noun="reading text" value={percent} onBump={bump} />;
+}
+
+export function ChromeSizeControl() {
+  const [percent, bump] = useChromeSize();
+  return <ScaleControl label="Tabs, session header and status bar text size" noun="tab and status bar text" value={percent} onBump={bump} />;
 }
 
 export function SidebarSizeControl() {

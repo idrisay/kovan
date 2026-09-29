@@ -2,6 +2,7 @@ node_modules/
 dist/
 out/
 release/
+release-next/
 *.tsbuildinfo
 .DS_Store
 .vite/

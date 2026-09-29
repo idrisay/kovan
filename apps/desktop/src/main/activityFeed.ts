@@ -16,7 +16,7 @@
 
 import * as path from 'node:path';
 import {
-  ACTIVITY_KINDS, addActivity, diffActivity,
+  ACTIVITY_KINDS, addActivity, diffActivity, githubAnswered,
   type ActivityEvent, type ActivityKind, type ActivityPoll, type ActivitySeen
 } from '@baton/core';
 import type { DesktopHost } from './host';
@@ -75,7 +75,7 @@ export class ActivityFeed {
   private pollOf(snapshot: Snapshot): ActivityPoll {
     const failed = (provider: string) => snapshot.errors.some((e) => e.provider === provider);
     const poll: ActivityPoll = {};
-    if (snapshot.connected.includes('github') && !failed('github') && snapshot.viewer) {
+    if (githubAnswered(snapshot)) {
       poll.github = { viewer: snapshot.viewer, mine: snapshot.mine, reviewRequested: snapshot.reviewRequested };
     }
     const jiraSetUp = Boolean(this.host.config.get('jira.baseUrl', '') && this.host.config.get('jira.email', ''));

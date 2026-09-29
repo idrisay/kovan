@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { CloseIcon } from './icons';
 import { Prose } from './Prose';
 import { highlightLines } from './languages';
@@ -16,6 +17,16 @@ const RUN_KIND_LABEL: Record<RunKind, string> = {
 };
 
 const IMAGE_NAME = /\.(png|jpe?g|gif|webp)$/i;
+/** `$BATON_STATUS`: the agent's current step, shown as a caption — not a file to list. */
+const STATUS_FILE = 'status.txt';
+
+/** "12 s ago" for the newest screenshot while a run is live. */
+function ago(iso: string, now: number): string {
+  const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return `${seconds} s ago`;
+  const minutes = Math.floor(seconds / 60);
+  return minutes < 60 ? `${minutes} min ago` : new Date(iso).toLocaleTimeString(undefined, { timeStyle: 'short' });
+}
 const MARKDOWN_NAME = /\.mdx?$/i;
 
 /**
@@ -64,29 +75,80 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
   const [loading, setLoading] = useState(false);
   const [readError, setReadError] = useState<string>();
 
+  // What the files looked like when last fetched, so a change fetches only
+  // what's new or rewritten, not every screenshot again (item 90).
+  const fetched = useRef<Record<string, string>>({});
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
+  const [status, setStatus] = useState('');
+
+  const load = useCallback(async (cancelled: () => boolean) => {
+    const found = await window.baton.runFiles(run.directory);
+    if (cancelled()) return;
+    setFiles(found);
+    const changed = found.filter((file) => fetched.current[file.path] !== file.modifiedAt);
+    const pairs = await Promise.all(
+      changed.map(async (file): Promise<readonly [string, string]> => {
+        const absolute = `${run.directory}/${file.path}`;
+        try {
+          return IMAGE_NAME.test(file.name)
+            ? [file.path, await window.baton.runImage(absolute)]
+            : [file.path, snippet(await window.baton.runText(absolute))];
+        } catch {
+          return [file.path, ''];
+        }
+      })
+    );
+    if (cancelled()) return;
+    const firstLoad = Object.keys(fetched.current).length === 0;
+    for (const file of changed) fetched.current[file.path] = file.modifiedAt;
+    setPreviews((current) => ({ ...current, ...Object.fromEntries(pairs) }));
+    const statusFile = found.find((f) => f.path === STATUS_FILE);
+    if (statusFile) {
+      const line = await window.baton.runText(`${run.directory}/${STATUS_FILE}`).catch(() => '');
+      if (!cancelled()) setStatus(line.trim().split('\n').pop()?.slice(0, 200) ?? '');
+    }
+    // New screenshots flash for a moment, so the eye finds them — not on
+    // the first load, where everything is "new".
+    const added = firstLoad ? [] : changed.filter((f) => IMAGE_NAME.test(f.name)).map((f) => f.path);
+    if (added.length > 0) {
+      setFresh((current) => new Set([...current, ...added]));
+      setTimeout(() => setFresh((current) => new Set([...current].filter((p) => !added.includes(p)))), 2_500);
+    }
+  }, [run.directory]);
+
   useEffect(() => {
     let cancelled = false;
-    void window.baton.runFiles(run.directory).then(async (found) => {
-      if (cancelled) return;
-      setFiles(found);
-      const pairs = await Promise.all(
-        found.map(async (file): Promise<readonly [string, string]> => {
-          const absolute = `${run.directory}/${file.path}`;
-          try {
-            return IMAGE_NAME.test(file.name)
-              ? [file.path, await window.baton.runImage(absolute)]
-              : [file.path, snippet(await window.baton.runText(absolute))];
-          } catch {
-            return [file.path, ''];
-          }
-        })
-      );
-      if (!cancelled) setPreviews(Object.fromEntries(pairs));
+    fetched.current = {};
+    void load(() => cancelled);
+    // Live: the folder is watched while this is open, so a screenshot shows
+    // up here the moment the agent saves it.
+    void window.baton.runWatch(run.directory, true).catch(() => undefined);
+    const off = window.baton.onRunChanged((directory) => {
+      if (directory === run.directory) void load(() => cancelled);
     });
     return () => {
       cancelled = true;
+      off();
+      void window.baton.runWatch(run.directory, false).catch(() => undefined);
     };
+  }, [run.directory, load]);
+
+  // Whether its agent is still running: a session attached to this run folder.
+  const [live, setLive] = useState(false);
+  useEffect(() => {
+    const check = (list: { running: boolean; runDirectory?: string }[]) =>
+      setLive(list.some((s) => s.running && s.runDirectory === run.directory));
+    void window.baton.sessions().then(check);
+    return window.baton.onSessions(check);
   }, [run.directory]);
+
+  // "12 s ago" keeps counting while it's live.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!live) return undefined;
+    const tick = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(tick);
+  }, [live]);
 
   // The selected *document's* full text — its gallery preview is only a
   // snippet. Images never go through this: the lightbox reuses the same data
@@ -114,7 +176,14 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
   }, [selected, run.directory]);
 
   const images = useMemo(() => files?.filter((f) => IMAGE_NAME.test(f.name)) ?? [], [files]);
-  const documents = useMemo(() => files?.filter((f) => !IMAGE_NAME.test(f.name)) ?? [], [files]);
+  const documents = useMemo(
+    () => files?.filter((f) => !IMAGE_NAME.test(f.name) && f.path !== STATUS_FILE) ?? [],
+    [files]
+  );
+  const newest = useMemo(
+    () => [...images].sort((a, b) => a.modifiedAt.localeCompare(b.modifiedAt)).pop(),
+    [images]
+  );
 
   const isMarkdown = selected ? MARKDOWN_NAME.test(selected.name) : false;
   const lines = useMemo(
@@ -170,11 +239,35 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
     ? images[0]!.path.slice(0, images[0]!.path.lastIndexOf('/'))
     : undefined;
 
-  return (
+  // Portalled to <body> (item 98). The viewer is opened from inside a pull
+  // request or ticket pane, and `.pane` is a CSS container — which also makes
+  // it the containing block and stacking context for anything `fixed` inside
+  // it. Left there, the backdrop covered only the pane, and a docked terminal
+  // beside it painted over the viewer's right half. No z-index can climb out
+  // of that; only leaving the pane can.
+  return createPortal(
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet run-viewer" onClick={(e) => e.stopPropagation()}>
         <header className="sheet-head">
           <h2>{RUN_KIND_LABEL[run.kind]}</h2>
+          {live && (
+            <span className="state run-live" title="Its agent is still running; new screenshots appear as they're saved">
+              <span className="dot live" />
+              Live
+            </span>
+          )}
+          <span className="spacer" />
+          {run.site && (
+            <button
+              type="button" className="ghost run-site-open"
+              title={`The page in ${newest ? 'the screenshot shown' : 'the report'}, on ${run.site} — in your default browser`}
+              // The page of the screenshot on screen, not the site's front
+              // door, which redirects to the dashboard (item 109).
+              onClick={() => void window.baton.runSiteOpen(run.directory, (lightbox ?? newest)?.path.split('/').pop())}
+            >
+              Open this page on {run.environment || 'the site'}
+            </button>
+          )}
           <button type="button" className="icon-button boxed" aria-label="Close" title="Close" onClick={onClose}>
             <CloseIcon size={14} />
           </button>
@@ -217,10 +310,31 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
           </div>
         ) : (
           <div className="run-viewer-gallery">
+            {live && (
+              // While the agent works: what its browser showed last, and what
+              // it says it's doing now (item 90).
+              <section className="run-now">
+                <div className="run-section-head">
+                  <h3>Now</h3>
+                  {status && <span className="run-now-step">{status}</span>}
+                </div>
+                {newest ? (
+                  <button type="button" className="run-now-shot" onClick={() => setLightbox(newest)}>
+                    <img src={previews[newest.path]} alt={newest.name} />
+                    <span className="run-now-caption">
+                      <span className="run-shot-name">{newest.name}</span>
+                      <span className="run-shot-time">taken {ago(newest.modifiedAt, now)}</span>
+                    </span>
+                  </button>
+                ) : (
+                  <p className="quiet">Waiting for the first screenshot…</p>
+                )}
+              </section>
+            )}
             {files === undefined ? (
               <p className="quiet">Loading…</p>
-            ) : files.length === 0 ? (
-              <p className="quiet">Nothing was recorded for this run.</p>
+            ) : files.length === 0 || (live && images.length === 0 && documents.length === 0) ? (
+              live ? null : <p className="quiet">Nothing was recorded for this run.</p>
             ) : (
               <>
                 {images.length > 0 && (
@@ -233,7 +347,7 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
                     </div>
                     <div className="run-shots-grid">
                       {images.map((file, index) => (
-                        <figure key={file.path} className="run-shot-item">
+                        <figure key={file.path} className={fresh.has(file.path) ? 'run-shot-item fresh' : 'run-shot-item'}>
                           <button
                             type="button"
                             className="run-shot"
@@ -341,6 +455,7 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }

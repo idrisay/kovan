@@ -77,7 +77,10 @@
       "out/**/*",
       "package.json",
       "!**/*.map",
-      "!resources/alternatives/**"
+      "!resources/alternatives/**",
+      "!**/node_modules/node-pty/prebuilds/darwin-x64/**",
+      "!**/node_modules/node-pty/prebuilds/win32-*/**",
+      "!**/node_modules/node-pty/build/node_gyp_bins/**"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",

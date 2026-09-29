@@ -93,3 +93,17 @@ export interface FigmaFrame {
   height: number;
   imageUrl?: string;
 }
+
+/**
+ * GitHub's GraphQL budget as of the last poll (item 92): points left this
+ * hour, of how many, when it refills, and what the poll itself cost. The
+ * limit is per account and shared with everything else using it — agents'
+ * `gh` calls included.
+ */
+export interface GitHubBudget {
+  remaining: number;
+  limit: number;
+  /** ISO 8601. */
+  resetAt: string;
+  cost: number;
+}

@@ -250,6 +250,26 @@ function rememberedPick(kind: RunKind): string | undefined {
   }
 }
 
+/** Item 94: the accounts you unticked on each environment, so they stay unticked. */
+const UNTICKED_KEY = 'baton.test-env-unticked';
+
+function rememberedUnticked(environmentId: string): string[] {
+  try {
+    const all = JSON.parse(localStorage.getItem(UNTICKED_KEY) ?? '{}') as Record<string, unknown>;
+    const list = all[environmentId];
+    return Array.isArray(list) ? list.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberUnticked(environmentId: string, unticked: ReadonlySet<string>) {
+  try {
+    const all = JSON.parse(localStorage.getItem(UNTICKED_KEY) ?? '{}') as Record<string, string[]>;
+    localStorage.setItem(UNTICKED_KEY, JSON.stringify({ ...all, [environmentId]: [...unticked] }));
+  } catch { /* a convenience, not a requirement */ }
+}
+
 export function rememberPick(kind: RunKind, environmentId: string) {
   try {
     const all = JSON.parse(localStorage.getItem(PICK_KEY) ?? '{}') as Record<string, string>;
@@ -301,6 +321,11 @@ export function TestEnvironmentPicker({
     setSiteDraft(savedSite);
     setSite(savedSite);
   }, [environmentId, savedSite]);
+
+  // …and with the accounts you left unticked on it last time (item 94).
+  useEffect(() => {
+    setUnticked(new Set(environmentId ? rememberedUnticked(environmentId) : []));
+  }, [environmentId]);
 
   // Typing is debounced into the prompt rather than rebuilding it per keystroke.
   useEffect(() => {
@@ -358,7 +383,7 @@ export function TestEnvironmentPicker({
             <button
               key={e.id} type="button" role="radio" aria-checked={e.id === environmentId}
               className={e.id === environmentId ? 'active' : ''}
-              onClick={() => { setEnvironmentId(e.id); setUnticked(new Set()); rememberPick(kind, e.id); }}
+              onClick={() => { setEnvironmentId(e.id); rememberPick(kind, e.id); }}
             >
               {e.name || 'Unnamed'}
             </button>
@@ -375,6 +400,16 @@ export function TestEnvironmentPicker({
             onBlur={() => setSite(siteDraft)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setSite(siteDraft); } }}
           />
+        )}
+        {environment && /^https?:\/\/\S+$/i.test(siteDraft.trim()) && (
+          // Item 90 (D): look at it yourself, in your own browser.
+          <button
+            type="button" className="link run-test-env-open"
+            title={`Open ${siteDraft.trim()} in your default browser`}
+            onClick={() => void window.baton.openExternal(siteDraft.trim())}
+          >
+            Open
+          </button>
         )}
         {environment && siteDraft.trim() !== savedSite && siteDraft.trim() && (
           <button
@@ -398,6 +433,7 @@ export function TestEnvironmentPicker({
                   onChange={(e) => setUnticked((set) => {
                     const next = new Set(set);
                     if (e.target.checked) next.delete(a.id); else next.add(a.id);
+                    rememberUnticked(environmentId, next);
                     return next;
                   })}
                 />

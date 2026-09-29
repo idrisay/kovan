@@ -82,6 +82,8 @@ export interface ActivitySeen {
     decisions: Record<string, string>;
     /** `repo#number` → comment count, for your own open pull requests. */
     comments: Record<string, number>;
+    /** How those counts were counted — see COMMENT_BASIS. */
+    commentBasis?: string;
   };
   /** Set once Jira has answered at least once. */
   jira?: { tickets: string[] };
@@ -92,6 +94,15 @@ export interface ActivityPoll {
   github?: { viewer: string; mine: readonly PullSummary[]; reviewRequested: readonly PullSummary[] };
   jira?: { tickets: readonly JiraIssue[] };
 }
+
+/**
+ * What a comment count counts. When this changes, the counts saved under the
+ * old meaning can't be compared with new ones: item 92 switched from review
+ * threads' comments to conversation comments plus reviews, and every pull
+ * request whose number differed was reported as having a new comment. A
+ * different basis re-baselines silently instead.
+ */
+export const COMMENT_BASIS = 'comments+reviews';
 
 /** More than this many new things of one kind at once is a changed view, not news. */
 export const FLOOD = 10;
@@ -144,8 +155,11 @@ export function diffActivity(
         }
 
         const count = pull.commentCount;
-        const hadCount = before.comments[id];
-        if (count !== undefined && hadCount !== undefined && count > hadCount &&
+        const hadCount = before.commentBasis === COMMENT_BASIS ? before.comments[id] : undefined;
+        // A review counts as a comment (item 92's cheaper query), so an
+        // approval raises the count too — it's already its own event.
+        const decidedNow = decided.some((event) => event.subject === id);
+        if (count !== undefined && hadCount !== undefined && count > hadCount && !decidedNow &&
             !sameLogin(pull.lastCommenter, viewer)) {
           commented.push({
             id: `new-comment:${id}:${count}`,
@@ -166,7 +180,8 @@ export function diffActivity(
       decisions: Object.fromEntries(mine.map((pull) => [key(pull), pull.reviewDecision])),
       comments: Object.fromEntries(
         mine.filter((pull) => pull.commentCount !== undefined).map((pull) => [key(pull), pull.commentCount!])
-      )
+      ),
+      commentBasis: COMMENT_BASIS
     };
   }
 
@@ -205,4 +220,37 @@ export function addActivity(
   const known = new Set(inbox.map((event) => event.id));
   const added = fresh.filter((event) => !known.has(event.id)).map((event) => ({ ...event, read: false }));
   return [...added.reverse(), ...inbox].slice(0, ACTIVITY_KEEP);
+}
+
+/**
+ * Whether GitHub actually answered this poll. A failed poll publishes empty
+ * lists, which look exactly like "nothing is open and nothing is blocked" —
+ * anything that compares one poll with the last must skip it, or the next
+ * good poll announces everything as new (item 92's notification flood).
+ */
+export function githubAnswered(snapshot: {
+  connected: readonly string[];
+  errors: readonly { provider: string }[];
+  viewer: string;
+}): boolean {
+  return snapshot.connected.includes('github') && Boolean(snapshot.viewer) &&
+    !snapshot.errors.some((error) => error.provider === 'github');
+}
+
+/**
+ * The status bar's GitHub tooltip line (item 92): how much of the hour's
+ * GraphQL budget is left, when it refills, and what one check costs — so a
+ * rate limit is never a surprise, and a check that got expensive shows.
+ */
+export function describeGitHubBudget(
+  budget: { remaining: number; limit: number; resetAt: string; cost: number },
+  timeOf: (iso: string) => string = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+): string {
+  const n = (x: number) => x.toLocaleString('en-US');
+  const parts = [`GitHub API: ${n(budget.remaining)} of ${n(budget.limit)} points left this hour`];
+  if (budget.resetAt) parts.push(`refills at ${timeOf(budget.resetAt)}`);
+  if (budget.cost > 0) parts.push(`each check costs ${n(budget.cost)}`);
+  parts.push('shared with everything else using your account');
+  const low = budget.remaining < budget.limit * 0.1;
+  return `${parts.join(' · ')}${low ? '\nRunning low: checks will fail until it refills.' : ''}`;
 }

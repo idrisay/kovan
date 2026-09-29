@@ -46,7 +46,26 @@ can't express.
 
 Every colour needs a value in both themes. Dark is `:root`, light is
 `:root[data-theme='light']`. A new literal colour needs a light override next
-to it, or it must be a token. Fonts are bundled (`@fontsource`); the renderer
+to it, or it must be a token. A tint of the accent or a status is
+`color-mix(in srgb, var(--clay) 14%, transparent)`, never a literal `rgba()`:
+the accent and the status colours change with the theme, the accent choice and
+colour-safe status, and a literal would not follow them.
+
+### Themes and appearance (item 96)
+
+Seven themes (`packages/core/src/appearance.ts`): Dark, Light, OLED Black,
+Cool Graphite, Ember Low Light, High Contrast, Paper Soft. Each is a *tone*
+(light or dark → `data-theme`, so every light rule still applies) plus a
+*palette* (`data-palette`) that only swaps tokens. The choice is one theme,
+Match macOS (a day and a night theme), or a schedule — which switches only
+while Baton is not in front, or when it comes back, never under a reader.
+On top of any theme: `data-accent` (curated; ones near a status colour are
+marked, macOS arrives as an inline `--clay`), `data-status='safe'`,
+`data-shapes` (a glyph per status dot, on by default and always in High
+Contrast), `data-density='compact'`. All of it is painted by
+`renderer/appearance.tsx`; nothing else writes those attributes. A new theme
+needs a palette block in `styles.css`, a `THEMES` entry, and must keep the
+elevation order. Fonts are bundled (`@fontsource`); the renderer
 never fetches anything remote.
 
 ### Type scale
@@ -80,7 +99,11 @@ the existing vertical rule, not with space alone.
 
 - **Sheet** (`.sheet-backdrop` > `.sheet`): modal for settings, run setup and the
   run viewer. The header is `.sheet-head` with an `h2` and a **boxed ✕ close**,
-  never a "Done" button. Clicking the backdrop closes it too.
+  never a "Done" button. Clicking the backdrop closes it too. A sheet opened
+  from inside a pane is portalled to `<body>` (`createPortal`, as
+  `RunViewer` does): `.pane` is a CSS container, which traps anything
+  `position: fixed` inside it — the backdrop then covers only the pane and a
+  docked terminal paints over it (item 98). No z-index fixes that.
 - **Menu** (`.menu`): drop-down from a button. Every menu uses
   `useMenuDismiss` (`menuDismiss.ts`): it closes on an outside click, on
   Escape, and when another menu opens, so two are never open at once. Rows
@@ -104,6 +127,16 @@ the existing vertical rule, not with space alone.
   The rail's order is a per-window preference too (`railOrder.ts`, Settings
   pinned below it); `reconcileOrder` in core keeps a saved order valid when a
   tab is added or removed, placing a new one beside its default neighbour.
+- **Settings** (`Settings.tsx`, item 99): one list, no side nav. A search
+  field, then seven rows — Appearance, Text & terminal, Notifications,
+  Dictation, Agents, Connections, Environments — each saying its current
+  values in one line. A row opens in place and closes the one that was open;
+  its body mounts only then, so opening Settings loads nothing. Search matches
+  section names and `SEARCH_INDEX` (every control's label, plus words people
+  use); matching rows show the settings that matched as chips, and a chip
+  opens the section at that control. A new setting goes into a section and
+  its label into `SEARCH_INDEX`, and a section's summary says its value if
+  it's one people check.
 - **Settings sections**: an `h3`, a `.settings-note` explaining what it does in
   plain words, then controls. Steppers use `.font-size-control`.
 - **Split quick button** (`.quick-split`): the label half runs the action, and
@@ -151,6 +184,32 @@ the existing vertical rule, not with space alone.
   the window in the capture phase so a focused terminal can't swallow them.
   Thumbnails carry their name and time. "in Finder" always means revealed in
   Finder (`runReveal`, run files only), never opened in another app.
+- **Quick commands** (`QuickCommands.tsx`, `main/quickCommands.ts`, core
+  `quickCommands.ts`, item 91): a split button in the title bar — ▶ runs the
+  last one, ⌄ opens the menu (search with ↑↓/↩, rows of name + command in
+  mono, duplicate/edit/delete on hover only, an inline editor, "+ Command").
+  Stored and validated by main; the page asks to run one **by id** and never
+  sends a command line. Each runs in its own session, named after it. Running
+  one whose terminal is open: still busy (node-pty's foreground process isn't
+  the shell) → go to it, never a second dev server; back at its prompt →
+  typed again in that same terminal. Delete asks inline, in amber. The menu
+  lives in the title bar's drag region, so it and everything in it is
+  `no-drag`; and `.menu button` flattens buttons into rows, so real buttons
+  inside a menu need their look restored.
+- **Live run viewer** (`RunViewer` + `main/runWatch.ts`, item 90): while a
+  run's viewer is open its folder is watched (run folders only), and new or
+  rewritten files are fetched as they land — never the whole folder again.
+  While its agent's session is running the viewer says **Live** (dot plus
+  word) and leads with **Now**: the newest screenshot large, "taken 12 s ago",
+  and the one-line step the agent writes to `$BATON_STATUS` (`status.txt`,
+  never listed as a file). New thumbnails get a brief ring in the live green,
+  not clay. A running agent's **watch** link (a PR's or ticket's Sessions) opens
+  it; the viewer is rendered in the same place whether or not the list still
+  shows the session, so the run ending never remounts it.
+- **Open in browser** (item 90): the run viewer offers the run's own site —
+  read by main from `run.json`, http(s) only, never a URL from the page — and
+  the run sheet's environment picker offers the URL in its field. Baton never
+  embeds a web page (see `notes/browser-preview-report.md` for why).
 - **Group actions** (Revert all) sit in the group's own header as an icon,
   not on a line of their own.
 - **Job rows** (`QuickJobRow`): running is an amber pulsing dot and a live
@@ -204,6 +263,15 @@ the existing vertical rule, not with space alone.
   The recogniser is Apple's, on-device where the language allows, in the
   `baton-dictate` Swift helper (Chromium's speech API doesn't work in
   Electron); it exits on stdin EOF, so the mic can't outlive Baton.
+  Settings › Dictation picks the speech model (item 97, VoiceSmith's list):
+  Apple Speech (default, live), whisper.cpp (local `whisper-cli`, models
+  from Baton's and VoiceSmith's folders, or a whisper-server URL), OpenAI,
+  Groq, Deepgram, AssemblyAI. For all but Apple the helper runs with
+  `--record` (16 kHz mono WAV, mic permission only), `main/transcribe.ts`
+  sends it once you finish — the pill says "Transcribing with …" — and the
+  recording is deleted whatever happens. Keys are secrets, never settings,
+  and never sent back to the renderer. Each provider has a Test that
+  transcribes a sample spoken by `say`, so a bad key shows up in Settings.
 - **Error card** (`ErrorBoundary`): what a pane shows instead of itself when
   it throws — a red dot (a crash is a failure), what broke in mono, then
   **Try again**, **Show log in Finder** and **Copy details**. Every detail pane
@@ -231,10 +299,18 @@ as a VS Code tab does), and fall back to the name it was opened with; renaming
 by hand wins over both. Dropping a file, or pasting a copied file or a
 screenshot, types its path (`shellPath`), which is how Claude Code takes an
 image. The Sessions split layout is kept across tabs and window reopenings.
+Terminal colours are read from the painted tokens (`terminalTheme()` in
+`Terminal.tsx`) and re-applied live on any appearance change; Boosted lifts
+them toward full contrast.
 
 ### Keyboard
 
-⌘F focuses the sidebar filter (except inside the code editor). ⌘+ and ⌘−
+⌘F focuses the sidebar filter (except inside the code editor). ⌘P opens
+go-to-file (`QuickOpen.tsx`, item 100) from anywhere: recent files first
+(`rememberFile` records every file opened, however), fuzzy matching over the
+active workspace's files (`main/fileIndex.ts` — `git ls-files` inside a repo,
+listed on the first ⌘P, never before), `name:42` for a line; the file opens
+in the Workspace view. ⌘+ and ⌘−
 resize as above. Every icon-only control is reachable by Tab and has a
 visible focus state.
 
@@ -297,6 +373,20 @@ at 1 MB. A smoke run with `BATON_USER_DATA` logs under that folder instead.
 When something breaks, read the log before guessing. Take the headline flag
 with `primaryFlag(pull)`, never `pullFlags(pull)[0]!`: a pull request can
 have no flags at all.
+
+### GitHub's budget
+
+The GraphQL limit is 5,000 points an hour **per account**, shared with every
+agent's `gh` call, and the queue query runs every minute. GitHub prices a
+query by what it *could* fetch, so a list inside a list multiplies: 50 pull
+requests × 100 review threads made one poll cost 116 points instead of 4 and
+used up the hour in 45 minutes (item 92). Before adding a field to
+`PULL_FIELDS` or the queue query, measure it with `rateLimit { cost }`
+(the poll already asks for it; the status bar's GitHub tooltip shows the
+budget and each check's cost). Keep the poll in single digits; put anything
+heavier in the per-pull-request detail query, which runs when you open one.
+Anything that compares one poll with the last must skip a poll GitHub didn't
+answer (`githubAnswered` in core): its empty lists aren't "nothing open".
 
 ### Safety
 

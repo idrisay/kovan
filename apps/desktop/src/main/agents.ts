@@ -7,7 +7,7 @@
  * that records it (`RunStore`).
  */
 
-import { shell } from 'electron';
+import { app, shell } from 'electron';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -29,9 +29,11 @@ import {
   type SentryFrame,
   type SentryIssue,
   extraDirArgs,
-  foldersPromptSection
+  foldersPromptSection,
+  runPageUrl
 } from '@baton/core';
 import { isAppFrame, resolveFrame } from '@baton/core/node';
+import { AgentLimitsReader } from './agentLimits';
 import { RunStore, available, type RunKind, type Runner } from '@baton/agent';
 import { findClones, runTargets, type RunTarget } from '@baton/git';
 import { HttpClient, JiraClient, SentryClient, type RawSentryFrame } from '@baton/providers';
@@ -125,6 +127,9 @@ export class Agents {
   private cachedFor?: string;
 
   readonly testEnvironments: TestEnvironments;
+
+  /** Plan limits, from what the agents write themselves (item 108). */
+  readonly limits = new AgentLimitsReader(app.getPath('userData'));
 
   constructor(
     private readonly host: DesktopHost,
@@ -304,11 +309,17 @@ export class Agents {
     const prompt = basePrompt + foldersPromptSection(folderOf(cwd), extras);
 
     const subjectId = this.subjectFor(subject.pull, subject.issue, subject.sentry?.issue);
+    // Where it checks, when it checks anywhere: kept with the run so its
+    // viewer can offer "Open in browser" on the same site.
+    const tested = request.kind === 'verify' || request.test
+      ? await this.testEnvironments.resolve(request.test ?? {})
+      : undefined;
     const run = await this.store.begin({
       subject: subjectId,
       pull: subject.pull ? `${subject.pull.repo}#${subject.pull.number}` : '',
       kind: request.kind,
-      prompt
+      prompt,
+      ...(tested?.environment.site ? { environment: tested.environment.name, site: tested.environment.site } : {})
     });
 
     // Everything already known about this ticket, so the agent does not start
@@ -322,8 +333,11 @@ export class Agents {
       ...(request.kind === 'verify' || request.test ? await this.testEnvironments.env(request.test ?? {}) : {})
     };
 
+    // A Claude session records its plan limits for the run sheet (item 108).
+    const base = withExtraDirs(this.runnerFor(runner, request.kind, request.model), extras.map((f) => f.path));
+    const limitArgs = await this.limits.claudeArgs(base);
     const result = await this.sessions.run({
-      runner: withExtraDirs(this.runnerFor(runner, request.kind, request.model), extras.map((f) => f.path)),
+      runner: limitArgs.length ? { ...base, leadingArgs: [...base.leadingArgs, ...limitArgs] } : base,
       prompt,
       cwd,
       title: `${request.kind} · ${subjectId}`,
@@ -430,6 +444,32 @@ export class Agents {
       throw new Error('Not a run directory.');
     }
     return this.store.files(directory);
+  }
+
+  /** Whether a path is inside the runs store — for the run folder watcher. */
+  ownsRun(file: string): boolean {
+    return this.store.owns(file);
+  }
+
+  /**
+   * Opens the site a run checked on in the default browser (item 90, D).
+   * The URL comes from the run's own run.json, never from the renderer, and
+   * only http(s) is opened.
+   */
+  /**
+   * Opens the page a run's agent was looking at (item 109) — the one in the
+   * screenshot on screen when given, see `runPageUrl` — rather than the
+   * environment's base address, which redirects a signed-in visitor to the
+   * dashboard.
+   */
+  async openRunSite(directory: string, shot?: string): Promise<void> {
+    if (!this.store.owns(directory)) throw new Error('Not a run directory.');
+    const run = await this.store.read(directory);
+    const site = run?.site;
+    if (!site || !/^https?:\/\//i.test(site)) throw new Error('This run has no site to open.');
+    const readOr = (file: string) => readFile(path.join(directory, file), 'utf8').catch(() => '');
+    const url = runPageUrl({ site, pages: await readOr('pages.txt'), report: await readOr('report.md'), ...(shot ? { shot } : {}) });
+    await shell.openExternal(url);
   }
 
   /**

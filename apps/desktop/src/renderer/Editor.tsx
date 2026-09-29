@@ -58,9 +58,9 @@ const look = EditorView.theme({
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
     backgroundColor: 'rgba(124, 160, 212, 0.22)'
   },
-  '.cm-selectionMatch': { backgroundColor: 'rgba(217, 119, 87, 0.16)' },
+  '.cm-selectionMatch': { backgroundColor: 'color-mix(in srgb, var(--clay) 16%, transparent)' },
   '.cm-matchingBracket, &.cm-focused .cm-matchingBracket': {
-    backgroundColor: 'rgba(217, 119, 87, 0.22)',
+    backgroundColor: 'color-mix(in srgb, var(--clay) 22%, transparent)',
     outline: 'none'
   },
   '.cm-panels': {
@@ -76,7 +76,7 @@ const look = EditorView.theme({
     color: 'var(--body)'
   },
   '.cm-searchMatch': { backgroundColor: 'rgba(208, 160, 90, 0.25)' },
-  '.cm-searchMatch-selected': { backgroundColor: 'rgba(217, 119, 87, 0.4)' }
+  '.cm-searchMatch-selected': { backgroundColor: 'color-mix(in srgb, var(--clay) 40%, transparent)' }
 });
 
 // --- Change bars (VS Code's quick diff) ----------------------------------------
@@ -141,7 +141,8 @@ export function Editor({
   onDirtyChange,
   onCursor,
   registerSave,
-  onSaved
+  onSaved,
+  goto
 }: {
   path: string;
   body: FileBody;
@@ -153,6 +154,8 @@ export function Editor({
   onCursor: (position: { line: number; column: number; selected: number }) => void;
   registerSave: (save: (() => void) | undefined) => void;
   onSaved: (stamp: FileStamp) => void;
+  /** Put the caret on this line and bring it into view — ⌘P's "name:42". */
+  goto?: { line: number; nonce: number };
 }) {
   if (body.kind === 'binary') {
     return <p className="quiet centred">Binary file · {formatBytes(body.bytes)}</p>;
@@ -175,6 +178,7 @@ export function Editor({
       onCursor={onCursor}
       registerSave={registerSave}
       onSaved={onSaved}
+      {...(goto ? { goto } : {})}
     />
   );
 }
@@ -187,7 +191,8 @@ function CodeEditor({
   onDirtyChange,
   onCursor,
   registerSave,
-  onSaved
+  onSaved,
+  goto
 }: {
   path: string;
   body: Extract<FileBody, { kind: 'text' }>;
@@ -197,6 +202,7 @@ function CodeEditor({
   onCursor: (position: { line: number; column: number; selected: number }) => void;
   registerSave: (save: (() => void) | undefined) => void;
   onSaved: (stamp: FileStamp) => void;
+  goto?: { line: number; nonce: number };
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>();
@@ -302,6 +308,19 @@ function CodeEditor({
     // cursor, and the document is CodeMirror's state now, not React's.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
+
+  // After the editor above exists, so a file opened at a line lands there.
+  useEffect(() => {
+    const current = view.current;
+    if (!goto || !current) return;
+    const line = current.state.doc.line(Math.min(Math.max(1, goto.line), current.state.doc.lines));
+    current.dispatch({
+      selection: { anchor: line.from },
+      effects: EditorView.scrollIntoView(line.from, { y: 'center' })
+    });
+    current.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goto?.nonce, path]);
 
   // Kept in a ref as well: replacing the whole document (a reload) maps every
   // bar away, so the reload puts the latest ones back itself.

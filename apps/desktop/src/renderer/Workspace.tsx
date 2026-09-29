@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { changeMarks, moveBy, moveItem, type ChangeMark } from '@baton/core';
 import { useMenuDismiss } from './menuDismiss';
 import { Editor, formatBytes, statusFor } from './Editor';
+import { rememberFile } from './QuickOpen';
 import { Diff } from './Diff';
 import { Resizer } from './Resizer';
 import {
@@ -51,8 +52,10 @@ const KIND_MARK: Record<ChangeKind, string> = {
 
 interface Cursor { line: number; column: number; selected: number }
 
-export function WorkspaceView({ onTerminal, visible }: {
+export function WorkspaceView({ onTerminal, visible, openRequest }: {
   onTerminal: (cwd: string) => void;
+  /** ⌘P picked a file (item 100): open it, at a line if one was typed. */
+  openRequest?: { path: string; line?: number; nonce: number };
   /**
    * App keeps this view mounted once opened and only hides it, so coming back
    * finds the same Files/Changes tab, open repositories, editor tabs and
@@ -340,8 +343,20 @@ export function WorkspaceView({ onTerminal, visible }: {
     setCurrent(tab.key);
   }, [tabs]);
 
-  const openFile = useCallback((entry: Entry) =>
-    open({ key: `file:${entry.path}`, kind: 'file', title: entry.name, path: entry.path }), [open]);
+  const openFile = useCallback((entry: Entry) => {
+    // Every file opened counts as recent for ⌘P, not only ones opened there.
+    rememberFile(entry.path);
+    open({ key: `file:${entry.path}`, kind: 'file', title: entry.name, path: entry.path });
+  }, [open]);
+
+  const [jump, setJump] = useState<{ path: string; line: number; nonce: number }>();
+  const handled = useRef<number>();
+  useEffect(() => {
+    if (!openRequest || handled.current === openRequest.nonce) return;
+    handled.current = openRequest.nonce;
+    openFile({ name: openRequest.path.split('/').pop() || openRequest.path, path: openRequest.path, directory: false });
+    if (openRequest.line) setJump({ path: openRequest.path, line: openRequest.line, nonce: openRequest.nonce });
+  }, [openRequest, openFile]);
 
   const openDiff = useCallback((repo: string, file: string, side: DiffSide, from?: string) =>
     open({
@@ -585,6 +600,7 @@ export function WorkspaceView({ onTerminal, visible }: {
                 onOpenFile={(file) => open({
                   key: `file:${file}`, kind: 'file', title: file.split('/').pop() || file, path: file
                 })}
+                {...(jump && tab.kind === 'file' && jump.path === tab.path ? { goto: { line: jump.line, nonce: jump.nonce } } : {})}
                 onStatus={() => void refreshStatuses(false)}
                 cursor={cursor}
                 dirty={dirty.has(tab.key)}
@@ -1288,9 +1304,10 @@ function loadWhole(): boolean {
 
 function TabBody({
   tab, revision, repo, untracked, cursor, dirty, onDirty, onCursor, registerSave, onSave,
-  onOpenFile, onStatus
+  onOpenFile, onStatus, goto
 }: {
   tab: Tab;
+  goto?: { line: number; nonce: number };
   /** Bumped whenever git status is re-read; see `WorkspaceView`. */
   revision: number;
   /** The clone the file is in — for a file tab, found by path; absent outside one. */
@@ -1377,6 +1394,7 @@ function TabBody({
             <Editor
               path={tab.path} body={body} marks={marks} revision={revision}
               onDirtyChange={onDirty} onCursor={onCursor} registerSave={registerSave}
+              {...(goto ? { goto } : {})}
               onSaved={(next) => {
                 setBytes(next.bytes);
                 // A save changes what git sees: new bars, and the list's count.

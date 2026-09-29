@@ -72,11 +72,13 @@ describe('Codex logs', () => {
 describe('prices', () => {
   it('matches the first rule and prices every kind of token', () => {
     expect(priceFor('claude-opus-4-1-20250805')?.input).toBe(15);
-    expect(priceFor('claude-opus-5-5')?.input).toBe(5);
+    // Its own rate since item 95 — it used to fall through to the older Opus catch-all at $5.
+    expect(priceFor('claude-opus-5-5')?.input).toBe(4);
     expect(priceFor('opencode/muse-spark-1.3-contributor-free')?.output).toBe(0);
     expect(priceFor('some-unknown-model')).toBeUndefined();
     const cost = costOf({ model: 'claude-sonnet-5', input: 1_000_000, output: 1_000_000, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 1_000_000 });
-    expect(cost).toBeCloseTo(3 + 15 + 0.3);
+    // Sonnet 5 is $2 / $10, cache reads $0.20 (item 95); it used to be priced as Sonnet 4.6.
+    expect(cost).toBeCloseTo(2 + 10 + 0.2);
   });
 
   it('totals records by ticket or pull request and flags a model with no price', () => {

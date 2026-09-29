@@ -59,3 +59,27 @@ describe('fetchPullDetail', () => {
     });
   });
 });
+
+describe('reviewers (item 106)', () => {
+  const pull = {
+    ...BASE_PULL,
+    // alice-dev asked for changes, the author pushed a fix and asked them again.
+    reviewRequests: { nodes: [{ requestedReviewer: { login: 'alice-dev' } }, { requestedReviewer: { login: 'newcomer' } }] },
+    latestOpinionatedReviews: {
+      nodes: [
+        { author: { login: 'alice-dev' }, state: 'CHANGES_REQUESTED', submittedAt: '2026-01-02T00:00:00.000Z' },
+        { author: { login: 'bob-dev' }, state: 'APPROVED', submittedAt: '2026-01-05T00:00:00.000Z' }
+      ]
+    }
+  };
+
+  it("makes a re-requested reviewer's turn theirs, keeping what they said last time", async () => {
+    const detail = await fetchPullDetail(fakeHttp({ repository: { pullRequest: pull } }), 'https://api.github.com', 'token', 'acme/web', 1);
+    const by = Object.fromEntries(detail.reviewers.map((r) => [r.login, r]));
+    expect(by['alice-dev']).toMatchObject({ turn: 'pending', previous: 'changes_requested' });
+    expect(by['newcomer']).toMatchObject({ turn: 'pending' });
+    expect(by['newcomer']?.previous).toBeUndefined();
+    expect(by['bob-dev']).toMatchObject({ turn: 'approved' });
+    expect(detail.reviewers).toHaveLength(3);
+  });
+});

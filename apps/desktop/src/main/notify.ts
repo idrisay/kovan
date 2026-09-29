@@ -10,8 +10,12 @@
 
 import { Notification, shell } from 'electron';
 import * as path from 'node:path';
-import type { PullSummary } from '@baton/core';
+import { githubAnswered, type PullSummary } from '@baton/core';
 import type { DesktopHost } from './host';
+import type { Snapshot } from './poller';
+
+/** What a notification says; shown by macOS unless a test collects it instead. */
+export interface BlockedNotice { title: string; body: string; subtitle?: string; url?: string }
 
 interface Seen {
   /** `repo#number` → the flags it was last seen blocked by. */
@@ -23,7 +27,10 @@ export class Activity {
   private seen: Seen = { blocked: {} };
   private loaded = false;
 
-  constructor(private readonly host: DesktopHost) {
+  constructor(
+    private readonly host: DesktopHost,
+    private readonly show: (notice: BlockedNotice) => void = showNotice
+  ) {
     this.file = path.join(host.files.stateDir(), 'activity.json');
   }
 
@@ -53,7 +60,13 @@ export class Activity {
    *              state without notifying. Without it, launching the app would
    *              fire one notification per already-blocked pull request.
    */
-  async report(blocked: readonly PullSummary[], first: boolean): Promise<void> {
+  async report(snapshot: Snapshot, first: boolean): Promise<void> {
+    // A poll GitHub didn't answer has an empty blocked list, which is not
+    // "nothing is blocked". Recording it made the next good poll announce
+    // every blocked pull request as newly blocked (item 92). Keep what was
+    // seen, and compare the next real answer with that.
+    if (!githubAnswered(snapshot)) return;
+    const blocked: readonly PullSummary[] = snapshot.blocked;
     await this.load();
 
     const now: Record<string, string> = {};
@@ -74,25 +87,26 @@ export class Activity {
     if (first || fresh.length === 0 || !this.host.config.get('notify.enabled', true)) {
       return;
     }
-    if (!Notification.isSupported()) {
-      return;
-    }
 
     if (fresh.length === 1) {
-      const pull = fresh[0];
-      const notification = new Notification({
-        title: `${pull.repo} #${pull.number}`,
-        body: pull.title,
-        subtitle: 'Blocked on you'
-      });
-      notification.on('click', () => void shell.openExternal(pull.url));
-      notification.show();
+      const pull = fresh[0]!;
+      this.show({ title: `${pull.repo} #${pull.number}`, body: pull.title, subtitle: 'Blocked on you', url: pull.url });
       return;
     }
-
-    new Notification({
-      title: 'Baton',
-      body: `${fresh.length} pull requests are now blocked on you`
-    }).show();
+    this.show({ title: 'Baton', body: `${fresh.length} pull requests are now blocked on you` });
   }
+}
+
+function showNotice(notice: BlockedNotice): void {
+  if (!Notification.isSupported()) return;
+  const notification = new Notification({
+    title: notice.title,
+    body: notice.body,
+    ...(notice.subtitle ? { subtitle: notice.subtitle } : {})
+  });
+  if (notice.url) {
+    const url = notice.url;
+    notification.on('click', () => void shell.openExternal(url));
+  }
+  notification.show();
 }

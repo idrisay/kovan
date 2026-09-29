@@ -69,13 +69,23 @@ export interface AgentRun {
   reportPath?: string;
   /** Absolute paths, in the order the agent numbered them. */
   shots: string[];
+  /**
+   * The test environment it checked on, when it had one — for "Open in
+   * browser" in the run viewer. Only ever from Settings › Environments.
+   */
+  environment?: string;
+  site?: string;
 }
 
 /** The environment variables every run is given, and the prompts name. */
 export const RUN_ENV = {
   report: 'BATON_REPORT',
   shots: 'BATON_SHOTS',
-  ticket: 'BATON_TICKET'
+  ticket: 'BATON_TICKET',
+  /** One line: what the agent is doing right now, shown above its newest screenshot. */
+  status: 'BATON_STATUS',
+  /** "<screenshot> <url>" per line — the page each screenshot shows (item 109). */
+  pages: 'BATON_PAGES'
 } as const;
 
 /**
@@ -120,6 +130,8 @@ export class RunStore {
     pull: string;
     kind: RunKind;
     prompt: string;
+    environment?: string;
+    site?: string;
   }): Promise<AgentRun> {
     const startedAt = Date.now();
     // Sortable, filesystem-safe, and readable at a glance in Finder.
@@ -136,7 +148,10 @@ export class RunStore {
     await writeFile(
       path.join(directory, 'run.json'),
       JSON.stringify(
-        { subject: options.subject, pull: options.pull, kind: options.kind, startedAt },
+        {
+          subject: options.subject, pull: options.pull, kind: options.kind, startedAt,
+          ...(options.site ? { environment: options.environment ?? '', site: options.site } : {})
+        },
         null,
         2
       ),
@@ -152,7 +167,8 @@ export class RunStore {
       kind: options.kind,
       verdict: 'unknown',
       promptPath,
-      shots: []
+      shots: [],
+      ...(options.site ? { environment: options.environment ?? '', site: options.site } : {})
     };
   }
 
@@ -160,7 +176,9 @@ export class RunStore {
   env(run: AgentRun, ticketFile?: string): Record<string, string> {
     const vars: Record<string, string> = {
       [RUN_ENV.report]: path.join(run.directory, 'report.md'),
-      [RUN_ENV.shots]: path.join(run.directory, 'shots')
+      [RUN_ENV.shots]: path.join(run.directory, 'shots'),
+      [RUN_ENV.status]: path.join(run.directory, 'status.txt'),
+      [RUN_ENV.pages]: path.join(run.directory, 'pages.txt')
     };
     if (ticketFile) {
       vars[RUN_ENV.ticket] = ticketFile;
@@ -186,7 +204,7 @@ export class RunStore {
 
   /** Reads one run folder back. */
   async read(directory: string): Promise<AgentRun | undefined> {
-    let meta: { subject?: string; pull?: string; kind?: RunKind; startedAt?: number };
+    let meta: { subject?: string; pull?: string; kind?: RunKind; startedAt?: number; environment?: string; site?: string };
     try {
       meta = JSON.parse(await readFile(path.join(directory, 'run.json'), 'utf8'));
     } catch {
@@ -220,7 +238,8 @@ export class RunStore {
       confidence: report ? confidenceFrom(report) : undefined,
       promptPath: hasPrompt ? promptPath : undefined,
       reportPath: report !== undefined ? reportPath : undefined,
-      shots
+      shots,
+      ...(typeof meta.site === 'string' && meta.site ? { environment: meta.environment ?? '', site: meta.site } : {})
     };
   }
 

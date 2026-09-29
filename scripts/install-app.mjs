@@ -22,7 +22,9 @@ if (!fs.existsSync(built)) {
   process.exit(1);
 }
 
-const APP = '/Applications/Baton.app/Contents/MacOS/Baton';
+// Any copy, not just /Applications': one launched from the build folder holds
+// the single-instance lock just the same, and would stop the new one starting.
+const APP = 'Baton\\.app/Contents/MacOS/Baton$';
 
 function running() {
   try {
@@ -71,16 +73,54 @@ console.log(`installed ${target}`);
 // Ad-hoc signatures do not survive a copy intact on every macOS version, and an
 // invalid one is refused at launch with a message that says nothing useful.
 // Re-signing here costs a second and removes that whole class of confusion.
-try {
-  execFileSync('codesign', ['--force', '--deep', '--sign', '-', target], { stdio: 'ignore' });
-  execFileSync('codesign', ['--verify', '--deep', target], { stdio: 'ignore' });
-  console.log('re-signed and verified (ad-hoc)');
-} catch {
-  console.warn('codesign step failed — the app may still run, but check with:');
-  console.warn(`  codesign --verify --verbose ${target}`);
+//
+// Retried: right after the copy it once failed ("code has no resources but
+// signature indicates they must be present") and then worked by hand a moment
+// later. Launching an unverified bundle made macOS start the build folder's
+// copy instead — same app id — which then held the single-instance lock, so
+// the installed one could never start.
+function sign() {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      execFileSync('codesign', ['--force', '--deep', '--sign', '-', target], { stdio: 'pipe' });
+      execFileSync('codesign', ['--verify', '--deep', target], { stdio: 'pipe' });
+      return true;
+    } catch (err) {
+      if (attempt === 3) {
+        console.error(`codesign failed: ${String(err.stderr ?? err.message).trim()}`);
+        return false;
+      }
+      execFileSync('sleep', ['1']);
+    }
+  }
+  return false;
 }
+
+if (!sign()) {
+  console.error('Not launching an unsigned Baton. Check with:');
+  console.error(`  codesign --verify --verbose ${target}`);
+  process.exit(1);
+}
+console.log('re-signed and verified (ad-hoc)');
 
 if (!process.argv.includes('--no-launch')) {
   spawn('open', ['-a', target], { detached: true, stdio: 'ignore' }).unref();
-  console.log('launched — Baton is in the Dock and Cmd+Tab');
+  // Say which copy actually started, not just that one was asked to.
+  const deadline = Date.now() + 15_000;
+  let path = '';
+  while (!path && Date.now() < deadline) {
+    execFileSync('sleep', ['0.5']);
+    try {
+      path = execFileSync('pgrep', ['-fl', 'Baton.app/Contents/MacOS/Baton$'], { encoding: 'utf8' }).trim();
+    } catch {
+      path = '';
+    }
+  }
+  if (path.includes(`${target}/Contents/MacOS/Baton`)) {
+    console.log('launched — Baton is in the Dock and Cmd+Tab');
+  } else if (path) {
+    console.warn(`A different copy of Baton is running:\n  ${path}\nQuit it, then open ${target}.`);
+  } else {
+    console.warn(`Baton didn't start. Open ${target} yourself, or check ~/Library/Logs/Baton/baton.log.`);
+  }
 }

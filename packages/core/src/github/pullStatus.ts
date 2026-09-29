@@ -367,26 +367,29 @@ export interface ApiCommentPage {
   nodes?: ({ author?: { login?: string } | null; createdAt?: string } | null)[] | null;
 }
 
+/** `reviews(last: 1) { totalCount nodes { author submittedAt } }` */
+export interface ApiReviewPage {
+  totalCount?: number;
+  nodes?: ({ author?: { login?: string } | null; submittedAt?: string } | null)[] | null;
+}
+
 /**
- * How many comments a pull request has in all, and the newest one's author,
- * from the conversation page and every review thread's page. Undefined when
- * the query didn't ask for comments at all.
+ * How much has been said on a pull request, and who said the latest of it:
+ * conversation comments plus reviews (a reply in a code thread is posted as a
+ * review). Undefined when the query didn't ask — only your own pull requests'
+ * search does, because asking costs points (item 92).
  */
 function commentsOf(node: ApiPullNode): Pick<PullSummary, 'commentCount' | 'lastCommenter' | 'lastCommentAt'> {
-  const pages = [node.comments, ...(node.reviewThreads?.nodes ?? []).map((t) => t?.comments)]
-    .filter((page): page is ApiCommentPage => Boolean(page));
-  if (!node.comments) return {};
-  let total = 0;
-  let last: { author: string; at: string } | undefined;
-  for (const page of pages) {
-    total += page.totalCount ?? 0;
-    const newest = page.nodes?.[page.nodes.length - 1];
-    if (newest?.createdAt && (!last || newest.createdAt > last.at)) {
-      last = { author: newest.author?.login ?? '', at: newest.createdAt };
-    }
-  }
+  if (!node.comments && !node.reviews) return {};
+  const newestComment = node.comments?.nodes?.[node.comments.nodes.length - 1];
+  const newestReview = node.reviews?.nodes?.[node.reviews.nodes.length - 1];
+  const candidates = [
+    newestComment?.createdAt ? { author: newestComment.author?.login ?? '', at: newestComment.createdAt } : undefined,
+    newestReview?.submittedAt ? { author: newestReview.author?.login ?? '', at: newestReview.submittedAt } : undefined
+  ].filter((c): c is { author: string; at: string } => Boolean(c));
+  const last = candidates.sort((a, b) => a.at.localeCompare(b.at)).pop();
   return {
-    commentCount: total,
+    commentCount: (node.comments?.totalCount ?? 0) + (node.reviews?.totalCount ?? 0),
     ...(last ? { lastCommenter: last.author, lastCommentAt: last.at } : {})
   };
 }
@@ -414,10 +417,9 @@ export interface ApiPullNode {
   reviewRequests?: {
     nodes?: ({ requestedReviewer?: { login?: string } | null } | null)[] | null;
   } | null;
-  reviewThreads?: {
-    nodes?: ({ isResolved?: boolean; comments?: ApiCommentPage | null } | null)[] | null;
-  } | null;
+  reviewThreads?: { nodes?: ({ isResolved?: boolean } | null)[] | null } | null;
   comments?: ApiCommentPage | null;
+  reviews?: ApiReviewPage | null;
   commits?: {
     nodes?: ({ commit?: { statusCheckRollup?: { state?: string } | null } } | null)[] | null;
   } | null;

@@ -16,7 +16,8 @@ import {
   type ProviderId,
   type PullSummary,
   type RepoRef,
-  type SentryIssue
+  type SentryIssue,
+  type GitHubBudget
 } from '@baton/core';
 import { Credentials, GitHubClient, HttpClient, JiraClient, SentryClient } from '@baton/providers';
 import { findClones } from '@baton/git';
@@ -51,6 +52,23 @@ export interface Snapshot {
   /** Which polled providers a single-provider refresh is in flight for —
    *  distinct from `refreshing`, which is only ever true for a full refresh. */
   refreshingProviders: PolledProvider[];
+  /** GitHub's GraphQL budget as of the last poll that got an answer (item 92). */
+  githubBudget?: GitHubBudget;
+  /**
+   * Only during the very first refresh after launch (item 101): each polled
+   * service that is connected, and how far it has got — what the startup
+   * screen lists. Absent once everything has answered, and on every later
+   * refresh (those keep showing the data they already have).
+   */
+  booting?: BootStep[];
+}
+
+export interface BootStep {
+  provider: PolledProvider;
+  state: 'loading' | 'done' | 'failed';
+  /** How many items it brought back, once done. */
+  count?: number;
+  message?: string;
 }
 
 export const EMPTY: Snapshot = {
@@ -130,10 +148,30 @@ export class Poller {
     const errors: Snapshot['errors'] = [];
     const connected = await this.credentials.connected();
 
+    // The first refresh after launch (item 101): which services are
+    // connected is known now, from the local credentials, and is published
+    // at once — before, the window said "Nothing connected yet" until every
+    // service had answered. Each service then reports in as it lands.
+    const first = this.snapshot.at === 0;
+    let booting: BootStep[] | undefined = first
+      ? (['github', 'jira', 'sentry'] as const).filter((p) => connected.includes(p)).map((provider) => ({ provider, state: 'loading' as const }))
+      : undefined;
+    if (booting) this.publish({ ...this.snapshot, connected, refreshing: true, booting });
+    const report = <T>(provider: PolledProvider, count: (value: T) => number) => (value: T) => {
+      if (!booting || controller.signal.aborted) return value;
+      const failed = errors.find((e) => e.provider === provider);
+      booting = booting.map((step) => step.provider !== provider ? step
+        : failed ? { provider, state: 'failed' as const, message: failed.message }
+          : { provider, state: 'done' as const, count: count(value) });
+      this.publish({ ...this.snapshot, booting });
+      return value;
+    };
+
     const [github, jira, sentry] = await Promise.all([
-      this.loadGitHub(connected, controller.signal, errors),
-      this.loadJira(connected, controller.signal, errors),
-      this.loadSentry(connected, controller.signal, errors)
+      this.loadGitHub(connected, controller.signal, errors)
+        .then(report('github', (g) => (g ? g.mine.length + g.reviewRequested.length : 0))),
+      this.loadJira(connected, controller.signal, errors).then(report('jira', (j) => j?.length ?? 0)),
+      this.loadSentry(connected, controller.signal, errors).then(report('sentry', (e) => e?.length ?? 0))
     ]);
 
     if (controller.signal.aborted) {
@@ -153,6 +191,7 @@ export class Poller {
       merged: github?.merged ?? [],
       mergedTotal: github?.mergedTotal ?? 0,
       loadingMerged: false,
+      ...((github?.budget ?? this.snapshot.githubBudget) ? { githubBudget: github?.budget ?? this.snapshot.githubBudget } : {}),
       tickets: jira ?? [],
       sentryIssues: sentry ?? [],
       connected,
@@ -203,7 +242,8 @@ export class Poller {
           reviewRequested: github.reviewRequested,
           merged: github.merged,
           mergedTotal: github.mergedTotal,
-          loadingMerged: false
+          loadingMerged: false,
+          ...(github.budget ? { githubBudget: github.budget } : {})
         };
       }
     } else if (id === 'jira') {
@@ -296,6 +336,7 @@ export class Poller {
         reviewRequested: PullSummary[];
         merged: PullSummary[];
         mergedTotal: number;
+        budget?: GitHubBudget;
       }
     | undefined
   > {
@@ -322,7 +363,8 @@ export class Poller {
         mine: sortPulls(queues.mine, 'updated-desc'),
         reviewRequested: sortPulls(queues.reviewRequested, 'updated-desc'),
         merged: byMergedAt(queues.merged),
-        mergedTotal: queues.mergedTotal
+        mergedTotal: queues.mergedTotal,
+        ...(queues.budget ? { budget: queues.budget } : {})
       };
     } catch (err) {
       if (!signal.aborted) {

@@ -244,7 +244,11 @@ function Reviewers({ reviewers, request }: {
               <span className="reviewer-avatar">{reviewer.login.slice(0, 2).toUpperCase()}</span>
               <span className="reviewer-who">
                 <span className="reviewer-name">{reviewer.login}</span>
-                <span className="reviewer-status">{turn.status}{age ? ` · ${age} ago` : ''}</span>
+                <span className="reviewer-status">
+                  {reviewer.previous
+                    ? `Asked again · ${reviewer.previous === 'changes_requested' ? 'asked for changes' : 'approved'}${age ? ` ${age} ago` : ''}`
+                    : `${turn.status}${age ? ` · ${age} ago` : ''}`}
+                </span>
               </span>
               <span className="state reviewer-turn">
                 <span className={`dot ${turn.tone}`} />
@@ -432,10 +436,26 @@ function LiveSessions({
   onOpen: (id: string) => void;
 }) {
   const mine = sessions.filter((s) => s.subject === subject);
-  if (mine.length === 0) {
+  // A running agent's own run, watched live in its viewer (item 90).
+  const [watching, setWatching] = useState<AgentRun>();
+  const watch = (session: SessionInfo) => {
+    void window.baton.runHistory(subject).then((runs) => {
+      const run = runs.find((r) => r.directory === session.runDirectory);
+      if (run) setWatching(run);
+    });
+  };
+  // The viewer outlives the list: when the agent finishes, its session goes
+  // from here, and that's exactly when you want to look at what it did.
+  // Always first in the same fragment, so the list coming and going never
+  // remounts it (which would reload it and drop an open lightbox).
+  const viewer = watching && <RunViewer run={watching} onClose={() => setWatching(undefined)} />;
+  if (mine.length === 0 && !viewer) {
     return null;
   }
   return (
+    <>
+    {viewer}
+    {mine.length > 0 && (
     <section>
       <h3>Sessions</h3>
       <ul className="runs">
@@ -452,10 +472,20 @@ function LiveSessions({
             <button className="link" onClick={() => onOpen(s.id)}>
               open
             </button>
+            {s.running && s.runDirectory && (
+              <button
+                className="link" onClick={() => watch(s)}
+                title="Its screenshots as the agent takes them, and the step it's on"
+              >
+                watch
+              </button>
+            )}
           </li>
         ))}
       </ul>
     </section>
+    )}
+    </>
   );
 }
 

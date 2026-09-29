@@ -20,6 +20,7 @@
  * `shellLine`, which routes it through a file.
  */
 
+import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { IPty } from 'node-pty';
 import { spawn } from 'node-pty';
@@ -65,6 +66,8 @@ export interface SessionInfo {
    * title already names its work, nor once somebody renamed the session.
    */
   task?: string;
+  /** The quick command (item 91) this session is running, if it is one. */
+  commandId?: string;
   /** Renamed by hand: the name is theirs and nothing retitles it. */
   renamed?: boolean;
 }
@@ -130,6 +133,8 @@ export class Sessions {
     subject?: string;
     pull?: string;
     runDirectory?: string;
+    /** A quick command's id: its name is the session's, and stays. */
+    commandId?: string;
   }): Promise<SessionInfo> {
     const id = randomUUID();
     // The environment a login shell produces, not the four-entry PATH a GUI
@@ -160,6 +165,7 @@ export class Sessions {
       subject: options.subject,
       pull: options.pull,
       runDirectory: options.runDirectory,
+      ...(options.commandId ? { commandId: options.commandId, renamed: true } : {}),
       startedAt: Date.now(),
       running: true,
       attention: false,
@@ -269,6 +275,27 @@ export class Sessions {
     if (!task || task === session.task) return false;
     session.task = task;
     session.subject = this.ticketIn(task) ?? session.subject;
+    return true;
+  }
+
+  /**
+   * Whether something other than the shell itself is in the foreground —
+   * a dev server, a test run — as opposed to a prompt waiting for input.
+   * What a quick command (item 91) asks before starting itself again.
+   */
+  busy(id: string): boolean {
+    const session = this.sessions.get(id);
+    if (!session?.running) return false;
+    const shell = path.basename(loginShell()).replace(/^-/, '');
+    const foreground = (session.pty.process ?? '').replace(/^-/, '');
+    return Boolean(foreground) && path.basename(foreground) !== shell;
+  }
+
+  /** Types a line into an idle session and runs it, as if typed. */
+  retype(id: string, line: string): boolean {
+    const session = this.sessions.get(id);
+    if (!session?.running) return false;
+    session.pty.write(`${line}\r`);
     return true;
   }
 

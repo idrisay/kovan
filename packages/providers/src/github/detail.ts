@@ -49,6 +49,9 @@ export interface Reviewer {
   turn: ReviewerTurn;
   /** When they last submitted a review. Absent for a request nobody has answered. */
   submittedAt?: string;
+  /** Asked again after answering (item 106): what they said last time. The
+   *  turn is then 'pending' — the ball is back with them. */
+  previous?: 'changes_requested' | 'approved';
 }
 
 export interface PullDetail {
@@ -261,15 +264,29 @@ export async function fetchPullDetail(
     }));
 
   const fold = (login: string) => login.toLowerCase();
-  const answeredLogins = new Set(answered.map((r) => fold(r.login)));
-  const pending: Reviewer[] = (pull['reviewRequests']?.nodes ?? [])
+  const requested: string[] = (pull['reviewRequests']?.nodes ?? [])
     .filter(Boolean)
     .map((req: any) => req.requestedReviewer?.login as string | undefined)
-    .filter((login: string | undefined): login is string => Boolean(login))
-    // A team re-requested after answering still shows up as a pending
-    // request; the review they already gave is the one that counts.
-    .filter((login: string) => !answeredLogins.has(fold(login)))
-    .map((login: string) => ({ login, turn: 'pending' as const }));
+    .filter((login: string | undefined): login is string => Boolean(login));
+  const requestedLogins = new Set(requested.map(fold));
+  // A re-request (item 106) is GitHub's "I've addressed it, look again": the
+  // reviewer is back in the review requests while their old review still
+  // stands. That makes it their turn, as GitHub itself shows it, so the
+  // request wins over the answer it follows — it used to be the other way
+  // round, which left "Your turn" on a pull request you'd already updated.
+  const answeredLogins = new Set(answered.map((r) => fold(r.login)));
+  const rerequested = answered
+    .filter((r) => requestedLogins.has(fold(r.login)))
+    .map((r): Reviewer => ({
+      login: r.login, turn: 'pending',
+      previous: r.turn === 'changes_requested' ? 'changes_requested' : 'approved',
+      ...(r.submittedAt ? { submittedAt: r.submittedAt } : {})
+    }));
+  const pending: Reviewer[] = [
+    ...requested.filter((login) => !answeredLogins.has(fold(login))).map((login) => ({ login, turn: 'pending' as const })),
+    ...rerequested
+  ];
+  const stillStanding = answered.filter((r) => !requestedLogins.has(fold(r.login)));
 
   return {
     number: pull['number'],
@@ -300,7 +317,7 @@ export async function fetchPullDetail(
       deletions: f.deletions ?? 0,
       status: String(f.changeType ?? '').toLowerCase()
     })),
-    reviewers: [...pending, ...answered]
+    reviewers: [...pending, ...stillStanding]
   };
 }
 

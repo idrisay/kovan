@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivitySettings } from './Activity';
+import { ACTIVITY_SETTINGS, ActivitySettings } from './Activity';
 import { DictationSettings } from './Dictation';
 import {
   DEFAULT_IDLE_MINUTES, DEFAULT_PRICES, NV_REVIEW_DEFAULT_MODEL, PRICE_CHECK_RUNNERS, QUICK_DEFAULT_MODEL,
@@ -7,11 +7,13 @@ import {
   type Price, type PriceCheckRunner, type PriceProposal, type PriceRule, type ProviderId
 } from '@baton/core';
 import { savePrices, useUsage } from './Usage';
-import type { ThemeChoice } from './types';
+import { AppearanceSettings } from './AppearanceSettings';
 import { FontSizeControl, useTerminalFontSize } from './terminalFontSize';
 import { TestEnvironmentSettings } from './TestEnvironments';
-import { ReadingSizeControl, SidebarSizeControl } from './readingSize';
-import { CloseIcon } from './icons';
+import { ChromeSizeControl, ReadingSizeControl, SidebarSizeControl, useChromeSize, useReadingSize, useSidebarSize } from './readingSize';
+import { useAppearance } from './appearance';
+import { ACCENTS, THEMES, speechProvider } from '@baton/core';
+import { ChevronIcon, CloseIcon, SearchIcon } from './icons';
 
 interface Field {
   key: string;
@@ -27,12 +29,6 @@ const PROVIDER_LABEL: Record<string, string> = {
   grafana: 'Grafana',
   figma: 'Figma'
 };
-
-const THEME_OPTIONS: { id: ThemeChoice; label: string }[] = [
-  { id: 'system', label: 'System' },
-  { id: 'light', label: 'Light' },
-  { id: 'dark', label: 'Dark' }
-];
 
 /**
  * Not a `CREDENTIAL_FIELDS` entry: reading and searching Jira tickets — the
@@ -451,23 +447,65 @@ function PriceCheckPanel({ rules, fields }: { rules: PriceRule[]; fields: { key:
   );
 }
 
+type SectionId = 'appearance' | 'text' | 'notifications' | 'dictation' | 'agents' | 'connections' | 'environments';
+
+/**
+ * Settings as one list (item 99, option B): each section is a single row that
+ * shows its current values, and opens in place — one at a time — so the
+ * window never becomes one long scroll of everything. A section's body only
+ * mounts when it opens, so nothing a section loads (models, prices, speech
+ * setup) runs just because Settings was opened.
+ */
+const SECTIONS: { id: SectionId; title: string; icon: string; ownHeading?: boolean }[] = [
+  { id: 'appearance', title: 'Appearance', icon: '◐' },
+  { id: 'text', title: 'Text & terminal', icon: 'Aa' },
+  { id: 'notifications', title: 'Notifications', icon: '◔' },
+  // These two bodies open with their own heading, which the row already says.
+  { id: 'dictation', title: 'Dictation', icon: '◉', ownHeading: true },
+  { id: 'agents', title: 'Agents', icon: '▸' },
+  { id: 'connections', title: 'Connections', icon: '⎇' },
+  { id: 'environments', title: 'Environments', icon: '⌂', ownHeading: true }
+];
+
+/** The names search looks through — each setting's label as it appears in
+ *  the section, plus words people use for it. */
+const SEARCH_INDEX: Record<SectionId, string[]> = {
+  appearance: ['Theme', 'Dark', 'Light', 'OLED Black', 'Cool Graphite', 'Ember Low Light', 'High Contrast', 'Paper Soft',
+    'Match macOS', 'Schedule', 'Accent', 'Colour-safe status colours', 'Show a shape with every status', 'List density',
+    'Compact', 'Terminal colours', 'Boosted', 'Color', 'Night'],
+  text: ['Terminal font size', 'Ticket and pull request text size', 'Sidebar text size',
+    'Tabs, session header and status bar text size', 'Status bar', 'Tabs', 'Font', 'Zoom'],
+  notifications: ['macOS notifications', 'Launch Baton at login', 'Activity', ...ACTIVITY_SETTINGS.map((a) => a.label)],
+  dictation: ['Dictate with double-tap ⌘', 'Speech model', 'Apple Speech', 'whisper.cpp', 'OpenAI Whisper', 'Groq Whisper',
+    'Deepgram', 'AssemblyAI', 'API key', 'Model file', 'Language', 'Microphone', 'Voice'],
+  agents: ['Quick model', 'Model (opencode)', 'Give up after (seconds)', 'Running agents', 'Idle after (minutes)',
+    'Remind me when an agent goes idle', 'Token prices', 'Usage', 'Cost', 'Review model'],
+  connections: ['Token', 'API key'],
+  environments: ['Environments', 'Test accounts', 'Site URL', 'Basic auth', 'Check it shipped', 'Password']
+};
+
 export function Settings({
   onClose,
-  connected,
-  theme,
-  onThemeChange
+  connected
 }: {
   onClose: () => void;
   connected: ProviderId[];
-  theme: ThemeChoice;
-  onThemeChange: (choice: ThemeChoice) => void;
 }) {
   const [fields, setFields] = useState<Record<string, Field[]>>({});
   const [values, setValues] = useState<Record<string, string>>({});
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
   const [notify, setNotify] = useState(true);
   const [saving, setSaving] = useState('');
-  const [active, setActive] = useState('general');
+  /** Which section is open; one at a time, none at first. */
+  const [open, setOpen] = useState<SectionId>();
+  const [query, setQuery] = useState('');
+  /** Every setting as saved, for the one-line summaries. Re-read when a
+   *  section closes, so a summary shows what was just changed. */
+  const [raw, setRaw] = useState<Record<string, unknown>>({});
+  const appearance = useAppearance();
+  const [reading] = useReadingSize();
+  const [sidebar] = useSidebarSize();
+  const [chrome] = useChromeSize();
   const [saveResult, setSaveResult] = useState<Record<string, { ok: boolean; text: string }>>({});
   const [fontSize, bumpFontSize] = useTerminalFontSize();
 
@@ -481,6 +519,7 @@ export function Settings({
         }
       }
       setValues(seed);
+      setRaw(settings);
       setLaunchAtLogin(Boolean(settings['launchAtLogin']));
       setNotify(settings['notify.enabled'] !== false);
     });
@@ -548,7 +587,161 @@ export function Settings({
     );
   }
 
-  const sections = ['general', ...Object.keys(fields), 'environment'];
+  const providers = Object.keys(fields);
+  const label = (id: string) => PROVIDER_LABEL[id] ?? id;
+  const themeName = (id: string) => THEMES.find((t) => t.id === id)?.label ?? id;
+  const on = (key: string) => raw[key] !== false;
+
+  // What each row says about itself when closed — Baton's state in seven lines.
+  const summary: Record<SectionId, string> = {
+    appearance: [
+      appearance.theme === 'system' ? `Match macOS · ${themeName(appearance.dayTheme)} / ${themeName(appearance.nightTheme)}`
+        : appearance.theme === 'schedule' ? `Schedule ${appearance.dayStart}–${appearance.nightStart} · ${themeName(appearance.dayTheme)} / ${themeName(appearance.nightTheme)}`
+          : themeName(appearance.theme),
+      ACCENTS.find((x) => x.id === appearance.accent)?.label ?? appearance.accent,
+      appearance.statusShapes ? 'shapes on' : 'shapes off',
+      appearance.density === 'compact' ? 'compact' : ''
+    ].filter(Boolean).join(' · '),
+    text: `Terminal ${fontSize} · Reading ${reading}% · Sidebar ${sidebar}% · Tabs and status bar ${chrome}%`,
+    notifications: [
+      notify ? 'macOS notifications on' : 'macOS notifications off',
+      `${ACTIVITY_SETTINGS.filter((a) => on(a.setting)).length} of ${ACTIVITY_SETTINGS.length} activity kinds`,
+      launchAtLogin ? 'launch at login' : ''
+    ].filter(Boolean).join(' · '),
+    dictation: on('dictation.enabled')
+      ? [
+          'Double-tap ⌘',
+          speechProvider(raw['dictation.provider']).label,
+          typeof raw['dictation.locale'] === 'string' && raw['dictation.locale'] ? raw['dictation.locale'] : 'automatic language'
+        ].join(' · ')
+      : 'Off',
+    agents: [
+      `Quick model ${typeof raw['quick.model'] === 'string' && raw['quick.model'] ? raw['quick.model'] : 'default'}`,
+      `idle after ${Number(raw['agents.idleMinutes']) || DEFAULT_IDLE_MINUTES} min`,
+      on('agents.remind') ? 'reminders on' : 'reminders off'
+    ].join(' · '),
+    connections: providers.length === 0 ? '' : [
+      ...providers.filter((id) => connected.includes(id as ProviderId)).map((id) => `✓ ${label(id)}`),
+      (() => {
+        const off = providers.filter((id) => !connected.includes(id as ProviderId)).map(label);
+        return off.length ? `${off.join(', ')} not connected` : '';
+      })()
+    ].filter(Boolean).join(' · '),
+    environments: (() => {
+      const envs = Array.isArray(raw['verify.environments']) ? raw['verify.environments'] as { name?: string }[] : [];
+      const accounts = Array.isArray(raw['verify.accounts']) ? raw['verify.accounts'].length : 0;
+      return envs.length === 0 ? 'None yet' : `${envs.map((e) => e.name || 'Unnamed').join(', ')} · ${accounts} test account${accounts === 1 ? '' : 's'}`;
+    })()
+  };
+
+  // Search: every setting's name, and a few words people use for it, so
+  // "key", "font" or "idle" finds its row and says which setting matched.
+  const index: Record<SectionId, string[]> = {
+    ...SEARCH_INDEX,
+    connections: [
+      ...SEARCH_INDEX.connections,
+      ...providers.flatMap((id) => [label(id), ...(fields[id] ?? []).map((f) => f.label), ...(EXTRA_FIELDS[id] ?? []).map((f) => f.label)])
+    ]
+  };
+  const q = query.trim().toLowerCase();
+  const matches = (id: SectionId) => (q ? index[id].filter((term) => term.toLowerCase().includes(q)) : []);
+  const visible = SECTIONS.filter((s) => !q || s.title.toLowerCase().includes(q) || matches(s.id).length > 0);
+
+  const toggleOpen = (id: SectionId, find?: string) => {
+    const next = open === id && !find ? undefined : id;
+    setOpen(next);
+    // Summaries follow what was just changed in the section being left.
+    void window.baton.settings().then(setRaw);
+    if (next && find) {
+      // Once the section has rendered, bring the setting that matched into view.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const body = document.getElementById(`settings-${next}`);
+        const hit = Array.from(body?.querySelectorAll('label, h3, p, button, td, th') ?? [])
+          .find((el) => el.textContent?.toLowerCase().includes(find.toLowerCase()));
+        if (hit instanceof HTMLElement) {
+          hit.scrollIntoView({ block: 'center' });
+          hit.classList.add('settings-found');
+          setTimeout(() => hit.classList.remove('settings-found'), 1_600);
+        }
+      }));
+    }
+  };
+
+  const sectionBody = (id: SectionId) => {
+    switch (id) {
+      case 'appearance':
+        return <AppearanceSettings />;
+      case 'text':
+        return (
+          <>
+            <label>
+              <span>Terminal font size</span>
+              <FontSizeControl size={fontSize} onBump={bumpFontSize} />
+            </label>
+            <label>
+              <span>Ticket and pull request text size</span>
+              <ReadingSizeControl />
+            </label>
+            <label>
+              <span>Sidebar text size</span>
+              <SidebarSizeControl />
+            </label>
+            <label>
+              <span>Tabs, session header and status bar text size</span>
+              <ChromeSizeControl />
+            </label>
+            <p className="settings-note">⌘+ and ⌘− resize whichever of these you last clicked in: the sidebar, the ticket or pull request, a terminal, or its tabs, header and the status bar. Terminal colours are under Appearance.</p>
+          </>
+        );
+      case 'notifications':
+        return (
+          <>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={notify} onChange={(e) => void toggle('notify.enabled', e.target.checked, setNotify)} />
+              <span>macOS notifications: blocked pull requests, and Activity while Baton isn't in front</span>
+            </label>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={launchAtLogin} onChange={(e) => void toggle('launchAtLogin', e.target.checked, setLaunchAtLogin)} />
+              <span>Launch Baton at login</span>
+            </label>
+            <ActivitySettings />
+          </>
+        );
+      case 'dictation':
+        return <DictationSettings />;
+      case 'agents':
+        return (
+          <>
+            <QuickModelSettings />
+            <RunningAgentSettings />
+            <TokenPriceSettings />
+          </>
+        );
+      case 'connections':
+        return providers.map((provider) => (
+          <div key={provider} className="settings-connection">
+            <h3>
+              {label(provider)}
+              {connected.includes(provider as ProviderId) && <span className="badge">connected</span>}
+            </h3>
+            {(fields[provider] ?? []).map(field)}
+            {(EXTRA_FIELDS[provider] ?? []).map(field)}
+            <button
+              className="primary"
+              disabled={saving === provider}
+              onClick={() => void save([...(fields[provider] ?? []), ...(EXTRA_FIELDS[provider] ?? [])], provider)}
+            >
+              {saving === provider ? 'Saving…' : `Save ${label(provider)}`}
+            </button>
+            {saveResult[provider] && (
+              <p className={saveResult[provider].ok ? 'settings-note ok' : 'settings-note error'}>{saveResult[provider].text}</p>
+            )}
+          </div>
+        ));
+      case 'environments':
+        return <TestEnvironmentSettings />;
+    }
+  };
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>
@@ -560,109 +753,53 @@ export function Settings({
           </button>
         </header>
 
-        <div className="settings-layout">
-          <nav className="settings-nav">
-            {sections.map((id) => (
-              <button
-                key={id}
-                className={id === active ? 'active' : ''}
-                onClick={() => setActive(id)}
-              >
-                {id === 'general' ? 'General' : id === 'environment' ? 'Environments' : PROVIDER_LABEL[id] ?? id}
-                {id !== 'general' && id !== 'environment' && connected.includes(id as ProviderId) && (
-                  <span className="badge">connected</span>
-                )}
-              </button>
-            ))}
-          </nav>
+        <div className="settings-list">
+          <div className="settings-search">
+            <SearchIcon size={13} />
+            <input
+              id="settings-search" type="text" value={query} autoFocus spellCheck={false}
+              placeholder="Search settings — try “key”, “font” or “idle”"
+              aria-label="Search settings"
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && visible[0]) toggleOpen(visible[0].id, matches(visible[0].id)[0]);
+                if (e.key === 'Escape' && query) { e.stopPropagation(); setQuery(''); }
+              }}
+            />
+          </div>
 
-          <div className="settings-body">
-            {active === 'general' && (
-              <section className="provider">
-                <h3>Appearance</h3>
-                <label>
-                  <span>Theme</span>
-                  <div className="theme-picker">
-                    {THEME_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        className={opt.id === theme ? 'active' : ''}
-                        onClick={() => onThemeChange(opt.id)}
-                      >
-                        {opt.label}
-                      </button>
+          {visible.length === 0 && <p className="settings-none">No setting matches “{query.trim()}”.</p>}
+          {visible.map((section) => {
+            const isOpen = open === section.id;
+            const found = matches(section.id);
+            return (
+              <section key={section.id} className={isOpen ? 'settings-row open' : 'settings-row'} data-section={section.id}>
+                <button
+                  type="button" className="settings-row-head" aria-expanded={isOpen} aria-controls={`settings-${section.id}`}
+                  onClick={() => toggleOpen(section.id)}
+                >
+                  <span className="settings-row-icon" aria-hidden="true">{section.icon}</span>
+                  <span className="settings-row-title">{section.title}</span>
+                  <span className="settings-row-summary">
+                    {summary[section.id]}
+                  </span>
+                  <span className="settings-row-chevron" aria-hidden="true"><ChevronIcon size={12} open={isOpen} /></span>
+                </button>
+                {!isOpen && found.length > 0 && (
+                  <div className="settings-hits">
+                    {found.slice(0, 6).map((term) => (
+                      <button key={term} type="button" className="settings-hit" onClick={() => toggleOpen(section.id, term)}>{term}</button>
                     ))}
                   </div>
-                </label>
-                <label>
-                  <span>Terminal font size</span>
-                  <FontSizeControl size={fontSize} onBump={bumpFontSize} />
-                </label>
-                <label>
-                  <span>Ticket and pull request text size</span>
-                  <ReadingSizeControl />
-                </label>
-                <label>
-                  <span>Sidebar text size</span>
-                  <SidebarSizeControl />
-                </label>
-                <p className="settings-note">⌘+ and ⌘− resize whichever of the three you last clicked in: the sidebar, the ticket or pull request, or a terminal.</p>
-
-                <h3>General</h3>
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={launchAtLogin}
-                    onChange={(e) => void toggle('launchAtLogin', e.target.checked, setLaunchAtLogin)}
-                  />
-                  <span>Launch Baton at login</span>
-                </label>
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={notify}
-                    onChange={(e) => void toggle('notify.enabled', e.target.checked, setNotify)}
-                  />
-                  <span>macOS notifications: blocked pull requests, and Activity while Baton isn't in front</span>
-                </label>
-
-                <ActivitySettings />
-                <DictationSettings />
-
-                <QuickModelSettings />
-                <RunningAgentSettings />
-                <TokenPriceSettings />
-              </section>
-            )}
-
-            {active !== 'general' && active !== 'environment' && (
-              <section className="provider">
-                <h3>
-                  {PROVIDER_LABEL[active] ?? active}
-                  {connected.includes(active as ProviderId) && <span className="badge">connected</span>}
-                </h3>
-                {(fields[active] ?? []).map(field)}
-                {(EXTRA_FIELDS[active] ?? []).map(field)}
-                <button
-                  className="primary"
-                  disabled={saving === active}
-                  onClick={() =>
-                    void save([...(fields[active] ?? []), ...(EXTRA_FIELDS[active] ?? [])], active)
-                  }
-                >
-                  {saving === active ? 'Saving…' : `Save ${PROVIDER_LABEL[active] ?? active}`}
-                </button>
-                {saveResult[active] && (
-                  <p className={saveResult[active].ok ? 'settings-note ok' : 'settings-note error'}>
-                    {saveResult[active].text}
-                  </p>
+                )}
+                {isOpen && (
+                  <div className={`settings-row-body provider ${section.ownHeading ? 'own-heading' : ''}`} id={`settings-${section.id}`}>
+                    {sectionBody(section.id)}
+                  </div>
                 )}
               </section>
-            )}
-
-            {active === 'environment' && <TestEnvironmentSettings />}
-          </div>
+            );
+          })}
         </div>
       </div>
     </div>

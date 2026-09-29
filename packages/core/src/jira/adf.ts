@@ -153,7 +153,7 @@ function render(node: AdfNode): string {
     case 'mention':
       return `@${String(node.attrs?.text ?? 'someone').replace(/^@/, '')}`;
     case 'emoji':
-      return String(node.attrs?.text ?? node.attrs?.shortName ?? '');
+      return renderEmoji(node);
     case 'table':
       return renderTable(node);
     case 'status':
@@ -163,6 +163,33 @@ function render(node: AdfNode): string {
     default:
       return children(node, '\n');
   }
+}
+
+/**
+ * Atlassian's own emoji (item 102) have no Unicode character, so Jira sends
+ * only a short name — `:flag_on:` on the comment Jira writes when a ticket is
+ * flagged — and that is what used to show. These are the ones Jira itself
+ * uses, plus the common short names people type, as the nearest emoji.
+ */
+const EMOJI: Record<string, string> = {
+  flag_on: '🚩', flag_off: '🏳️', check_mark: '✅', cross_mark: '❌', warning: '⚠️', info: 'ℹ️',
+  question: '❓', light_bulb_on: '💡', light_bulb_off: '💡', thumbsup: '👍', thumbsdown: '👎',
+  '+1': '👍', '-1': '👎', star: '⭐', plus: '➕', minus: '➖', smile: '😄', smiley: '😃', grinning: '😀',
+  slight_smile: '🙂', wink: '😉', sad: '🙁', frowning: '🙁', cry: '😢', tongue: '😛', heart: '❤️',
+  tada: '🎉', fire: '🔥', rocket: '🚀', eyes: '👀', pray: '🙏', clap: '👏', ok_hand: '👌', wave: '👋',
+  white_check_mark: '✅', heavy_check_mark: '✔️', x: '❌', exclamation: '❗', bangbang: '‼️',
+  red_circle: '🔴', green_circle: '🟢', yellow_circle: '🟡', blue_circle: '🔵', bug: '🐛',
+  lock: '🔒', unlock: '🔓', memo: '📝', pushpin: '📌', link: '🔗', hourglass: '⌛', stopwatch: '⏱️',
+  100: '💯', muscle: '💪', thinking: '🤔', sweat_smile: '😅', joy: '😂', laughing: '😆'
+};
+
+function renderEmoji(node: AdfNode): string {
+  const text = typeof node.attrs?.text === 'string' ? node.attrs.text : '';
+  const short = typeof node.attrs?.shortName === 'string' ? node.attrs.shortName : '';
+  // A real character is used as is; a `:name:` in either field is looked up.
+  if (text && !/^:[^:\s]+:$/.test(text)) return text;
+  const name = (text || short).replace(/^:|:$/g, '').toLowerCase();
+  return EMOJI[name] ?? (text || short);
 }
 
 function renderTable(node: AdfNode): string {

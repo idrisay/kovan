@@ -1,5 +1,5 @@
 import type {
-  ActivityEvent, JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport
+  ActivityEvent, GitHubBudget, QuickCommand, JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport
 } from '@baton/core';
 import type { PullDetail, ReviewComment, ReviewThread, Reviewer } from '@baton/providers';
 import type { AgentRun, RunFile, Runner, RunKind } from '@baton/agent';
@@ -26,8 +26,10 @@ export type {
 /** A repo's status plus the de-duplicated count the badge shows. */
 export type WorkspaceStatus = RepoStatus & { changes: number };
 
-/** 'system' follows the OS; the other two hold regardless of it. */
-export type ThemeChoice = 'system' | 'light' | 'dark';
+export type { ThemeChoice } from '@baton/core';
+import type { SpeechProviderId } from '@baton/core';
+export type { RunnerLimits } from '../main/agentLimits';
+import type { RunnerLimits } from '../main/agentLimits';
 
 /** The providers a "refresh just this one" control has anything to do for —
  *  see the note on `Snapshot['refreshedAt']` in `main/poller.ts`. */
@@ -49,6 +51,8 @@ export interface SessionInfo {
   /** The title the program running in a plain terminal set — see `SessionInfo.task` in main. */
   task?: string;
   renamed?: boolean;
+  /** The quick command (item 91) running in it, if any. */
+  commandId?: string;
 }
 
 export interface Snapshot {
@@ -67,6 +71,10 @@ export interface Snapshot {
   refreshing: boolean;
   refreshedAt: Partial<Record<PolledProvider, number>>;
   refreshingProviders: PolledProvider[];
+  /** GitHub's GraphQL budget as of the last poll that got an answer (item 92). */
+  githubBudget?: GitHubBudget;
+  /** The first refresh after launch, service by service (item 101). */
+  booting?: { provider: PolledProvider; state: 'loading' | 'done' | 'failed'; count?: number; message?: string }[];
 }
 
 /** One quick-model job's saved result and live progress; see `main/quick.ts`. */
@@ -95,6 +103,8 @@ export interface BatonApi {
   missingFields(id: ProviderId): Promise<string[]>;
   settings(): Promise<Record<string, unknown>>;
   setSetting(key: string, value: unknown): Promise<void>;
+  setNativeTheme(source: 'system' | 'light' | 'dark'): Promise<void>;
+  systemAccent(): Promise<string | undefined>;
   setSecret(key: string, value: string): Promise<Snapshot>;
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
 
@@ -183,11 +193,36 @@ export interface BatonApi {
   /** A run's own screenshot, as a `data:image/...` URL ready for an `<img src>`. */
   /** Shows a run's file or folder selected in Finder. */
   runReveal(file: string): Promise<void>;
+  /** Watches a run's folder while its viewer is open (item 90). */
+  runWatch(directory: string, on: boolean): Promise<void>;
+  /** Opens the site the run checked on in the default browser. */
+  /** Plan limits per runner id, read from what the agents write (item 108). */
+  agentLimits(): Promise<Record<string, RunnerLimits>>;
+  /** Opens the page the agent was on — the given screenshot's, when it recorded one (item 109). */
+  runSiteOpen(directory: string, shot?: string): Promise<void>;
+  onRunChanged(listener: (directory: string) => void): () => void;
+  /** Quick commands (item 91): the saved list, and which ran last. */
+  /** `busy`: commands still running in their terminal, not just open at a prompt. */
+  commands(): Promise<{ commands: QuickCommand[]; last: string; busy: string[] }>;
+  commandSave(input: { id?: string; name: string; command: string; cwd: string }): Promise<{ ok: true; id: string } | { ok: false; error: string }>;
+  commandDuplicate(id: string): Promise<string | undefined>;
+  commandDelete(id: string): Promise<void>;
+  /** Runs a saved command by id — or finds the session it's already running in. */
+  commandRun(id: string): Promise<{ ok: true; sessionId: string; reused: boolean } | { ok: false; error: string }>;
+  /** A native folder picker; '' when cancelled. */
+  commandFolder(): Promise<string>;
   /** Starts listening (item 88); words arrive through `onDictation`. */
   dictationStart(): Promise<{ ok: true } | { ok: false; message: string }>;
   dictationStop(): Promise<void>;
   dictationCancel(): Promise<void>;
   dictationStatus(refresh?: boolean): Promise<DictationStatus>;
+  /** Speech providers (item 97): what's set up, a key, a sample test, a model file. */
+  speechSetup(): Promise<SpeechSetup>;
+  /** ⌘P (item 100): the active workspace's files; `force` lists them again. */
+  quickOpenFiles(force?: boolean): Promise<{ workspace: string | null; files: { path: string; rel: string }[] }>;
+  speechKey(provider: SpeechProviderId, key: string): Promise<void>;
+  speechTest(provider: SpeechProviderId): Promise<{ ok: true; text: string; ms: number } | { ok: false; message: string }>;
+  speechPickModel(): Promise<string | undefined>;
   privacyOpen(pane: 'mic' | 'speech'): Promise<void>;
   onDictation(listener: (event: DictationEvent) => void): () => void;
   /** The Activity inbox, and a subject a clicked notification asked to open. */
@@ -255,10 +290,11 @@ export interface RendererErrorReport {
 }
 
 export type DictationEvent =
-  | { type: 'ready'; locale: string; onDevice: boolean }
+  | { type: 'ready'; locale: string; onDevice: boolean; recording?: boolean }
   | { type: 'level'; value: number }
   | { type: 'partial'; text: string }
   | { type: 'final'; text: string }
+  | { type: 'transcribing'; provider: string }
   | { type: 'error'; code: string; message: string }
   | { type: 'ended' };
 
@@ -269,4 +305,15 @@ export interface DictationStatus {
   system: string;
   locale: string;
   locales: { id: string; name: string; onDevice: boolean }[];
+  provider: SpeechProviderId;
+}
+
+export interface SpeechSetup {
+  provider: SpeechProviderId;
+  models: Record<string, string>;
+  baseUrls: Record<string, string>;
+  keys: Record<string, boolean>;
+  whisperCli: string | null;
+  whisperModels: string[];
+  whisperModel: string;
 }

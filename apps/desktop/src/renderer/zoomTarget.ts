@@ -1,4 +1,4 @@
-import { stepReadingSize, stepSidebarSize } from './readingSize';
+import { stepChromeSize, stepReadingSize, stepSidebarSize } from './readingSize';
 import { stepTerminalFont } from './terminalFontSize';
 
 /**
@@ -12,7 +12,7 @@ import { stepTerminalFont } from './terminalFontSize';
  * (the rail, the titlebar), the previous target stands; the first one is the
  * terminal, which is what these keys moved before there was a choice.
  */
-type Target = 'terminal' | 'sidebar' | 'reading';
+type Target = 'terminal' | 'sidebar' | 'reading' | 'chrome';
 
 let target: Target = 'terminal';
 
@@ -20,6 +20,8 @@ function classify(node: EventTarget | null): Target | undefined {
   if (!(node instanceof Element)) return undefined;
   // The terminal first: a docked one sits inside the reading pane's column.
   if (node.closest('.term')) return 'terminal';
+  // Item 103: the tab strip, a session's header and the status bar.
+  if (node.closest('.pane-tabs, .term-head, .statusbar')) return 'chrome';
   if (node.closest('.queue')) return 'sidebar';
   if (node.closest('.detail.reading')) return 'reading';
   return undefined;
@@ -35,6 +37,7 @@ export function installZoomRouting(): void {
   window.baton.onFontSizeStep((step) => {
     if (target === 'sidebar') stepSidebarSize(step);
     else if (target === 'reading') stepReadingSize(step);
+    else if (target === 'chrome') stepChromeSize(step);
     else stepTerminalFont(step);
   });
 }

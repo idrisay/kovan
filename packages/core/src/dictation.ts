@@ -94,3 +94,77 @@ export function joinDictation(before: string, text: string): string {
   if (!said) return '';
   return before === '' || /\s$/.test(before) ? said : ` ${said}`;
 }
+
+/**
+ * Speech providers (item 97), matching VoiceSmith's list and defaults. Apple
+ * Speech is the default: on this Mac, no key, and the only one that shows the
+ * words while you speak. Every other provider gets a recording once you
+ * finish, and answers once.
+ */
+export type SpeechProviderId = 'apple' | 'whisper-cpp' | 'openai' | 'groq' | 'deepgram' | 'assemblyai';
+
+export interface SpeechProviderInfo {
+  id: SpeechProviderId;
+  label: string;
+  /** apple: live, on-device. local: whisper.cpp on this Mac. cloud: an API key. */
+  kind: 'apple' | 'local' | 'cloud';
+  defaultModel: string;
+  /** Empty when there's no server to point elsewhere. For whisper.cpp, a
+   *  base URL means a running whisper-server instead of the CLI. */
+  defaultBaseUrl: string;
+  /** Where to get a key. */
+  keyUrl?: string;
+}
+
+export const SPEECH_PROVIDERS: SpeechProviderInfo[] = [
+  { id: 'apple', label: 'Apple Speech', kind: 'apple', defaultModel: '', defaultBaseUrl: '' },
+  { id: 'whisper-cpp', label: 'whisper.cpp', kind: 'local', defaultModel: 'ggml-base.en', defaultBaseUrl: '' },
+  { id: 'openai', label: 'OpenAI Whisper', kind: 'cloud', defaultModel: 'whisper-1', defaultBaseUrl: 'https://api.openai.com/v1', keyUrl: 'https://platform.openai.com/api-keys' },
+  { id: 'groq', label: 'Groq Whisper', kind: 'cloud', defaultModel: 'whisper-large-v3-turbo', defaultBaseUrl: 'https://api.groq.com/openai/v1', keyUrl: 'https://console.groq.com/keys' },
+  { id: 'deepgram', label: 'Deepgram', kind: 'cloud', defaultModel: 'nova-2', defaultBaseUrl: 'https://api.deepgram.com/v1', keyUrl: 'https://console.deepgram.com' },
+  { id: 'assemblyai', label: 'AssemblyAI', kind: 'cloud', defaultModel: 'best', defaultBaseUrl: 'https://api.assemblyai.com/v2', keyUrl: 'https://www.assemblyai.com/app/api-keys' }
+];
+
+export function speechProvider(id: unknown): SpeechProviderInfo {
+  return SPEECH_PROVIDERS.find((p) => p.id === id) ?? SPEECH_PROVIDERS[0]!;
+}
+
+/** The secret an API key is kept under, in the Keychain like every token. */
+export function speechKeyName(id: SpeechProviderId): string {
+  return `dictation.key.${id}`;
+}
+
+/** A locale for a service that wants a language: "en-GB" → "en"; no
+ *  setting → undefined, meaning let the service detect it. */
+export function speechLanguage(locale: string): string | undefined {
+  const language = locale.split('-')[0]?.trim().toLowerCase();
+  return language ? language : undefined;
+}
+
+/**
+ * whisper-cli's stdout, as text. It prints progress and timing lines next to
+ * the words (VoiceSmith filters the same ones), and a blank-audio marker when
+ * nothing was said.
+ */
+export function whisperCliText(stdout: string): string {
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('[') && !line.startsWith('whisper_'))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Which of the model files found to use by default: the provider's default
+ *  (base.en) when it's there, otherwise the best of what is. */
+export function preferredWhisperModel(files: readonly string[]): string | undefined {
+  const name = (file: string) => file.split('/').pop()!.replace(/\.bin$/, '');
+  const order = ['ggml-base.en', 'ggml-base', 'ggml-small.en', 'ggml-small', 'ggml-medium.en', 'ggml-medium',
+    'ggml-large-v3-turbo', 'ggml-large-v3', 'ggml-tiny.en', 'ggml-tiny'];
+  for (const wanted of order) {
+    const hit = files.find((f) => name(f) === wanted) ?? files.find((f) => name(f).startsWith(`${wanted}-q`));
+    if (hit) return hit;
+  }
+  return files[0];
+}

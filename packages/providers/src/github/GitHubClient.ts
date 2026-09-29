@@ -7,6 +7,7 @@ import {
   summaryFromApi,
   withinScope,
   type ApiPullNode,
+  type GitHubBudget,
   type PullSummary,
   type RepoRef,
   type ReviewDecision
@@ -38,6 +39,8 @@ export interface PullRequest {
 
 export interface PullQueues {
   viewer: string;
+  /** GitHub's GraphQL budget after this poll, when it said. */
+  budget?: GitHubBudget;
   mine: PullSummary[];
   reviewRequested: PullSummary[];
   /** The most recently merged, newest first. A window onto `mergedTotal`. */
@@ -85,26 +88,44 @@ const PULL_FIELDS = `
   viewerLatestReview { state }
   latestOpinionatedReviews(first: 20) { nodes { state author { login } } }
   reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
-  reviewThreads(first: 100) {
-    nodes { isResolved comments(last: 1) { totalCount nodes { author { login } createdAt } } }
-  }
-  comments(last: 1) { totalCount nodes { author { login } createdAt } }
+  reviewThreads(first: 100) { nodes { isResolved } }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
 `;
+
+/**
+ * What Activity (item 86) needs to notice a new comment on your own pull
+ * requests: the latest conversation comment and the latest review, with
+ * their counts. A reply in a code review thread is posted as a review, so it
+ * counts too.
+ *
+ * Deliberately not each review thread's latest comment: GitHub charges a
+ * GraphQL query by what it *could* fetch, and a list inside a list multiplies
+ * — 50 pull requests × 100 threads made the minute's poll cost 116 points
+ * instead of 4, and ran through the 5,000-an-hour limit in 45 minutes
+ * (item 92). This costs 1 point more than none at all.
+ */
+const ACTIVITY_FIELDS = `
+  comments(last: 1) { totalCount nodes { author { login } createdAt } }
+  reviews(last: 1) { totalCount nodes { author { login } submittedAt } }
+`;
+
+/** A merged row shows neither review threads nor activity. */
+const MERGED_FIELDS = PULL_FIELDS.replace('  reviewThreads(first: 100) { nodes { isResolved } }\n', '');
 
 const QUEUES_QUERY = `
 query BatonPullQueues($mine: String!, $review: String!, $merged: String!,
                       $first: Int!, $mergedFirst: Int!) {
   viewer { login }
+  rateLimit { cost remaining limit resetAt }
   mine: search(query: $mine, type: ISSUE, first: $first) {
-    nodes { ... on PullRequest { ${PULL_FIELDS} } }
+    nodes { ... on PullRequest { ${PULL_FIELDS} ${ACTIVITY_FIELDS} } }
   }
   review: search(query: $review, type: ISSUE, first: $first) {
     nodes { ... on PullRequest { ${PULL_FIELDS} } }
   }
   merged: search(query: $merged, type: ISSUE, first: $mergedFirst) {
     issueCount
-    nodes { ... on PullRequest { ${PULL_FIELDS} } }
+    nodes { ... on PullRequest { ${MERGED_FIELDS} } }
   }
 }`;
 
@@ -120,7 +141,7 @@ const MERGED_QUERY = `
 query BatonMerged($merged: String!, $first: Int!) {
   merged: search(query: $merged, type: ISSUE, first: $first) {
     issueCount
-    nodes { ... on PullRequest { ${PULL_FIELDS} } }
+    nodes { ... on PullRequest { ${MERGED_FIELDS} } }
   }
 }`;
 
@@ -138,6 +159,7 @@ interface MergedSearch {
 interface GraphResponse {
   data?: {
     viewer?: { login?: string };
+    rateLimit?: { cost?: number; remaining?: number; limit?: number; resetAt?: string } | null;
     mine?: { nodes?: (ApiPullNode | null)[] | null };
     review?: { nodes?: (ApiPullNode | null)[] | null };
     merged?: MergedSearch | null;
@@ -293,8 +315,12 @@ export class GitHubClient {
     const read = (nodes: (ApiPullNode | null)[] | null | undefined): PullSummary[] =>
       (nodes ?? []).filter((n): n is ApiPullNode => Boolean(n?.number)).map(summaryFromApi);
 
+    const rate = response.data?.rateLimit;
     return {
       viewer: response.data?.viewer?.login ?? '',
+      ...(rate && typeof rate.remaining === 'number' && typeof rate.limit === 'number'
+        ? { budget: { remaining: rate.remaining, limit: rate.limit, resetAt: rate.resetAt ?? '', cost: rate.cost ?? 0 } }
+        : {}),
       mine: withinScope(read(response.data?.mine?.nodes), mineSearch.allow),
       reviewRequested: withinScope(read(response.data?.review?.nodes), reviewSearch.allow),
       merged: withinScope(read(response.data?.merged?.nodes), mergedSearch.allow),

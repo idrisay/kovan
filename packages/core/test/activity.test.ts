@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addActivity, diffActivity, FLOOD, summaryFromApi,
+  addActivity, describeGitHubBudget, diffActivity, FLOOD, githubAnswered, summaryFromApi,
   type ActivitySeen, type JiraIssue, type PullSummary
 } from '../src';
 
@@ -78,6 +78,23 @@ describe('diffActivity', () => {
     expect(mine.events).toEqual([]);
   });
 
+  // Item 92: counts saved before the counting changed are not comparable.
+  it('re-baselines silently when the way comments are counted changed', () => {
+    const oldSeen: ActivitySeen = { github: { reviewRequested: [], decisions: { 'acme/web#1': 'review_required' }, comments: { 'acme/web#1': 0 } } };
+    const first = diffActivity(oldSeen, github([pull(1, { commentCount: 3, lastCommenter: 'bob-dev' })]));
+    expect(first.events).toEqual([]);
+    const next = diffActivity(first.seen, github([pull(1, { commentCount: 4, lastCommenter: 'bob-dev' })]));
+    expect(next.events).toMatchObject([{ kind: 'new-comment' }]);
+  });
+
+  it("doesn't also call an approval a new comment", () => {
+    const { events } = twice(
+      github([pull(1, { commentCount: 2 })]),
+      github([pull(1, { reviewDecision: 'approved', commentCount: 3, lastCommenter: 'bob-dev' })])
+    );
+    expect(events.map((e) => e.kind)).toEqual(['approved']);
+  });
+
   it('reports a newly assigned ticket', () => {
     const { events } = twice({ jira: { tickets: [ticket('A-1')] } }, { jira: { tickets: [ticket('A-1'), ticket('A-2')] } });
     expect(events).toMatchObject([{ kind: 'new-ticket', subject: 'A-2', title: 'Ticket A-2' }]);
@@ -120,24 +137,51 @@ describe('addActivity', () => {
 });
 
 describe('summaryFromApi comments', () => {
-  it('adds conversation and review-thread comments and finds the newest author', () => {
+  const node = { number: 1, title: 't', url: 'u', isDraft: false, createdAt: '', updatedAt: '', additions: 0, deletions: 0 };
+
+  // Item 92: conversation comments plus reviews, not every thread's comments.
+  it('adds conversation comments and reviews, and finds the newest author', () => {
     const summary = summaryFromApi({
-      number: 1, title: 't', url: 'u', isDraft: false, createdAt: '', updatedAt: '', additions: 0, deletions: 0,
+      ...node,
       comments: { totalCount: 2, nodes: [{ author: { login: 'a' }, createdAt: '2026-09-01T10:00:00Z' }] },
-      reviewThreads: {
-        nodes: [
-          { isResolved: false, comments: { totalCount: 3, nodes: [{ author: { login: 'b' }, createdAt: '2026-09-02T10:00:00Z' }] } },
-          { isResolved: true, comments: { totalCount: 1, nodes: [{ author: { login: 'c' }, createdAt: '2026-08-01T10:00:00Z' }] } }
-        ]
-      }
+      reviews: { totalCount: 3, nodes: [{ author: { login: 'b' }, submittedAt: '2026-09-02T10:00:00Z' }] }
     });
-    expect(summary).toMatchObject({ commentCount: 6, lastCommenter: 'b', lastCommentAt: '2026-09-02T10:00:00Z' });
+    expect(summary).toMatchObject({ commentCount: 5, lastCommenter: 'b', lastCommentAt: '2026-09-02T10:00:00Z' });
+  });
+
+  it('takes the conversation comment when it is the newer one', () => {
+    const summary = summaryFromApi({
+      ...node,
+      comments: { totalCount: 1, nodes: [{ author: { login: 'a' }, createdAt: '2026-09-03T10:00:00Z' }] },
+      reviews: { totalCount: 0, nodes: [] }
+    });
+    expect(summary).toMatchObject({ commentCount: 1, lastCommenter: 'a' });
   });
 
   it('leaves the count off when the query did not ask for comments', () => {
-    const summary = summaryFromApi({
-      number: 1, title: 't', url: 'u', isDraft: false, createdAt: '', updatedAt: '', additions: 0, deletions: 0
-    });
-    expect(summary.commentCount).toBeUndefined();
+    expect(summaryFromApi(node).commentCount).toBeUndefined();
+  });
+});
+
+describe('githubAnswered', () => {
+  const ok = { connected: ['github', 'jira'], errors: [], viewer: 'me' };
+  it('is true only for a poll GitHub answered', () => {
+    expect(githubAnswered(ok)).toBe(true);
+    expect(githubAnswered({ ...ok, errors: [{ provider: 'github' }] })).toBe(false);
+    expect(githubAnswered({ ...ok, viewer: '' })).toBe(false);
+    expect(githubAnswered({ ...ok, connected: ['jira'] })).toBe(false);
+    // Another provider failing doesn't count against GitHub.
+    expect(githubAnswered({ ...ok, errors: [{ provider: 'jira' }] })).toBe(true);
+  });
+});
+
+describe('describeGitHubBudget', () => {
+  const at = () => '15:55';
+  it('says what is left, when it refills and what a check costs', () => {
+    expect(describeGitHubBudget({ remaining: 4768, limit: 5000, resetAt: '2026-09-28T13:55:34Z', cost: 5 }, at))
+      .toBe('GitHub API: 4,768 of 5,000 points left this hour · refills at 15:55 · each check costs 5 · shared with everything else using your account');
+  });
+  it('warns when it is nearly gone', () => {
+    expect(describeGitHubBudget({ remaining: 120, limit: 5000, resetAt: 'x', cost: 5 }, at)).toContain('Running low');
   });
 });

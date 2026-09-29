@@ -18,6 +18,11 @@
 // dies never leaves the microphone on.
 //
 //   baton-dictate [--locale en-US] [--file audio.wav]
+//   baton-dictate --record out.wav   (item 97) record only, for a speech
+//                                    provider other than Apple's: 16 kHz mono
+//                                    16-bit WAV, the same level meter, then
+//                                    {"type":"recorded","path":…,"seconds":…}
+//                                    after "stop". No Speech permission needed.
 //   baton-dictate --status     permissions and languages, never prompts
 
 import AVFoundation
@@ -189,6 +194,7 @@ final class Transcriber: @unchecked Sendable {
 let localeId = argument("--locale")
 let locale = localeId.map { Locale(identifier: $0.replacingOccurrences(of: "-", with: "_")) } ?? Locale.current
 let file = argument("--file")
+let recordPath = argument("--record")
 
 func authorize(_ then: @escaping () -> Void) {
     let speech = { (next: @escaping () -> Void) in
@@ -203,11 +209,14 @@ func authorize(_ then: @escaping () -> Void) {
         }
     }
     if file != nil { speech(then); return }
+    // Recording for another provider: the words aren't Apple's, so only the
+    // microphone is asked for.
+    let next = recordPath != nil ? { (go: @escaping () -> Void) in go() } : speech
     switch AVCaptureDevice.authorizationStatus(for: .audio) {
-    case .authorized: speech(then)
+    case .authorized: next(then)
     case .notDetermined:
         AVCaptureDevice.requestAccess(for: .audio) { granted in
-            if granted { speech(then) } else { fail("mic-denied", "Baton isn't allowed to use the microphone.") }
+            if granted { next(then) } else { fail("mic-denied", "Baton isn't allowed to use the microphone.") }
         }
     default: fail("mic-denied", "Baton isn't allowed to use the microphone.")
     }
@@ -239,6 +248,10 @@ func stopAndFinish() {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
     }
+    if let recorder {
+        emit(["type": "recorded", "path": recorder.close(), "seconds": (recorder.seconds * 10).rounded() / 10])
+        exit(0)
+    }
     guard let transcriber else { deliverFinal(""); return }
     transcriber.onFinished = { deliverFinal($0) }
     transcriber.finish()
@@ -246,7 +259,92 @@ func stopAndFinish() {
     DispatchQueue.main.asyncAfter(deadline: .now() + 4) { deliverFinal(transcriber.text) }
 }
 
+/// `--record`: the microphone, converted to what every speech service and
+/// whisper.cpp accept — 16 kHz, mono, 16-bit PCM WAV.
+final class Recorder: @unchecked Sendable {
+    let url: URL
+    private var file: AVAudioFile?
+    private let converter: AVAudioConverter
+    private let output: AVAudioFormat
+    private let lock = NSLock()
+    private(set) var seconds: Double = 0
+
+    init(url: URL, input: AVAudioFormat) throws {
+        self.url = url
+        output = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+        guard let converter = AVAudioConverter(from: input, to: output) else {
+            throw NSError(domain: "baton-dictate", code: 1, userInfo: [NSLocalizedDescriptionKey: "can't convert \(input)"])
+        }
+        self.converter = converter
+        file = try AVAudioFile(forWriting: url, settings: [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: 16_000,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+        ], commonFormat: .pcmFormatFloat32, interleaved: false)
+    }
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        let ratio = output.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32
+        guard let converted = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: capacity) else { return }
+        var fed = false
+        var error: NSError?
+        converter.convert(to: converted, error: &error) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true
+            status.pointee = .haveData
+            return buffer
+        }
+        guard error == nil, converted.frameLength > 0 else { return }
+        lock.lock(); defer { lock.unlock() }
+        try? file?.write(from: converted)
+        seconds += Double(converted.frameLength) / output.sampleRate
+    }
+
+    /// Flushes and closes the file (AVAudioFile writes its header on release).
+    func close() -> String {
+        lock.lock(); defer { lock.unlock() }
+        file = nil
+        return url.path
+    }
+}
+
+var recorder: Recorder?
+
+func startRecording(to path: String) {
+    let input = engine.inputNode
+    let format = input.outputFormat(forBus: 0)
+    guard format.sampleRate > 0 else { fail("no-input", "No microphone is ready.") }
+    do {
+        recorder = try Recorder(url: URL(fileURLWithPath: path), input: format)
+    } catch {
+        fail("record", "Couldn't record to \(path): \(error.localizedDescription)")
+    }
+    let r = recorder!
+    emit(["type": "ready", "locale": "", "onDevice": false, "recording": true])
+    input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
+        r.append(buffer)
+        let now = Date()
+        if now.timeIntervalSince(lastLevelAt) >= 0.05 {
+            lastLevelAt = now
+            emit(["type": "level", "value": (level(of: buffer) * 100).rounded() / 100])
+        }
+        if now.timeIntervalSince(startedAt) > maxSeconds {
+            DispatchQueue.main.async { stopAndFinish() }
+        }
+    }
+    engine.prepare()
+    do {
+        try engine.start()
+    } catch {
+        fail("no-input", "The microphone couldn't start: \(error.localizedDescription)")
+    }
+}
+
 func start() {
+    if let recordPath { startRecording(to: recordPath); return }
     guard let recognizer = SFSpeechRecognizer(locale: locale) else {
         fail("no-recognizer", "Dictation isn't available for \(locale.identifier).")
     }

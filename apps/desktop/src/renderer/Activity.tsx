@@ -235,7 +235,7 @@ export function ActivityToasts({ onOpen, onShowAll }: {
 }
 
 /** The settings behind the inbox, one per kind (approved and changes requested share one). */
-const ACTIVITY_SETTINGS: { setting: string; label: string; note: string }[] = [
+export const ACTIVITY_SETTINGS: { setting: string; label: string; note: string }[] = [
   { setting: 'activity.reviewRequested', label: 'Review requested from you', note: 'Somebody asks you to review their pull request.' },
   { setting: 'activity.decisions', label: 'Your pull request approved or sent back', note: 'A reviewer approves, or asks for changes.' },
   { setting: 'activity.newTicket', label: 'New Jira ticket assigned to you', note: 'A ticket newly appears in Tickets.' },

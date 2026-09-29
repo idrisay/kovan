@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useMenuDismiss } from './menuDismiss';
-import { DEFAULT_PULL_SORT, formatAge, isBlocked, moveBy, moveItem, PULL_SORTS, sortPulls, type PullSort } from '@baton/core';
+import { DEFAULT_PULL_SORT, describeGitHubBudget, formatAge, isBlocked, moveBy, moveItem, PULL_SORTS, sortPulls, withSelected, type PullSort } from '@baton/core';
 import type {
   JiraIssue, PolledProvider, PullSummary, RunKind, RunTarget, SentryFrame, SentryIssue,
-  SessionInfo, Snapshot, ThemeChoice
+  SessionInfo, Snapshot
 } from './types';
 import { Settings } from './Settings';
 import { levelTone, PullPane, SentryPane, TicketPane } from './Detail';
@@ -20,6 +21,10 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { ActivityList, ActivityToasts, useActivity } from './Activity';
 import { DictationLayer } from './Dictation';
 import { useRailOrder } from './railOrder';
+import { QuickCommands } from './QuickCommands';
+import { loadViewPrefs, saveViewPrefs } from './viewPrefs';
+import { startAppearance } from './appearance';
+import { QuickOpen } from './QuickOpen';
 import type { ActivityEvent } from './types';
 
 /** What the detail pane is showing, in words — for its error card and the log (item 83). */
@@ -76,22 +81,6 @@ const REFRESHABLE: { id: PolledProvider; label: string }[] = [
 const MERGED_STEP = 10;
 
 const COLLAPSED_KEY = 'baton.collapsed-groups';
-
-/** 'system' resolved against the OS right now — never left unresolved. */
-function resolveTheme(choice: ThemeChoice): 'light' | 'dark' {
-  return choice === 'system'
-    ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
-    : choice;
-}
-
-/**
- * Writes the resolved theme onto `<html>`, which is all the CSS in
- * `styles.css` keys off — see the note on `:root[data-theme='light']`
- * there for why this replaced a `prefers-color-scheme` media query.
- */
-function applyTheme(choice: ThemeChoice): void {
-  document.documentElement.dataset.theme = resolveTheme(choice);
-}
 
 /**
  * Which sections start folded.
@@ -200,9 +189,12 @@ function TicketFilterMenu({
     return counts;
   }, [tickets]);
   const options = (facet: TicketFacetKey): string[] => {
-    if (facet !== 'status' || !projectStatuses?.length) return values[facet];
+    // What's ticked is always listed, even with nothing in it any more — a
+    // remembered filter (item 93) the menu didn't show would hide tickets
+    // with no box to untick.
+    if (facet !== 'status' || !projectStatuses?.length) return withSelected(values[facet], active[facet]);
     const extra = values.status.filter((s) => !projectStatuses.includes(s));
-    return [...projectStatuses, ...extra];
+    return withSelected([...projectStatuses, ...extra], active.status);
   };
 
   // Any click outside closes the menu, same as the workspace overflow menu.
@@ -434,7 +426,8 @@ function PullFilterMenu({
       {open && (
         <div className="menu filter-menu" role="menu" onClick={(e) => e.stopPropagation()}>
           {PULL_FACETS.map((facet) => {
-            const options = values[facet.key];
+            // Ticked values stay listed even when no pull request has them (item 93).
+            const options = withSelected(values[facet.key], active[facet.key]);
             if (options.length === 0) return null;
             return (
               <div key={facet.key} className="filter-group">
@@ -588,7 +581,11 @@ function StatusBar({
             <span
               key={id}
               className="statusbar-item"
-              title={failed.has(id) ? snapshot.errors.find((e) => e.provider === id)?.message : undefined}
+              title={[
+                failed.has(id) ? snapshot.errors.find((e) => e.provider === id)?.message : undefined,
+                // Item 92: GitHub's hourly budget, so a rate limit is never a surprise.
+                id === 'github' && snapshot.githubBudget ? describeGitHubBudget(snapshot.githubBudget) : undefined
+              ].filter(Boolean).join('\n\n') || undefined}
             >
               <span className={`dot ${failed.has(id) ? 'fail' : 'pass'}`} />
               {STATUSBAR_PROVIDER[id] ?? id}
@@ -662,6 +659,29 @@ export function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+  // ⌘P, go to file (item 100). Anywhere in the app, as in VS Code: the file
+  // opens in the Workspace view, which is switched to.
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [openRequest, setOpenRequest] = useState<{ path: string; line?: number; nonce: number }>();
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== 'p') return;
+      // While it's open, ⌘P is the picker's own "next row".
+      if (document.querySelector('.quick-open')) return;
+      event.preventDefault();
+      setQuickOpen(true);
+    };
+    // Capture: a focused terminal or editor must not swallow it first.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
+  const openFromQuick = useCallback((path: string, line?: number) => {
+    setQuickOpen(false);
+    setView('workspace');
+    setOpenRequest({ path, ...(line ? { line } : {}), nonce: Date.now() });
+  }, []);
+
   const [connecting, setConnecting] = useState(false);
   const [selected, setSelected] = useState<Selection>({});
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -677,11 +697,18 @@ export function App() {
   >();
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsed);
-  const [pullFilters, setPullFilters] = useState<PullFilters>(emptyPullFilters);
-  const [pullSort, setPullSort] = useState<PullSort>(DEFAULT_PULL_SORT);
-  const [ticketFilters, setTicketFilters] = useState<TicketFilters>(emptyTicketFilters);
-  const [ticketSort, setTicketSort] = useState<TicketSort>('updated');
-  const [theme, setThemeState] = useState<ThemeChoice>('system');
+  // Item 93: the filters and sorts you left are the ones you come back to.
+  const [savedPrefs] = useState(() => loadViewPrefs({
+    pullKeys: PULL_FACETS.map((f) => f.key), pullSorts: PULL_SORTS.map((s) => s.key), pullSortDefault: DEFAULT_PULL_SORT,
+    ticketKeys: TICKET_FACETS.map((f) => f.key), ticketSorts: TICKET_SORTS.map((s) => s.id), ticketSortDefault: 'updated' as TicketSort
+  }));
+  const [pullFilters, setPullFilters] = useState<PullFilters>(savedPrefs.pullFilters);
+  const [pullSort, setPullSort] = useState<PullSort>(savedPrefs.pullSort);
+  const [ticketFilters, setTicketFilters] = useState<TicketFilters>(savedPrefs.ticketFilters);
+  const [ticketSort, setTicketSort] = useState<TicketSort>(savedPrefs.ticketSort);
+  useEffect(() => {
+    saveViewPrefs({ pullFilters, pullSort, ticketFilters, ticketSort });
+  }, [pullFilters, pullSort, ticketFilters, ticketSort]);
   const [fontSize] = useTerminalFontSize();
   const idleCount = idleAgents(useRunningAgents()).length;
   const [agentsPane, setAgentsPane] = useState<AgentsPaneId>('agents');
@@ -690,31 +717,8 @@ export function App() {
     setAgentsPane('agents');
   }), []);
 
-  // Seeded once from disk, then applied — and re-applied live if "System" is
-  // the choice and the OS itself changes appearance underneath it.
-  useEffect(() => {
-    void window.baton.settings().then((settings) => {
-      const choice = (settings['appearance.theme'] as ThemeChoice) || 'system';
-      setThemeState(choice);
-      applyTheme(choice);
-    });
-  }, []);
-
-  useEffect(() => {
-    applyTheme(theme);
-    if (theme !== 'system') {
-      return undefined;
-    }
-    const mql = matchMedia('(prefers-color-scheme: light)');
-    const onChange = () => applyTheme('system');
-    mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
-  }, [theme]);
-
-  const setTheme = useCallback((choice: ThemeChoice) => {
-    setThemeState(choice);
-    void window.baton.setSetting('appearance.theme', choice);
-  }, []);
+  // Seeded from disk, then kept painted — see `appearance.tsx`.
+  useEffect(startAppearance, []);
 
   const togglePullFilter = useCallback((facet: PullFacetKey, value: string) => {
     setPullFilters((current) => {
@@ -1050,7 +1054,13 @@ export function App() {
     void window.baton.sessions().then(setSessions);
   };
 
-  const nothingConnected = snapshot.connected.length === 0;
+  // "Nothing connected" only once a refresh has actually finished and found
+  // nothing (item 101). Before that the list is simply not known yet — it
+  // used to flash "Nothing connected yet" for the seconds a first refresh
+  // takes, for someone with everything connected.
+  const nothingConnected = snapshot.connected.length === 0 && snapshot.at > 0;
+  const starting = snapshot.at === 0 && (snapshot.booting?.length ?? 0) === 0 && snapshot.connected.length === 0;
+  const booting = snapshot.booting && snapshot.booting.length > 0 ? snapshot.booting : undefined;
 
   return (
     <div className="app">
@@ -1058,6 +1068,10 @@ export function App() {
         <span className="wordmark">Baton</span>
         {snapshot.viewer && <span className="viewer">{snapshot.viewer}</span>}
         <span className="spacer" />
+        <QuickCommands
+          sessions={sessions}
+          onRan={(id) => { setActiveSession(id); setView('sessions'); }}
+        />
         {snapshot.at > 0 && (
           <RefreshMenu
             snapshot={snapshot}
@@ -1077,6 +1091,10 @@ export function App() {
 
       {nothingConnected && !connecting ? (
         <Empty onConnect={() => setConnecting(true)} />
+      ) : starting ? (
+        <div className="boot" aria-busy="true" />
+      ) : booting ? (
+        <BootScreen steps={booting} />
       ) : (
         <div className={queueHidden ? 'body queue-hidden' : 'body'}>
           <nav className="rail" aria-label="Sections">
@@ -1135,7 +1153,7 @@ export function App() {
               aside and main as the body's own flex items. */}
           {workspaceSeen && (
             <div className={view === 'workspace' ? 'keep-alive' : 'keep-alive hidden'}>
-              <WorkspaceView onTerminal={openTerminal} visible={view === 'workspace'} />
+              <WorkspaceView onTerminal={openTerminal} visible={view === 'workspace'} openRequest={openRequest} />
             </div>
           )}
 
@@ -1382,13 +1400,12 @@ export function App() {
       <StatusBar snapshot={snapshot} sessions={sessions} onView={setView} />
       <ActivityToasts onOpen={openEvent} onShowAll={() => setView('activity')} />
       <DictationLayer />
+      {quickOpen && <QuickOpen onOpen={openFromQuick} onClose={() => setQuickOpen(false)} />}
 
       {connecting && (
         <Settings
           onClose={() => setConnecting(false)}
           connected={snapshot.connected}
-          theme={theme}
-          onThemeChange={setTheme}
         />
       )}
       {runSheet && (
@@ -1521,7 +1538,7 @@ function SessionRow({
  */
 function SessionCloseButton({ session }: { session: SessionInfo }) {
   const [asking, setAsking] = useState(false);
-  const [place, setPlace] = useState<{ top: number; right: number }>();
+  const [place, setPlace] = useState<{ top: number; left: number }>();
   const button = useRef<HTMLButtonElement>(null);
   useMenuDismiss(asking, () => setAsking(false));
   // Placed after render, from the button as it is then: fixed to the window,
@@ -1531,7 +1548,11 @@ function SessionCloseButton({ session }: { session: SessionInfo }) {
     if (!asking || !button.current) { setPlace(undefined); return; }
     const box = button.current.getBoundingClientRect();
     const below = box.bottom + 130 < window.innerHeight;
-    setPlace({ top: below ? box.bottom + 4 : box.top - 124, right: window.innerWidth - box.right });
+    // Right-aligned to the ×, but never past either edge of the window: at a
+    // large sidebar size the × sits closer to the left than the popover is wide.
+    const width = 260;
+    const left = Math.min(window.innerWidth - width - 8, Math.max(8, box.right - width));
+    setPlace({ top: below ? box.bottom + 4 : box.top - 124, left });
   }, [asking]);
   const confirm = asking ? place : undefined;
 
@@ -1555,10 +1576,14 @@ function SessionCloseButton({ session }: { session: SessionInfo }) {
       >
         <CloseIcon size={10} />
       </button>
-      {confirm && (
+      {/* Portalled to <body> (item 104): the sidebar's contents are CSS-zoomed
+          by its text-size setting, and a fixed popover inside a zoomed box has
+          its coordinates scaled too — at 130% it opened off the left edge of
+          the window, so the × only turned amber and nothing else happened. */}
+      {confirm && createPortal(
         <div
           className="menu confirm session-close-confirm" role="alertdialog" aria-label={label}
-          style={{ position: 'fixed', top: confirm.top, right: confirm.right, left: 'auto' }}
+          style={{ position: 'fixed', top: confirm.top, left: confirm.left, right: 'auto' }}
           onClick={(e) => e.stopPropagation()}
         >
           <p>
@@ -1571,7 +1596,8 @@ function SessionCloseButton({ session }: { session: SessionInfo }) {
           </button>
           {/* Focus lands on Cancel: Enter straight after the click must not stop an agent. */}
           <button type="button" autoFocus onClick={() => setAsking(false)}>Cancel</button>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
@@ -1944,6 +1970,45 @@ function Sessions({
         )}
       </main>
     </>
+  );
+}
+
+const BOOT_LABEL: Record<string, { name: string; noun: (n: number) => string }> = {
+  github: { name: 'GitHub', noun: (n) => `${n} pull request${n === 1 ? '' : 's'}` },
+  jira: { name: 'Jira', noun: (n) => `${n} ticket${n === 1 ? '' : 's'}` },
+  sentry: { name: 'Sentry', noun: (n) => `${n} issue${n === 1 ? '' : 's'}` }
+};
+
+/**
+ * The first seconds after launch (item 101, option B): each connected
+ * service with a spinner that becomes a tick and a count as it answers, or
+ * says why it failed. It gives way to the normal view once all have answered;
+ * later refreshes never show it, they keep the data already on screen.
+ */
+function BootScreen({ steps }: { steps: NonNullable<Snapshot['booting']> }) {
+  return (
+    <div className="boot" aria-busy="true">
+      <div className="boot-card" role="status" aria-live="polite">
+        <h1>Getting your work</h1>
+        <p>From the services you connected.</p>
+        <ul>
+          {steps.map((step) => {
+            const label = BOOT_LABEL[step.provider] ?? { name: step.provider, noun: (n: number) => String(n) };
+            return (
+              <li key={step.provider} className={`boot-step ${step.state}`}>
+                {step.state === 'loading' ? <span className="boot-spin" aria-hidden="true" />
+                  : step.state === 'done' ? <span className="boot-mark pass" aria-hidden="true">✓</span>
+                    : <span className="boot-mark fail" aria-hidden="true">!</span>}
+                <span className="boot-name">{label.name}</span>
+                <span className="boot-value" title={step.message}>
+                  {step.state === 'loading' ? 'asking…' : step.state === 'done' ? label.noun(step.count ?? 0) : step.message ?? 'failed'}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
   );
 }
 

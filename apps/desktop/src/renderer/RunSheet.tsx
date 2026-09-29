@@ -1,14 +1,45 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DictateButton } from './Dictation';
 import { useMenuDismiss } from './menuDismiss';
-import { formatAge, modelFamily, type ModelFamily } from '@baton/core';
+import {
+  folderMemoryFrom, formatAge, modelFamily, recallFolders, rememberFolders, type FolderMemory, type ModelFamily
+} from '@baton/core';
 import type {
-  JiraIssue, ModelList, PullSummary, RunKind, Runner, RunTarget, SentryFrame, SentryIssue, StartResult, TestSelection
+  JiraIssue, ModelList, PullSummary, RunKind, Runner, RunnerLimits, RunTarget, SentryFrame, SentryIssue, StartResult, TestSelection
 } from './types';
 import { CloseIcon, RefreshIcon } from './icons';
 import { TestEnvironmentPicker } from './TestEnvironments';
+import { AgentLimitsNote } from './AgentLimits';
 
 const LAST_MODEL_KEY = 'runner.lastModel';
+
+/**
+ * Item 94: the agent and folders you picked come back next time. Per window,
+ * like the environment pick beside them (localStorage, every access in try):
+ * the agent per kind of run, the folders per ticket or pull request — a new
+ * ticket starts from the last ticket's.
+ */
+const CHOICES_KEY = 'baton.run-choices';
+
+interface RunChoices { agent: Partial<Record<RunKind, string>>; folders: FolderMemory }
+
+function readChoices(): RunChoices {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CHOICES_KEY) ?? '{}') as { agent?: unknown; folders?: unknown };
+    const agent = raw.agent && typeof raw.agent === 'object'
+      ? Object.fromEntries(Object.entries(raw.agent as Record<string, unknown>).filter(([, v]) => typeof v === 'string'))
+      : {};
+    return { agent, folders: folderMemoryFrom(raw.folders) };
+  } catch {
+    return { agent: {}, folders: { bySubject: {} } };
+  }
+}
+
+function writeChoices(update: (current: RunChoices) => RunChoices): void {
+  try {
+    localStorage.setItem(CHOICES_KEY, JSON.stringify(update(readChoices())));
+  } catch { /* a convenience, not a requirement */ }
+}
 
 export const KIND_LABEL: Record<RunKind, string> = {
   implement: 'Work on this in an agent',
@@ -60,12 +91,18 @@ export function RunSheet({
   const subject = { pull, issue, sentry };
   const subjectId = sentry ? sentry.issue.shortId : issue ? issue.key : pull ? `${pull.repo}#${pull.number}` : '';
   const runner = runners.find((r) => r.id === runnerId);
+  // Read once when the sheet opens: files the agents wrote, no requests (item 108).
+  const [limits, setLimits] = useState<Record<string, RunnerLimits>>();
+  useEffect(() => { void window.baton.agentLimits().then(setLimits).catch(() => setLimits({})); }, []);
 
   useEffect(() => {
     void window.baton.runners().then((list) => {
       setRunners(list);
-      // The default agent if one is set and still installed, else the first.
-      setRunnerId((current) => current || list[0]?.id || '');
+      // The agent you last used for this kind of run, if it's still
+      // installed (item 94); else the first.
+      const last = readChoices().agent[kind];
+      const remembered = last && list.some((r) => r.id === last) ? last : undefined;
+      setRunnerId((current) => current || remembered || list[0]?.id || '');
     });
     void window.baton.knownModels().then(setKnownModels);
     void window.baton.runTargets().then(setTargets);
@@ -75,13 +112,30 @@ export function RunSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, subjectId]);
 
+  // The folders this ticket or pull request last ran across, and where it
+  // started (item 94) — once the offered folders are known, and only ones
+  // still offered. Applied once per sheet, so it never fights a change you make.
+  const isTicket = Boolean(issue) && !sentry;
+  const recalled = useRef(false);
+  useEffect(() => {
+    if (recalled.current || targets.length === 0) return;
+    recalled.current = true;
+    const back = recallFolders(readChoices().folders, subjectId, isTicket, targets.map((t) => t.path));
+    if (back) {
+      setCwd(back.cwd);
+      setExtraCwds(back.extras);
+    }
+  }, [targets, subjectId, isTicket]);
+
   // Never leave Folder empty while there are folders to offer: the default
   // above can come back empty (no clone matched, or the list was still being
   // scanned), and an empty Folder silently blocks Run.
   useEffect(() => {
     if (cwd || targets.length === 0) return;
     const match = pull ? targets.find((t) => t.label.toLowerCase() === pull.repo.toLowerCase()) : undefined;
-    setCwd((match ?? targets[0]!).path);
+    // Functional: the remembered folders above may have just been set in
+    // this same render, and must not be replaced by the fallback.
+    setCwd((current) => current || (match ?? targets[0]!).path);
   }, [cwd, targets, pull]);
 
   const rebuild = useCallback((selection: TestSelection | undefined) => {
@@ -128,6 +182,11 @@ export function RunSheet({
         const settings = await window.baton.settings();
         const remembered = (settings[LAST_MODEL_KEY] as Record<string, string> | undefined) ?? {};
         void window.baton.setSetting(LAST_MODEL_KEY, { ...remembered, [runnerId]: model });
+        // What a run actually used is what next time starts from (item 94).
+        writeChoices((c) => ({
+          agent: { ...c.agent, [kind]: runnerId },
+          folders: rememberFolders(c.folders, subjectId, isTicket, { cwd, extras: extraCwds })
+        }));
         onStarted(result.sessionId);
       } else {
         setError(result.error);
@@ -156,7 +215,14 @@ export function RunSheet({
         <div className="run-controls">
           <label>
             <span>Agent</span>
-            <select value={runnerId} onChange={(e) => setRunnerId(e.target.value)}>
+            <select
+              value={runnerId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setRunnerId(id);
+                writeChoices((c) => ({ ...c, agent: { ...c.agent, [kind]: id } }));
+              }}
+            >
               {runners.map((runner) => (
                 <option key={runner.id} value={runner.id}>
                   {runner.name}
@@ -164,14 +230,27 @@ export function RunSheet({
                 </option>
               ))}
             </select>
+            <AgentLimitsNote entry={limits?.[runnerId]} />
           </label>
           <FolderField
             targets={targets} cwd={cwd} extras={extraCwds} runner={runner}
-            onChange={(main, extras) => { setCwd(main); setExtraCwds(extras); }}
+            onChange={(main, extras) => {
+              setCwd(main);
+              setExtraCwds(extras);
+              writeChoices((c) => ({ ...c, folders: rememberFolders(c.folders, subjectId, isTicket, { cwd: main, extras }) }));
+            }}
           />
           {runner?.modelFlag && (
             <ModelField
-              runner={runner} model={model} onChange={setModel}
+              runner={runner} model={model}
+              onChange={(next) => {
+                setModel(next);
+                // Kept the moment it's picked, not only when a run starts (item 94).
+                void window.baton.settings().then((settings) => {
+                  const remembered = (settings[LAST_MODEL_KEY] as Record<string, string> | undefined) ?? {};
+                  void window.baton.setSetting(LAST_MODEL_KEY, { ...remembered, [runnerId]: next });
+                });
+              }}
               list={knownModels[modelFamily(runner.command) ?? ('' as ModelFamily)]}
               onList={(family, list) => setKnownModels((all) => ({ ...all, [family]: list }))}
             />

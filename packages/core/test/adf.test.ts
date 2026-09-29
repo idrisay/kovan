@@ -33,3 +33,15 @@ describe('adfToMarkdown', () => {
     expect(adfToMarkdown(doc)).not.toMatch(JIRA_MEDIA_PATTERN);
   });
 });
+
+describe('emoji (item 102)', () => {
+  const doc = (attrs: Record<string, unknown>) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'emoji', attrs }, { type: 'text', text: ' Flag added' }] }] });
+  it("shows Jira's own flag emoji, which comes with only a short name", () => {
+    expect(adfToMarkdown(doc({ shortName: ':flag_on:', id: 'atlassian-flag_on', text: ':flag_on:' }))).toBe('🚩 Flag added');
+    expect(adfToMarkdown(doc({ shortName: ':flag_on:' }))).toBe('🚩 Flag added');
+  });
+  it('keeps a real character, and an unknown short name as written', () => {
+    expect(adfToMarkdown(doc({ shortName: ':grinning:', text: '😀' }))).toBe('😀 Flag added');
+    expect(adfToMarkdown(doc({ shortName: ':company-logo:' }))).toBe(':company-logo: Flag added');
+  });
+});

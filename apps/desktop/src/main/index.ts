@@ -12,7 +12,7 @@
  * If you ever find yourself moving the poller into the renderer, stop.
  */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, Notification, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, Notification, shell, systemPreferences } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
@@ -21,12 +21,16 @@ import { fileURLToPath } from 'node:url';
 import { createHost } from './host';
 import { logFilePath, logRendererError } from './logFile';
 import { Poller, type PolledProvider, type Snapshot } from './poller';
-import type { ProviderId } from '@baton/core';
+import type { ProviderId, SpeechProviderId, ThemeId } from '@baton/core';
+import { DEFAULT_SETTINGS, resolveTheme, themeInfo } from '@baton/core';
 import type { ChangeKind } from '@baton/git';
 import { BatonTray } from './tray';
 import { Activity } from './notify';
 import { ActivityFeed } from './activityFeed';
 import { Dictation } from './dictation';
+import { FileIndex } from './fileIndex';
+import { RunWatcher } from './runWatch';
+import { QuickCommands } from './quickCommands';
 import {
   CREDENTIAL_FIELDS, Credentials, HttpClient, JiraClient, fetchPullDetail, fetchPullDiff, fetchReviewerCandidates,
   requestPullReviewers, submitPullReview
@@ -45,7 +49,7 @@ import { PriceCheck } from './priceCheck';
 import { ModelSearch } from './modelSearch';
 import { Usage } from './usage';
 import { RunningAgents } from './running';
-import { activityLabel, ticketKeyInTitle, type ActivityEvent, type PriceCheckRunner, type PriceRule, type QuickKind, type ReviewEvent } from '@baton/core';
+import { activityLabel, githubAnswered, ticketKeyInTitle, type ActivityEvent, type PriceCheckRunner, type PriceRule, type QuickKind, type ReviewEvent } from '@baton/core';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -140,6 +144,8 @@ function deliverActivity(inbox: ActivityEvent[], fresh: ActivityEvent[], quiet: 
 
 const activityFeed = new ActivityFeed(host, deliverActivity);
 const dictation = new Dictation(host);
+const fileIndex = new FileIndex();
+const runWatcher = new RunWatcher((message, error) => host.log.warn(message, error));
 // A ticket key in a terminal's title only counts for a project Baton already
 // has tickets from, as for branch names in `nameTerminal` below.
 const sessions = new Sessions((text) => {
@@ -147,6 +153,7 @@ const sessions = new Sessions((text) => {
   const projects = new Set(poller.current().tickets.map((t) => t.key.split('-')[0]));
   return key && projects.has(key.split('-')[0]!) ? key : undefined;
 });
+const quickCommands = new QuickCommands(host, sessions);
 const detailHttp = new HttpClient(host.log);
 const credentials = new Credentials(host);
 const quick = new QuickModel(host, {
@@ -336,7 +343,7 @@ function createWindow(): void {
     titleBarStyle: 'hiddenInset',
     // Matches the rail on each side of the appearance switch, so the frame and
     // the first paint agree rather than flashing the wrong one.
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0d0e11' : '#edebe5',
+    backgroundColor: launchBackground(),
     webPreferences: {
       preload: path.join(dirname, '../preload/index.mjs'),
       contextIsolation: true,
@@ -422,7 +429,31 @@ function applyLoginItem(): void {
  * System/Light/Dark choice `data-theme` is the renderer's side of.
  */
 function applyTheme(): void {
-  nativeTheme.themeSource = host.config.get('appearance.theme', 'system');
+  nativeTheme.themeSource = themeSource();
+}
+
+/** The theme the saved settings ask for right now. The renderer keeps
+ *  native chrome current afterwards (a scheduled switch, say) through
+ *  `baton:native-theme`; this is for launch, before it has loaded. */
+function savedTheme(): ThemeId {
+  const get = <K extends 'appearance.theme' | 'appearance.dayTheme' | 'appearance.nightTheme' | 'appearance.dayStart' | 'appearance.nightStart'>(key: K) =>
+    host.config.get(key, DEFAULT_SETTINGS[key]);
+  return resolveTheme(get('appearance.theme'), {
+    day: get('appearance.dayTheme'),
+    night: get('appearance.nightTheme'),
+    dayStart: get('appearance.dayStart'),
+    nightStart: get('appearance.nightStart')
+  }, { osLight: !nativeTheme.shouldUseDarkColors, now: new Date() });
+}
+
+/** The saved theme choice as Electron's System/Light/Dark. */
+function themeSource(): 'system' | 'light' | 'dark' {
+  return host.config.get('appearance.theme', 'system') === 'system' ? 'system' : themeInfo(savedTheme()).tone;
+}
+
+/** The first paint's colour: the rail of the theme about to be painted. */
+function launchBackground(): string {
+  return themeInfo(savedTheme()).rail;
 }
 
 function broadcast(snapshot: Snapshot): void {
@@ -456,9 +487,12 @@ app.whenReady().then(async () => {
   poller.onDidChange((snapshot) => {
     broadcast(snapshot);
     if (!snapshot.refreshing) {
-      void activity.report(snapshot.blocked, firstRefresh);
+      void activity.report(snapshot, firstRefresh);
       void activityFeed.report(snapshot, firstRefresh);
-      firstRefresh = false;
+      // Only an answered poll is the first one: a launch that starts during a
+      // rate limit must still stay quiet about what it finds afterwards.
+      // (Without GitHub connected there's nothing to wait for.)
+      if (githubAnswered(snapshot) || !snapshot.connected.includes('github')) firstRefresh = false;
     }
   });
 
@@ -478,6 +512,18 @@ app.whenReady().then(async () => {
     }
     if (key === 'appearance.theme') {
       applyTheme();
+    }
+  });
+  ipcMain.handle('baton:native-theme', (_event, source: 'system' | 'light' | 'dark') => {
+    if (source === 'system' || source === 'light' || source === 'dark') nativeTheme.themeSource = source;
+  });
+  ipcMain.handle('baton:system-accent', () => {
+    // 'rrggbbaa' on macOS; empty or throwing where there is no such setting.
+    try {
+      const raw = systemPreferences.getAccentColor();
+      return /^[0-9a-f]{6}/i.test(raw) ? `#${raw.slice(0, 6)}` : undefined;
+    } catch {
+      return undefined;
     }
   });
   ipcMain.handle('baton:set-secret', async (_event, key: string, value: string) => {
@@ -611,8 +657,34 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('baton:run-files', (_event, directory: string) => agents.runFiles(directory));
   ipcMain.handle('baton:run-text', (_event, file: string) => agents.readRunText(file));
+  // Item 90: live screenshots while a run's viewer is open, and its site in
+  // the default browser. Run folders only; the site comes from run.json.
+  ipcMain.handle('baton:run-watch', (event, directory: string, on: boolean) => {
+    if (typeof directory !== 'string' || !agents.ownsRun(directory)) throw new Error('Not a run directory.');
+    if (on) runWatcher.watch(directory, event.sender);
+    else runWatcher.unwatch(directory, event.sender);
+  });
+  // Plan limits per runner, from what the agents write themselves (item 108).
+  ipcMain.handle('baton:agent-limits', async () => agents.limits.read(await agents.runners()));
+  ipcMain.handle('baton:run-site-open', (_event, directory: string, shot?: string) =>
+    agents.openRunSite(directory, typeof shot === 'string' ? shot : undefined));
   ipcMain.handle('baton:run-image', (_event, file: string) => agents.readRunImage(file));
   ipcMain.handle('baton:run-reveal', (_event, file: string) => agents.revealRunFile(file));
+
+  // --- Quick commands (item 91) ---------------------------------------------
+  // Saved and edited here, validated in main; run only by id, so the command
+  // that reaches a shell is always the one stored, never one the page sent.
+  ipcMain.handle('baton:commands', () => quickCommands.list());
+  ipcMain.handle('baton:command-save', (_event, input: unknown) =>
+    quickCommands.save(input && typeof input === 'object' ? (input as Record<string, unknown>) : {}));
+  ipcMain.handle('baton:command-duplicate', (_event, id: string) => quickCommands.duplicate(String(id)));
+  ipcMain.handle('baton:command-delete', (_event, id: string) => quickCommands.remove(String(id)));
+  ipcMain.handle('baton:command-run', (_event, id: string) => quickCommands.run(String(id)));
+  ipcMain.handle('baton:command-folder', async () => {
+    const options = { properties: ['openDirectory', 'createDirectory'] as ('openDirectory' | 'createDirectory')[], title: 'Run the command in' };
+    const picked = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
+    return picked.canceled ? '' : picked.filePaths[0] ?? '';
+  });
 
   // --- Dictation (item 88) ---------------------------------------------------
   // Only ever the window that asked hears the words; the helper exits with it.
@@ -620,6 +692,20 @@ app.whenReady().then(async () => {
   ipcMain.handle('baton:dictation-stop', () => dictation.stop());
   ipcMain.handle('baton:dictation-cancel', () => dictation.cancel());
   ipcMain.handle('baton:dictation-status', (_event, refresh: unknown) => dictation.currentStatus(refresh === true));
+  // Speech providers (item 97).
+  ipcMain.handle('baton:speech-setup', () => dictation.setup());
+  ipcMain.handle('baton:speech-key', (_event, provider: SpeechProviderId, key: string) => dictation.setKey(provider, String(key ?? '')));
+  ipcMain.handle('baton:speech-test', (_event, provider: SpeechProviderId) => dictation.test(provider));
+  ipcMain.handle('baton:speech-pick-model', async () => {
+    const picked = await dialog.showOpenDialog({
+      title: 'Choose a whisper.cpp model',
+      filters: [{ name: 'whisper.cpp model', extensions: ['bin'] }],
+      properties: ['openFile']
+    });
+    const file = picked.canceled ? undefined : picked.filePaths[0];
+    if (file) await host.config.set('dictation.whisperModel', file);
+    return file;
+  });
   // A fixed pair of Settings panes, never a URL from the renderer.
   ipcMain.handle('baton:privacy-open', (_event, pane: unknown) =>
     shell.openExternal(
@@ -654,6 +740,12 @@ app.whenReady().then(async () => {
     list: workspaces.list(),
     active: workspaces.activeId()
   }));
+  // ⌘P (item 100): the active workspace's files, listed on demand.
+  ipcMain.handle('baton:quick-open-files', async (_event, force?: boolean) => {
+    const active = workspaces.list().find((w) => w.id === workspaces.activeId());
+    if (!active || active.folders.length === 0) return { workspace: null, files: [] };
+    return { workspace: active.name, files: await fileIndex.files(active.folders, force === true) };
+  });
   ipcMain.handle('baton:workspace-create', () => workspaces.create(window));
   ipcMain.handle('baton:workspace-activate', (_event, id: string) => workspaces.activate(id));
   ipcMain.handle('baton:workspace-add-folder', (_event, id: string) =>
@@ -742,7 +834,7 @@ app.whenReady().then(async () => {
 
   // Seeds the workspace the UI smoke then drives. Guarded by the same env var
   // that redirects userData, so it can only ever touch a throwaway profile.
-  if (process.env['BATON_SMOKE'] === 'workspace' && process.env['BATON_WS_FOLDER']) {
+  if ((process.env['BATON_SMOKE'] === 'workspace' || process.env['BATON_SMOKE_ITEM100']) && process.env['BATON_WS_FOLDER']) {
     await seedWorkspace(process.env['BATON_WS_FOLDER']);
   }
 
@@ -763,7 +855,7 @@ app.whenReady().then(async () => {
       // the run hung until whatever was waiting on it gave up, with the actual
       // error nowhere in the output. A smoke that cannot fail is not a check.
       try {
-        console.log(JSON.stringify(await smokeUi(win, poller, mode, activityFeed), null, 2));
+        console.log(JSON.stringify(await smokeUi(win, poller, mode, activityFeed, sessions), null, 2));
         app.exit(0);
       } catch (err) {
         console.error('smoke failed:', err instanceof Error ? err.stack ?? err.message : err);
@@ -832,6 +924,7 @@ app.on('before-quit', (event) => {
 });
 
 app.on('will-quit', () => {
+  runWatcher.dispose();
   dictation.dispose();
   usage.dispose();
   running.dispose();

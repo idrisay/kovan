@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DoubleTap, joinDictation, pickDictationLocale, type DictationLocale } from '../src';
+import { DoubleTap, joinDictation, pickDictationLocale, preferredWhisperModel, speechLanguage, speechProvider, whisperCliText, type DictationLocale } from '../src';
 
 const locales: DictationLocale[] = [
   { id: 'en-US', name: 'English (US)', onDevice: true },
@@ -90,5 +90,26 @@ describe('joinDictation', () => {
     expect(joinDictation('Fix it ', 'now')).toBe('now');
     expect(joinDictation('line\n', 'next')).toBe('next');
     expect(joinDictation('x', '   ')).toBe('');
+  });
+});
+
+describe('speech providers (item 97)', () => {
+  it('reads whisper-cli output as text, dropping its chatter', () => {
+    const out = 'whisper_init_from_file: loading model\n[00:00:00.000 --> 00:00:02.000]\n Baton dictation test.\n\n';
+    expect(whisperCliText(out)).toBe('Baton dictation test.');
+    expect(whisperCliText('[BLANK_AUDIO]\n')).toBe('');
+  });
+
+  it('prefers base.en, then falls back to what is there', () => {
+    expect(preferredWhisperModel(['/m/ggml-tiny-q5_1.bin', '/m/ggml-base.en.bin'])).toBe('/m/ggml-base.en.bin');
+    expect(preferredWhisperModel(['/m/ggml-tiny-q5_1.bin'])).toBe('/m/ggml-tiny-q5_1.bin');
+    expect(preferredWhisperModel([])).toBeUndefined();
+  });
+
+  it('knows its providers, and falls back to Apple', () => {
+    expect(speechProvider('groq').defaultModel).toBe('whisper-large-v3-turbo');
+    expect(speechProvider('nonsense').id).toBe('apple');
+    expect(speechLanguage('en-GB')).toBe('en');
+    expect(speechLanguage('')).toBeUndefined();
   });
 });

@@ -13,18 +13,26 @@
 import { app, type WebContents } from 'electron';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pickDictationLocale, type DictationLocale } from '@baton/core';
+import {
+  pickDictationLocale, speechKeyName, speechProvider, SPEECH_PROVIDERS,
+  type DictationLocale, type SpeechProviderId
+} from '@baton/core';
 import type { DesktopHost } from './host';
+import { findWhisperModels, speechConfig, transcribe, whisperCliPath } from './transcribe';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export type DictationEvent =
-  | { type: 'ready'; locale: string; onDevice: boolean }
+  | { type: 'ready'; locale: string; onDevice: boolean; recording?: boolean }
   | { type: 'level'; value: number }
   | { type: 'partial'; text: string }
   | { type: 'final'; text: string }
+  /** Recording done; a provider other than Apple's is working on it (item 97). */
+  | { type: 'transcribing'; provider: string }
   | { type: 'error'; code: string; message: string }
   | { type: 'ended' };
 
@@ -36,7 +44,24 @@ export interface DictationStatus {
   /** What `start` will use: the setting, or the best match for the system. */
   locale: string;
   locales: DictationLocale[];
+  /** The chosen speech provider (item 97). */
+  provider: SpeechProviderId;
 }
+
+/** What Settings › Dictation shows about the providers (item 97). */
+export interface SpeechSetup {
+  provider: SpeechProviderId;
+  models: Record<string, string>;
+  baseUrls: Record<string, string>;
+  /** Which cloud providers have a key saved. The key itself never leaves main. */
+  keys: Record<string, boolean>;
+  whisperCli: string | null;
+  whisperModels: string[];
+  /** The model file whisper.cpp will use: the saved one, or the best found. */
+  whisperModel: string;
+}
+
+export type SpeechTest = { ok: true; text: string; ms: number } | { ok: false; message: string };
 
 function helperPath(): string {
   return app.isPackaged
@@ -46,7 +71,8 @@ function helperPath(): string {
 
 export class Dictation {
   private child?: ChildProcess;
-  private status?: Promise<Omit<DictationStatus, 'locale'>>;
+  private cancelled = false;
+  private status?: Promise<Omit<DictationStatus, 'locale' | 'provider'>>;
 
   constructor(private readonly host: DesktopHost) {}
 
@@ -62,7 +88,7 @@ export class Dictation {
         execFile(file, ['--status'], { timeout: 10_000 }, (error, stdout) => {
           try {
             if (error) throw error;
-            const parsed = JSON.parse(stdout.trim().split('\n').pop() ?? '{}') as Omit<DictationStatus, 'locale' | 'available'>;
+            const parsed = JSON.parse(stdout.trim().split('\n').pop() ?? '{}') as Omit<DictationStatus, 'locale' | 'available' | 'provider'>;
             resolve({ available: true, ...parsed });
           } catch (err) {
             this.host.log.warn('Dictation status failed', err);
@@ -72,7 +98,78 @@ export class Dictation {
       });
     }
     const status = await this.status;
-    return { ...status, locale: pickDictationLocale(this.host.config.get('dictation.locale', ''), status.system, status.locales) };
+    return {
+      ...status,
+      locale: pickDictationLocale(this.host.config.get('dictation.locale', ''), status.system, status.locales),
+      provider: speechProvider(this.host.config.get('dictation.provider', 'apple')).id
+    };
+  }
+
+  async setup(): Promise<SpeechSetup> {
+    const keys: Record<string, boolean> = {};
+    for (const p of SPEECH_PROVIDERS) {
+      if (p.kind === 'cloud') keys[p.id] = Boolean(await this.host.secrets.get(speechKeyName(p.id)));
+    }
+    const config = await speechConfig(this.host, app.getPath('userData'), 'whisper-cpp');
+    return {
+      provider: speechProvider(this.host.config.get('dictation.provider', 'apple')).id,
+      models: this.host.config.get('dictation.models', {} as Record<string, string>),
+      baseUrls: this.host.config.get('dictation.baseUrls', {} as Record<string, string>),
+      keys,
+      whisperCli: whisperCliPath() ?? null,
+      whisperModels: findWhisperModels(app.getPath('userData')),
+      whisperModel: config.modelFile
+    };
+  }
+
+  /** Saves (or, with '', removes) a provider's API key — to the Keychain. */
+  async setKey(provider: SpeechProviderId, key: string): Promise<void> {
+    if (speechProvider(provider).kind !== 'cloud') return;
+    const name = speechKeyName(provider);
+    if (key.trim()) await this.host.secrets.set(name, key.trim());
+    else await this.host.secrets.delete(name);
+  }
+
+  /**
+   * Transcribes a short sample with a provider, so a wrong key or model shows
+   * up in Settings rather than mid-dictation. The sample is spoken by macOS's
+   * own `say` — nothing is recorded.
+   */
+  async test(provider: SpeechProviderId): Promise<SpeechTest> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'baton-speech-'));
+    const wav = path.join(dir, 'sample.wav');
+    const started = Date.now();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        execFile('/usr/bin/say', ['-o', wav, '--data-format=LEI16@16000', 'Baton dictation test, one two three.'],
+          { timeout: 20_000 }, (error) => (error ? reject(new Error('Couldn’t make the test sample.')) : resolve()));
+      });
+      const spoken = Date.now();
+      let text: string;
+      if (speechProvider(provider).kind === 'apple') {
+        const status = await this.currentStatus();
+        if (!status.available) throw new Error('The dictation helper is missing from this build.');
+        text = await new Promise<string>((resolve, reject) => {
+          execFile(helperPath(), ['--locale', status.locale, '--file', wav], { timeout: 30_000 }, (error, stdout) => {
+            const events = stdout.split('\n').flatMap((line) => {
+              try { return [JSON.parse(line) as DictationEvent]; } catch { return []; }
+            });
+            const final = events.find((e) => e.type === 'final');
+            const failed = events.find((e) => e.type === 'error');
+            if (final && final.type === 'final') resolve(final.text);
+            else reject(new Error(failed && failed.type === 'error' ? failed.message : error?.message ?? 'No answer.'));
+          });
+        });
+      } else {
+        text = await transcribe(await speechConfig(this.host, app.getPath('userData'), provider), wav);
+      }
+      this.host.log.info(`Speech test ${provider}: sample ${spoken - started} ms, transcription ${Date.now() - spoken} ms`);
+      return text ? { ok: true, text, ms: Date.now() - spoken } : { ok: false, message: 'It answered, but heard nothing.' };
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    } finally {
+      void rm(dir, { recursive: true, force: true });
+    }
   }
 
   async start(target: WebContents): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -91,8 +188,21 @@ export class Dictation {
     if (!status.available) {
       return { ok: false, message: 'The dictation helper is missing from this build.' };
     }
-    const child = spawn(helperPath(), ['--locale', status.locale], { stdio: ['pipe', 'pipe', 'pipe'] });
+    // Any provider but Apple's: the helper only records, and the words come
+    // from the provider once you finish (item 97).
+    const config = status.provider === 'apple' ? undefined : await speechConfig(this.host, app.getPath('userData'));
+    if (config && speechProvider(config.provider).kind === 'cloud' && !config.key) {
+      return { ok: false, message: `No API key for ${speechProvider(config.provider).label} — add one in Settings › Dictation.` };
+    }
+    const dir = config ? await mkdtemp(path.join(os.tmpdir(), 'baton-dictation-')) : undefined;
+    const args = config && dir ? ['--record', path.join(dir, 'dictation.wav')] : ['--locale', status.locale];
+    const child = spawn(helperPath(), args, { stdio: ['pipe', 'pipe', 'pipe'] });
     this.child = child;
+    this.cancelled = false;
+    // Set while a recording is with the provider: the helper has exited, but
+    // dictation hasn't ended until the words (or an error) are back.
+    let working: Promise<void> | undefined;
+    const discard = () => { if (dir) void rm(dir, { recursive: true, force: true }); };
     let buffered = '';
     child.stdout!.setEncoding('utf8');
     child.stdout!.on('data', (chunk: string) => {
@@ -103,7 +213,25 @@ export class Dictation {
         buffered = buffered.slice(newline + 1);
         if (!line) continue;
         try {
-          const event = JSON.parse(line) as DictationEvent;
+          const event = JSON.parse(line) as DictationEvent | { type: 'recorded'; path: string; seconds: number };
+          if (event.type === 'recorded') {
+            if (!config) continue;
+            const label = speechProvider(config.provider).label;
+            send({ type: 'transcribing', provider: label });
+            working = transcribe(config, event.path)
+              .then((text) => { if (!this.cancelled) send({ type: 'final', text }); })
+              .catch((err: unknown) => {
+                const message = err instanceof Error ? err.message : String(err);
+                this.host.log.warn(`Dictation via ${label} failed: ${message}`);
+                if (!this.cancelled) send({ type: 'error', code: 'provider', message });
+              })
+              .finally(() => {
+                // Recordings are deleted once transcribed, whatever happened.
+                discard();
+                send({ type: 'ended' });
+              });
+            continue;
+          }
           if (event.type === 'error') this.host.log.warn(`Dictation: ${event.code}: ${event.message}`);
           send(event);
         } catch {
@@ -117,7 +245,12 @@ export class Dictation {
     child.on('exit', (code) => {
       if (this.child === child) this.child = undefined;
       if (code !== 0 && code !== null) this.host.log.warn(`Dictation helper exited with ${code}`);
-      send({ type: 'ended' });
+      // stdout may still hold the "recorded" line when exit fires.
+      setImmediate(() => {
+        if (working) return;
+        discard();
+        send({ type: 'ended' });
+      });
     });
     child.on('error', (err) => {
       this.host.log.error('Dictation helper failed to start', err);
@@ -133,6 +266,8 @@ export class Dictation {
   }
 
   cancel(): void {
+    // Also drops an answer still on its way from a provider.
+    this.cancelled = true;
     const child = this.child;
     if (!child) return;
     child.stdin?.write('cancel\n');

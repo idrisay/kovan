@@ -49,7 +49,17 @@ export const DEFAULT_PRICES: PriceRule[] = [
   { match: 'free', input: 0, output: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0 },
   { match: 'opus-4-1', input: 15, output: 75, cacheWrite: 18.75, cacheWrite1h: 30, cacheRead: 1.5 },
   { match: 'opus-4-2', input: 15, output: 75, cacheWrite: 18.75, cacheWrite1h: 30, cacheRead: 1.5 },
+  // Item 95: the current models, before the catch-alls below. Opus 5.5 fell
+  // through to "opus" at $5 / $25 with cache reads at $0.50 — but it's $4 /
+  // $20 and $0.20, and cache reads are most of an agent's tokens, so a
+  // session showed $8.13 where Claude Code itself said $4.75. Cache writes use
+  // Anthropic's standard multipliers: 1.25× input for 5 minutes, 2× for 1 hour.
+  { match: 'opus-5-5', input: 4, output: 20, cacheWrite: 5, cacheWrite1h: 8, cacheRead: 0.2 },
+  { match: 'fable-5-1', input: 10, output: 50, cacheWrite: 12.5, cacheWrite1h: 20, cacheRead: 0.25 },
+  { match: 'mythos-5-1', input: 10, output: 50, cacheWrite: 12.5, cacheWrite1h: 20, cacheRead: 0.25 },
+  { match: 'fable', input: 10, output: 50, cacheWrite: 12.5, cacheWrite1h: 20, cacheRead: 1 },
   { match: 'opus', input: 5, output: 25, cacheWrite: 6.25, cacheWrite1h: 10, cacheRead: 0.5 },
+  { match: 'sonnet-5', input: 2, output: 10, cacheWrite: 2.5, cacheWrite1h: 4, cacheRead: 0.2 },
   { match: 'sonnet', input: 3, output: 15, cacheWrite: 3.75, cacheWrite1h: 6, cacheRead: 0.3 },
   { match: 'haiku', input: 1, output: 5, cacheWrite: 1.25, cacheWrite1h: 2, cacheRead: 0.1 },
   { match: 'gpt-5-mini', input: 0.25, output: 2, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0.025 },

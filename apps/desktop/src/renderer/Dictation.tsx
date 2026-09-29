@@ -17,8 +17,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DoubleTap, joinDictation } from '@baton/core';
-import type { DictationEvent } from './types';
+import { DoubleTap, joinDictation, SPEECH_PROVIDERS, speechProvider, type SpeechProviderId } from '@baton/core';
+import type { DictationEvent, SpeechSetup } from './types';
 import { MicIcon } from './icons';
 
 /** Starts (or finishes) dictation into `target` — the mic buttons' way in. */
@@ -34,6 +34,10 @@ interface State {
   levels: number[];
   locale?: string;
   onDevice?: boolean;
+  /** Recording for a provider other than Apple's: no words until the end. */
+  recording?: boolean;
+  /** Which provider is transcribing the recording. */
+  transcribing?: string;
   message?: string;
   /** Which permission an error is about, for its button. */
   pane?: 'mic' | 'speech';
@@ -148,7 +152,13 @@ export function DictationLayer() {
     if (cancelled.current) return;
     switch (event.type) {
       case 'ready':
-        set((s) => ({ ...s, phase: s.phase === 'finishing' ? 'finishing' : 'listening', locale: event.locale, onDevice: event.onDevice }));
+        set((s) => ({
+          ...s, phase: s.phase === 'finishing' ? 'finishing' : 'listening',
+          locale: event.locale, onDevice: event.onDevice, recording: event.recording === true
+        }));
+        break;
+      case 'transcribing':
+        set((s) => ({ ...s, phase: 'finishing', transcribing: event.provider }));
         break;
       case 'level':
         set((s) => ({ ...s, levels: [...s.levels.slice(1), event.value] }));
@@ -218,7 +228,7 @@ export function DictationLayer() {
         <span className="dictation-state">
           {state.phase === 'starting' ? 'Starting…'
             : state.phase === 'listening' ? `Listening · into ${describeTarget(target.current)}`
-            : state.phase === 'finishing' ? 'Finishing…'
+            : state.phase === 'finishing' ? (state.transcribing ? `Transcribing with ${state.transcribing}…` : 'Finishing…')
             : state.phase === 'done' ? state.message
             : 'Dictation stopped'}
         </span>
@@ -244,7 +254,9 @@ export function DictationLayer() {
       ) : state.phase !== 'done' && (
         <>
           <div className={state.text ? 'dictation-text' : 'dictation-text quiet-text'}>
-            {state.text || 'Say what you want to type…'}
+            {state.text || (state.recording
+              ? (state.phase === 'finishing' ? 'The words arrive in a moment…' : 'Recording — the words appear when you finish.')
+              : 'Say what you want to type…')}
           </div>
           {live && <div className="dictation-hint">Double-tap ⌘ to insert · Esc to cancel</div>}
         </>
@@ -285,11 +297,159 @@ const PERMISSION: Record<string, string> = {
   unknown: 'unknown'
 };
 
+const fileName = (file: string) => file.split('/').pop() ?? file;
+
+/**
+ * Which speech model turns your voice into text (item 97) — VoiceSmith's
+ * providers and defaults. Keys go to the Keychain and are never shown again.
+ */
+function SpeechProviderSettings({ onProvider }: { onProvider: (id: SpeechProviderId) => void }) {
+  const [setup, setSetup] = useState<SpeechSetup>();
+  const [key, setKey] = useState('');
+  const [test, setTest] = useState<{ running: boolean; text?: string; ok?: boolean }>({ running: false });
+
+  const reload = useCallback(() => window.baton.speechSetup().then(setSetup), []);
+  useEffect(() => { void reload(); }, [reload]);
+  if (!setup) return null;
+
+  const info = speechProvider(setup.provider);
+  const saveMap = (setting: 'dictation.models' | 'dictation.baseUrls', current: Record<string, string>, value: string) => {
+    const next = { ...current, [info.id]: value };
+    if (!value.trim()) delete next[info.id];
+    setSetup({ ...setup, [setting === 'dictation.models' ? 'models' : 'baseUrls']: next });
+    void window.baton.setSetting(setting, next);
+  };
+  const pick = (id: SpeechProviderId) => {
+    setSetup({ ...setup, provider: id });
+    setKey('');
+    setTest({ running: false });
+    onProvider(id);
+    void window.baton.setSetting('dictation.provider', id);
+  };
+  const runTest = async () => {
+    setTest({ running: true });
+    const result = await window.baton.speechTest(info.id);
+    setTest(result.ok
+      ? { running: false, ok: true, text: `Heard “${result.text}” in ${(result.ms / 1000).toFixed(1)} s.` }
+      : { running: false, ok: false, text: result.message });
+  };
+
+  return (
+    <>
+      <label className="settings-field">
+        <span>Speech model</span>
+        <select value={setup.provider} onChange={(e) => pick(e.target.value as SpeechProviderId)}>
+          {SPEECH_PROVIDERS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label} · {p.kind === 'apple' ? 'on this Mac, live' : p.kind === 'local' ? 'on this Mac' : 'API key'}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="settings-note">
+        {info.kind === 'apple'
+          ? 'The default: no key, and the only one that shows your words while you speak.'
+          : info.kind === 'local'
+            ? 'Runs whisper.cpp on this Mac — audio never leaves it. The words appear when you finish.'
+            : `Your recording is sent to ${info.label} when you finish, and the words come back. Recordings are deleted after.`}
+      </p>
+
+      {info.kind === 'local' && (
+        <>
+          {!setup.whisperCli && !setup.baseUrls[info.id] && (
+            <p className="settings-note warn-note">whisper-cli isn’t installed. <code>brew install whisper-cpp</code>, or point it at a running whisper-server below.</p>
+          )}
+          <label className="settings-field">
+            <span>Model file</span>
+            <div className="speech-row">
+              <select
+                value={setup.whisperModel}
+                onChange={(e) => {
+                  setSetup({ ...setup, whisperModel: e.target.value });
+                  void window.baton.setSetting('dictation.whisperModel', e.target.value);
+                }}
+              >
+                {!setup.whisperModel && <option value="">No model found</option>}
+                {[...new Set([...setup.whisperModels, setup.whisperModel].filter(Boolean))].map((f) => (
+                  <option key={f} value={f}>{fileName(f)}{f.includes('/VoiceSmith/') ? ' · VoiceSmith’s' : ''}</option>
+                ))}
+              </select>
+              <button type="button" className="ghost" onClick={() => void window.baton.speechPickModel().then((f) => { if (f) void reload(); })}>
+                Choose file…
+              </button>
+            </div>
+          </label>
+        </>
+      )}
+
+      {info.kind === 'cloud' && (
+        <>
+          <label className="settings-field">
+            <span>Model</span>
+            <input
+              type="text" placeholder={info.defaultModel} value={setup.models[info.id] ?? ''}
+              onChange={(e) => saveMap('dictation.models', setup.models, e.target.value)}
+            />
+          </label>
+          <label className="settings-field">
+            <span>API key {setup.keys[info.id] ? '· saved' : ''}</span>
+            <div className="speech-row">
+              <input
+                type="password" value={key} autoComplete="off"
+                placeholder={setup.keys[info.id] ? '•••••••• (saved in the Keychain)' : `Paste your ${info.label} key`}
+                onChange={(e) => setKey(e.target.value)}
+              />
+              <button
+                type="button" className="ghost" disabled={!key.trim()}
+                onClick={() => void window.baton.speechKey(info.id, key).then(() => { setKey(''); void reload(); })}
+              >
+                Save
+              </button>
+              {setup.keys[info.id] && (
+                <button type="button" className="ghost" onClick={() => void window.baton.speechKey(info.id, '').then(reload)}>
+                  Remove
+                </button>
+              )}
+            </div>
+          </label>
+          {info.keyUrl && (
+            <p className="settings-note">
+              Get a key: <button type="button" className="link" onClick={() => void window.baton.openExternal(info.keyUrl!)}>{info.keyUrl.replace(/^https:\/\//, '')}</button>
+            </p>
+          )}
+        </>
+      )}
+
+      {info.kind !== 'apple' && (
+        <label className="settings-field">
+          <span>{info.kind === 'local' ? 'whisper-server URL (optional)' : 'Base URL (optional)'}</span>
+          <input
+            type="text"
+            placeholder={info.defaultBaseUrl || 'http://127.0.0.1:8080/v1 — leave blank to run whisper-cli'}
+            value={setup.baseUrls[info.id] ?? ''}
+            onChange={(e) => saveMap('dictation.baseUrls', setup.baseUrls, e.target.value)}
+          />
+        </label>
+      )}
+
+      <div className="speech-test">
+        <button type="button" className="ghost" disabled={test.running} onClick={() => void runTest()}>
+          {test.running ? 'Testing…' : `Test ${info.label}`}
+        </button>
+        {test.text && <span className={test.ok ? 'speech-test-ok' : 'speech-test-fail'}>{test.text}</span>}
+      </div>
+      <p className="settings-note">The test transcribes a short sample spoken by macOS — nothing is recorded.</p>
+    </>
+  );
+}
+
 /** Settings › General › Dictation. */
 export function DictationSettings() {
   const [enabled, setEnabled] = useState(true);
   const [setting, setSetting] = useState('');
   const [status, setStatus] = useState<Awaited<ReturnType<typeof window.baton.dictationStatus>>>();
+  const [provider, setProvider] = useState<SpeechProviderId>();
+  const apple = (provider ?? status?.provider ?? 'apple') === 'apple';
 
   useEffect(() => {
     void window.baton.settings().then((s) => {
@@ -319,6 +479,7 @@ export function DictationSettings() {
         />
         <span>Dictate with double-tap ⌘</span>
       </label>
+      <SpeechProviderSettings onProvider={(id) => setProvider(id)} />
       {status && !status.available ? (
         <p className="settings-note">The dictation helper is missing from this build, so dictation is off.</p>
       ) : (
@@ -344,8 +505,9 @@ export function DictationSettings() {
             </select>
           </label>
           <p className="settings-note">
-            "On this Mac" never sends audio anywhere. A language marked "Apple's servers" is recognised online,
-            until macOS downloads it for on-device use (System Settings › Keyboard › Dictation).
+            {apple
+              ? `"On this Mac" never sends audio anywhere. A language marked "Apple's servers" is recognised online, until macOS downloads it for on-device use (System Settings › Keyboard › Dictation).`
+              : 'Told to the speech model as a hint; Automatic lets it detect the language.'}
           </p>
           {status && (
             <div className="dictation-permissions">
@@ -357,14 +519,14 @@ export function DictationSettings() {
                   </button>
                 )}
               </div>
-              <div>
+              {apple && <div>
                 Speech recognition: <strong>{PERMISSION[status.speech] ?? status.speech}</strong>
                 {status.speech === 'denied' && (
                   <button type="button" className="link" onClick={() => void window.baton.privacyOpen('speech')}>
                     Open System Settings
                   </button>
                 )}
-              </div>
+              </div>}
             </div>
           )}
         </>

@@ -149,7 +149,7 @@ Before you finish, write what you did to \`$BATON_REPORT\`. Baton collects  thes
 
 Say what you set out to do, what you actually changed and where, what you  verified and how, what you decided and why, and what is still uncertain.  Include the findings table if there was a review. Be specific about file  paths. If you were stopped part way, write that down too — a short honest  record beats none.
 
-If you take screenshots, save them as PNGs in \`$BATON_SHOTS\`, numbered in  the order you took them and named for what they show, e.g.  \`01-lesson-page.png\`. They are shown with the report.
+If you take screenshots, save them as PNGs in \`$BATON_SHOTS\`, numbered in  the order you took them and named for what they show, e.g.  \`01-lesson-page.png\`. They are shown with the report. Save each one as  you take it rather than all at the end: Baton shows them live while you  work. As you go, overwrite \`$BATON_STATUS\` with one short line saying  what you are doing now, e.g. \`echo "Signing in as Teacher" > "$BATON_STATUS"\`.  When a screenshot shows a web page, also append its file name and the page's full address to \`$BATON_PAGES\`, e.g. \`echo "01-lesson-page.png https://…/lesson/12" >> "$BATON_PAGES"\`, so the page can be opened from Baton.
 
 Read \`$BATON_TICKET\` first if it exists: it is everything already known  about this ticket — what was asked for under "What was asked", the pull  requests that carried it, and every earlier run with what it concluded.  Do not edit it — Baton rebuilds it from these reports.`;
 
@@ -176,6 +176,14 @@ Screenshot everything that proves something — the feature working, or the  pla
 
     $BATON_SHOTS/01-signed-in.png
     $BATON_SHOTS/02-lesson-page-scrolled.png
+
+Save each one the moment you take it — Baton shows them live while you  work. Before each step, overwrite $BATON_STATUS with one short line  saying what you are doing, e.g.
+
+    echo "Opening the lesson page as Teacher" > "$BATON_STATUS"
+
+Each time you save a screenshot, also append its file name and the full  address of the page it shows to $BATON_PAGES, so Baton can open that  exact page for me:
+
+    echo "02-lesson-page-scrolled.png https://…/course/12/unit/3" >> "$BATON_PAGES"
 
 Step 3 — write $BATON_REPORT. Its first line must be  exactly one of:
 

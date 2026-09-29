@@ -3,6 +3,67 @@ import { Terminal as Xterm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { shellPath } from '@baton/core';
 import '@xterm/xterm/css/xterm.css';
+import { getAppearance, subscribeAppearance } from './appearance';
+
+/** "#rrggbb" → [r, g, b]; anything else (a color-mix, say) → undefined. */
+function rgb(hex: string): [number, number, number] | undefined {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return undefined;
+  const n = parseInt(m[1]!, 16);
+  return [n >> 16, (n >> 8) & 255, n & 255];
+}
+
+/** `a` moved `amount` of the way to `b`, both "#rrggbb". */
+function mix(a: string, b: string, amount: number): string {
+  const x = rgb(a);
+  const y = rgb(b);
+  if (!x || !y) return a;
+  return '#' + x.map((v, i) => Math.round(v * (1 - amount) + y[i]! * amount).toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * The terminal's palette, read from the theme tokens painted right now —
+ * the editor surface and the status colours — so a terminal belongs to
+ * whichever theme is on, rather than to two palettes hard-coded here (item 96).
+ * Boosted lifts every colour toward full contrast for brighter output.
+ */
+function terminalTheme() {
+  const css = getComputedStyle(document.documentElement);
+  const token = (name: string, fallback: string) => {
+    const value = css.getPropertyValue(`--${name}`).trim();
+    return rgb(value) ? value : fallback;
+  };
+  const light = document.documentElement.dataset.theme === 'light';
+  const boosted = getAppearance().terminalColors === 'boosted';
+  const far = light ? '#000000' : '#ffffff';
+  const lift = (hex: string) => (boosted ? mix(hex, far, light ? 0.25 : 0.3) : hex);
+  // The bright ANSI variants: a step further from the background.
+  const bright = (hex: string) => mix(hex, far, light ? 0.18 : 0.22);
+
+  const clay = token('clay', light ? '#c0603c' : '#d97757');
+  const red = lift(token('blocked', '#c4635a'));
+  const green = lift(token('pass', '#6fa97f'));
+  const yellow = lift(token('running', '#d0a05a'));
+  const blue = lift(token('waiting', '#7ca0d4'));
+  const magenta = lift(token('merged', '#9a7bc8'));
+  // No cyan token: halfway between pass and waiting stays in the family.
+  const cyan = mix(green, blue, 0.5);
+  const [r, g, b] = rgb(clay) ?? [217, 119, 87];
+  return {
+    background: token('editor', light ? '#fbfaf7' : '#191b20'),
+    foreground: boosted ? far : token('prose', light ? '#2a2b2f' : '#dad8d3'),
+    cursor: clay,
+    selectionBackground: `rgba(${r},${g},${b},${light ? 0.22 : 0.28})`,
+    black: token('rail', '#0d0e11'), brightBlack: lift(token('dim', '#6e6d69')),
+    red, brightRed: bright(red),
+    green, brightGreen: bright(green),
+    yellow, brightYellow: bright(yellow),
+    blue, brightBlue: bright(blue),
+    magenta, brightMagenta: bright(magenta),
+    cyan, brightCyan: bright(cyan),
+    white: lift(token('secondary', '#c9c7c2')), brightWhite: token('title', '#f5f3ef')
+  };
+}
 
 /**
  * One xterm.js view onto a pty living in the main process.
@@ -21,43 +82,11 @@ export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; font
   useEffect(() => {
     if (!host.current) return;
 
-    // The terminal has no CSS custom properties of its own, so its theme is
-    // read from the page at construction. `data-theme` is App.tsx's already
-    // resolved choice — System included, it never leaves that unresolved —
-    // so this follows the in-app theme setting rather than the raw OS media
-    // query, which would ignore an explicit Light/Dark override.
-    const light = document.documentElement.dataset.theme === 'light';
     const term = new Xterm({
       fontFamily: "'IBM Plex Mono', ui-monospace, Menlo, monospace",
       fontSize,
       cursorBlink: true,
-      // The editor surface and the status palette, so the terminal belongs to
-      // the same room as the rest of the app rather than looking pasted on.
-      theme: light
-        ? {
-            background: '#fbfaf7', foreground: '#2a2b2f', cursor: '#c0603c',
-            selectionBackground: 'rgba(192,96,60,0.22)',
-            black: '#16171a', brightBlack: '#8a8984',
-            red: '#b4544a', brightRed: '#a5473e',
-            green: '#4e8a62', brightGreen: '#3e7350',
-            yellow: '#a9783a', brightYellow: '#8d6230',
-            blue: '#4c74ae', brightBlue: '#3d5f92',
-            magenta: '#8b5fa0', brightMagenta: '#744d87',
-            cyan: '#3f7f7a', brightCyan: '#336763',
-            white: '#5c5c58', brightWhite: '#16171a'
-          }
-        : {
-            background: '#191b20', foreground: '#dad8d3', cursor: '#d97757',
-            selectionBackground: 'rgba(217,119,87,0.28)',
-            black: '#0d0e11', brightBlack: '#6e6d69',
-            red: '#c4635a', brightRed: '#d4756b',
-            green: '#6fa97f', brightGreen: '#8bc196',
-            yellow: '#d0a05a', brightYellow: '#e0b877',
-            blue: '#7ca0d4', brightBlue: '#9db9e0',
-            magenta: '#b58fc4', brightMagenta: '#c9a8d6',
-            cyan: '#79b0ab', brightCyan: '#95c6c1',
-            white: '#c9c7c2', brightWhite: '#f5f3ef'
-          },
+      theme: terminalTheme(),
       scrollback: 10_000,
       allowProposedApi: true
     });
@@ -102,6 +131,12 @@ export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; font
       if (id === sessionId) term.write(data);
     });
     const typed = term.onData((data) => void window.baton.sessionWrite(sessionId, data));
+
+    // xterm draws on a canvas, not with CSS, so a theme or accent change has
+    // to be handed to it — otherwise a terminal keeps the theme it opened in.
+    const offAppearance = subscribeAppearance(() => {
+      term.options.theme = terminalTheme();
+    });
 
     const observer = new ResizeObserver(sync);
     observer.observe(host.current);
@@ -157,6 +192,7 @@ export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; font
       element.removeEventListener('drop', onDrop);
       element.removeEventListener('paste', onPaste, true);
       offOutput();
+      offAppearance();
       typed.dispose();
       term.dispose();
     };

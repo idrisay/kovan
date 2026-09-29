@@ -11,6 +11,7 @@
  * `defaults read com.idrisay.devhub` import lands on the right names.
  */
 
+import type { AccentId, Density, TerminalColors, ThemeChoice, ThemeId } from './appearance';
 import type { TestAccount, TestEnvironment } from './testAccounts';
 
 import type { PathMapping } from './types';
@@ -19,8 +20,21 @@ export interface Settings {
   ticketKeyPattern: string;
   branchTemplate: string;
 
-  /** 'system' follows the OS; the other two hold regardless of it. */
-  'appearance.theme': 'system' | 'light' | 'dark';
+  /** 'system' and 'schedule' switch between the day and night themes below;
+   *  a theme id holds regardless of the OS or the time. See `appearance.ts`. */
+  'appearance.theme': ThemeChoice;
+  'appearance.dayTheme': ThemeId;
+  'appearance.nightTheme': ThemeId;
+  /** "HH:MM" local, for 'schedule'. */
+  'appearance.dayStart': string;
+  'appearance.nightStart': string;
+  'appearance.accent': AccentId;
+  /** Status hues pushed further apart for colour-blind eyes. */
+  'appearance.colorSafeStatus': boolean;
+  /** A shape beside every status colour (✓ ⟳ ! ◷ ⇄). */
+  'appearance.statusShapes': boolean;
+  'appearance.density': Density;
+  'appearance.terminalColors': TerminalColors;
 
   'jira.baseUrl': string;
   'jira.email': string;
@@ -104,6 +118,15 @@ export const DEFAULT_SETTINGS: Settings = {
   branchTemplate: '${key}-${slug}',
 
   'appearance.theme': 'system',
+  'appearance.dayTheme': 'light',
+  'appearance.nightTheme': 'dark',
+  'appearance.dayStart': '07:00',
+  'appearance.nightStart': '19:00',
+  'appearance.accent': 'clay',
+  'appearance.colorSafeStatus': false,
+  'appearance.statusShapes': true,
+  'appearance.density': 'comfortable',
+  'appearance.terminalColors': 'integrated',
 
   'jira.baseUrl': '',
   'jira.email': '',

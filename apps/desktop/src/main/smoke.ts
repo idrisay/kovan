@@ -597,7 +597,8 @@ export async function smokeUi(
   win: BrowserWindow,
   poller: Poller,
   mode: SmokeMode,
-  feed?: ActivityFeed
+  feed?: ActivityFeed,
+  sessions?: Sessions
 ): Promise<Record<string, unknown>> {
   if (mode === 'seeded' || mode === 'workspace') {
     // After the renderer has mounted, not before. `did-finish-load` fires when
@@ -638,6 +639,66 @@ export async function smokeUi(
   // Items 83–85 on their own: a pull request with nothing to report (the one
   // that blanked the window), the repository on every row, and the
   // "unresolved" chip's wording. `BATON_SMOKE_ITEM83=<shot prefix>`.
+  // Item 108, plan limits in the run sheet: `BATON_SMOKE_ITEM108=<shot prefix>`.
+  if (process.env['BATON_SMOKE_ITEM108'] && mode === 'seeded') {
+    return { item108: await driveItem108(win, process.env['BATON_SMOKE_ITEM108']) };
+  }
+
+  // Item 101, the startup list: `BATON_SMOKE_ITEM101=<shot prefix>` (mode 1).
+  if (process.env['BATON_SMOKE_ITEM101'] && mode === '1') {
+    return { item101: await driveItem101(win, process.env['BATON_SMOKE_ITEM101']) };
+  }
+
+  // Item 104, closing a running session: `BATON_SMOKE_ITEM104=<shot prefix>`.
+  if (process.env['BATON_SMOKE_ITEM104'] && mode === 'seeded' && sessions) {
+    return { item104: await driveItem104(win, sessions, process.env['BATON_SMOKE_ITEM104']) };
+  }
+
+  // Item 99, Settings as one searchable list: `BATON_SMOKE_ITEM99=<shot prefix>`.
+  if (process.env['BATON_SMOKE_ITEM99'] && mode === 'seeded') {
+    return { item99: await driveItem99(win, process.env['BATON_SMOKE_ITEM99']) };
+  }
+
+  // Item 100, ⌘P: `BATON_SMOKE_ITEM100=<shot prefix>` with BATON_WS_FOLDER.
+  if (process.env['BATON_SMOKE_ITEM100'] && mode === 'seeded') {
+    return { item100: await driveItem100(win, process.env['BATON_SMOKE_ITEM100']) };
+  }
+
+  // Item 98, the run viewer over a docked terminal: `BATON_SMOKE_ITEM98=<shot prefix>`.
+  if (process.env['BATON_SMOKE_ITEM98'] && mode === 'seeded' && sessions) {
+    return { item98: await driveItem98(win, sessions, process.env['BATON_SMOKE_ITEM98']) };
+  }
+
+  // Item 97, speech providers: `BATON_SMOKE_ITEM97=<shot prefix>`.
+  if (process.env['BATON_SMOKE_ITEM97'] && mode === 'seeded') {
+    return { item97: await driveItem97(win, process.env['BATON_SMOKE_ITEM97']) };
+  }
+
+  // Item 96, the themes: `BATON_SMOKE_ITEM96=<shot prefix>`.
+  if (process.env['BATON_SMOKE_ITEM96'] && mode === 'seeded' && sessions) {
+    return { item96: await driveItem96(win, sessions, process.env['BATON_SMOKE_ITEM96']) };
+  }
+
+  // Items 93 and 94 together: `BATON_SMOKE_ITEM93=<shot prefix>`.
+  if (process.env['BATON_SMOKE_ITEM93'] && mode === 'seeded') {
+    return { item93: await driveItems93and94(win, process.env['BATON_SMOKE_ITEM93']) };
+  }
+
+  // Item 92 (fixes 3 and 4) on its own: `BATON_SMOKE_ITEM92=1`.
+  if (process.env['BATON_SMOKE_ITEM92'] && mode === 'seeded') {
+    return { item92: await driveItem92(win) };
+  }
+
+  // Item 91 on its own: `BATON_SMOKE_ITEM91=<shot prefix>`.
+  if (process.env['BATON_SMOKE_ITEM91'] && mode === 'seeded') {
+    return { item91: await driveItem91(win, process.env['BATON_SMOKE_ITEM91']) };
+  }
+
+  // Item 90 (C + D) on its own: `BATON_SMOKE_ITEM90=<shot prefix>`.
+  if (process.env['BATON_SMOKE_ITEM90'] && mode === 'seeded' && sessions) {
+    return { item90: await driveItem90(win, sessions, process.env['BATON_SMOKE_ITEM90']) };
+  }
+
   // Item 89 on its own: `BATON_SMOKE_ITEM89=<shot prefix>`.
   if (process.env['BATON_SMOKE_ITEM89'] && mode === 'seeded') {
     return { item89: await driveItem89(win, process.env['BATON_SMOKE_ITEM89']) };
@@ -701,8 +762,10 @@ export async function smokeUi(
 
     // Settings closes with an ✕, and Token prices offers the online check.
     await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);
-    await until(win, `document.querySelector('.settings-nav')`, 5_000);
+    await until(win, `document.querySelector('.settings-list')`, 5_000);
     report['closeIsIcon'] = await read(win, `Boolean(document.querySelector('.sheet-head button[aria-label="Close"] svg'))`);
+    await read(win, `document.querySelector('.settings-row[data-section="agents"]:not(.open) .settings-row-head')?.click()`);
+    await new Promise((r) => setTimeout(r, 150));
     await read(win, `Array.from(document.querySelectorAll('.settings button')).find(b => b.textContent.includes('Check prices online'))?.click()`);
     await new Promise((r) => setTimeout(r, 150));
     await read(win, `document.querySelector('.price-check')?.scrollIntoView({ block: 'center' })`);
@@ -711,7 +774,7 @@ export async function smokeUi(
     await read(win, `document.querySelector('.sheet-head .icon-button')?.scrollIntoView()`);
     await snap('settings-head');
     await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
-    await until(win, `!document.querySelector('.settings-nav')`, 5_000);
+    await until(win, `!document.querySelector('.settings-list')`, 5_000);
     console.log('items49:', JSON.stringify(report));
   }
 
@@ -2400,8 +2463,8 @@ export async function smokeUi(
     win.webContents.send('baton:snapshot', fixtureSnapshot(10));
     await until(win, `document.querySelector('.rail [aria-label="Settings"]')`, 10_000);
     await read(win, `document.querySelector('.rail [aria-label="Settings"]')?.click()`);
-    await until(win, `document.querySelector('.settings-nav')`, 5_000);
-    await read(win, `Array.from(document.querySelectorAll('.settings-nav button')).find(b => b.textContent.startsWith('Environments'))?.click()`);
+    await until(win, `document.querySelector('.settings-list')`, 5_000);
+    await read(win, `document.querySelector('.settings-row[data-section="environments"]:not(.open) .settings-row-head')?.click()`);
     await until(win, `document.querySelector('.test-envs .account-card')`, 5_000);
     await shot('settings-dev');
     await read(win, `Array.from(document.querySelectorAll('.test-envs .env-picker button')).find(b => b.textContent.trim() === 'Local')?.click()`);
@@ -2412,7 +2475,7 @@ export async function smokeUi(
       cards: document.querySelectorAll('.test-envs .account-card').length,
       placeholders: Array.from(document.querySelectorAll('.test-envs .account-card input[type=password]')).map(i => i.placeholder)
     })`);
-    await read(win, `Array.from(document.querySelectorAll('.settings-nav button')).find(b => b.textContent.startsWith('General'))?.click()`);
+    await read(win, `document.querySelector('.settings-row[data-section="text"]:not(.open) .settings-row-head')?.click()`);
     await new Promise((r) => setTimeout(r, 200));
     await read(win, `document.querySelector('[aria-label="Larger reading text"]')?.click()`);
     await read(win, `document.querySelector('[aria-label="Larger reading text"]')?.click()`);
@@ -2898,11 +2961,10 @@ export async function smokeUi(
   // filled and saved, actually flip to connected without a manual refresh —
   // `save()` re-polls itself now.
   await read(win, `document.querySelector('[aria-label="Settings"]')?.click()`);
-  await until(win, `document.querySelector('.settings-nav')`, 5_000);
+  await until(win, `document.querySelector('.settings-list')`, 5_000);
   await read(
     win,
-    `Array.from(document.querySelectorAll('.settings-nav button'))
-      .find(b => b.textContent.includes('Sentry'))?.click()`
+    `document.querySelector('.settings-row[data-section="connections"]:not(.open) .settings-row-head')?.click()`
   );
   await until(win, `document.querySelector('.provider h3')`, 5_000);
   const setField = (match: string, value: string) => `(() => {
@@ -2954,7 +3016,7 @@ export async function smokeUi(
   }
 
   await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
-  await until(win, `!document.querySelector('.settings-nav')`, 5_000);
+  await until(win, `!document.querySelector('.settings-list')`, 5_000);
 
   // Back to Tickets, so nothing below assumes Sentry is still the active view.
   await read(win, `document.querySelector('.rail-item[aria-label="Tickets"]')?.click()`);
@@ -3180,7 +3242,7 @@ export async function smokeUi(
 
   if (process.env['BATON_SHOT_SETTINGS']) {
     await read(win, `document.querySelector('[aria-label="Settings"]')?.click()`);
-    await until(win, `document.querySelector('.settings-nav')`, 5_000);
+    await until(win, `document.querySelector('.settings-list')`, 5_000);
     await new Promise((r) => setTimeout(r, 150));
     await writeFile(
       process.env['BATON_SHOT_SETTINGS'],
@@ -3191,8 +3253,7 @@ export async function smokeUi(
     if (process.env['BATON_SHOT_SETTINGS_ENV']) {
       await read(
         win,
-        `Array.from(document.querySelectorAll('.settings-nav button'))
-          .find(b => b.textContent.includes('Dev environment'))?.click()`
+        `document.querySelector('.settings-row[data-section="environments"]:not(.open) .settings-row-head')?.click()`
       );
       await new Promise((r) => setTimeout(r, 150));
       await writeFile(
@@ -3205,14 +3266,13 @@ export async function smokeUi(
     if (process.env['BATON_SHOT_SETTINGS_LIGHT']) {
       await read(
         win,
-        `Array.from(document.querySelectorAll('.settings-nav button'))
-          .find(b => b.textContent.includes('General'))?.click()`
+        `document.querySelector('.settings-row[data-section="appearance"]:not(.open) .settings-row-head')?.click()`
       );
       await new Promise((r) => setTimeout(r, 100));
       await read(
         win,
-        `Array.from(document.querySelectorAll('.theme-picker button'))
-          .find(b => b.textContent === 'Light')?.click()`
+        `(Array.from(document.querySelectorAll('.theme-picker button')).find(b => b.textContent === 'Always one')?.click(),
+          setTimeout(() => Array.from(document.querySelectorAll('.theme-grid .theme-name')).find(b => b.textContent === 'Light')?.click(), 50))`
       );
       await new Promise((r) => setTimeout(r, 250));
       await writeFile(
@@ -3479,6 +3539,889 @@ async function driveItem83(win: BrowserWindow, prefix: string): Promise<Record<s
     rows, merged, everyOpenRowHasRepo, opened, afterOther,
     log: { file: logFile, size: logSize, rendererErrors: log.split('\n').filter((l) => l.includes('[renderer')).slice(0, 3) }
   };
+}
+
+async function driveItems93and94(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const snap = async (name: string) => {
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (selector: string) => read(win, `document.querySelector(${JSON.stringify(selector)})?.click()`);
+  const rail = (label: string) => click(`.rail-item[aria-label="${label}"]`);
+  const reload = async () => {
+    win.webContents.reload();
+    await until(win, `document.querySelector('#root')?.children.length > 0`);
+    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    await until(win, `document.querySelector('.rail-item[data-view]')`, 10_000);
+    await pause(400);
+  };
+  // The ticked options of whichever filter menu is open.
+  const ticked = () => read(win, `Array.from(document.querySelectorAll('.filter-menu .filter-option')).filter(l => l.querySelector('input').checked).map(l => l.textContent.trim())`);
+  win.focus();
+
+  // --- 93: tick filters and change sorts, in both views -------------------
+  await rail('Tickets');
+  await until(win, `document.querySelector('[aria-label="Filter tickets"]')`, 5_000);
+  await click('[aria-label="Filter tickets"]');
+  await until(win, `document.querySelector('.filter-menu .filter-option input')`, 5_000);
+  await read(win, `document.querySelector('.filter-menu .filter-option input').click()`);
+  const ticketTicked = await ticked();
+  await click('[aria-label="Filter tickets"]');
+  await click('[aria-label="Sort tickets"]');
+  await read(win, `Array.from(document.querySelectorAll('.menu [role=menuitemradio]')).find(b => b.textContent === 'Priority')?.click()`);
+  await read(win, `(() => { const q = document.getElementById('q'); q.focus(); document.execCommand('insertText', false, 'payment'); })()`);
+
+  await rail('Pull requests');
+  await until(win, `document.querySelector('[aria-label="Filter pull requests"]')`, 5_000);
+  await click('[aria-label="Filter pull requests"]');
+  await until(win, `document.querySelector('.filter-menu .filter-option input')`, 5_000);
+  await read(win, `document.querySelector('.filter-menu .filter-option input').click()`);
+  const pullTicked = await ticked();
+  await click('[aria-label="Filter pull requests"]');
+  await click('[aria-label="Sort pull requests"]');
+  await read(win, `Array.from(document.querySelectorAll('.menu [role=menuitemradio]')).find(b => b.textContent === 'Oldest')?.click()`);
+  const stored = await read(win, `JSON.parse(localStorage.getItem('baton.view-prefs'))`);
+
+  // Close and reopen the window: everything but the search text comes back.
+  await reload();
+  const pullBadge = await read(win, `document.querySelector('[aria-label="Filter pull requests"] .filter-count')?.textContent ?? null`);
+  const pullSortActive = await read(win, `document.querySelector('[aria-label="Sort pull requests"]')?.classList.contains('active')`);
+  await click('[aria-label="Filter pull requests"]');
+  await until(win, `document.querySelector('.filter-menu')`, 3_000);
+  const pullTickedAfter = await ticked();
+  await click('[aria-label="Filter pull requests"]');
+  await rail('Tickets');
+  await until(win, `document.querySelector('[aria-label="Filter tickets"]')`, 5_000);
+  const ticketBadge = await read(win, `document.querySelector('[aria-label="Filter tickets"] .filter-count')?.textContent ?? null`);
+  const ticketSortActive = await read(win, `document.querySelector('[aria-label="Sort tickets"]')?.classList.contains('active')`);
+  await click('[aria-label="Filter tickets"]');
+  await until(win, `document.querySelector('.filter-menu')`, 3_000);
+  const ticketTickedAfter = await ticked();
+  await click('[aria-label="Filter tickets"]');
+  const searchAfter = await read(win, `document.getElementById('q')?.value`);
+  await snap('filters-restored');
+
+  // A remembered value nothing has any more still shows, ticked, to untick.
+  await read(win, `(() => { const p = JSON.parse(localStorage.getItem('baton.view-prefs'));
+    p.ticketFilters.assignee = ['Nobody Here']; localStorage.setItem('baton.view-prefs', JSON.stringify(p)); })()`);
+  await reload();
+  await rail('Tickets');
+  await until(win, `document.querySelector('[aria-label="Filter tickets"]')`, 5_000);
+  await click('[aria-label="Filter tickets"]');
+  await until(win, `document.querySelector('.filter-menu')`, 3_000);
+  const orphanShown = (await ticked() as string[]).includes('Nobody Here');
+  await snap('orphan');
+  // Clear everything, so the run sheet part sees every ticket.
+  await read(win, `Array.from(document.querySelectorAll('.filter-menu button')).find(b => b.textContent.includes('Clear'))?.click()`);
+
+  // --- 94: the run sheet remembers agent and folders ----------------------
+  const { execFileSync } = await import('node:child_process');
+  const { mkdirSync } = await import('node:fs');
+  const root = path.join(app.getPath('userData'), 'repos');
+  const alpha = path.join(root, 'alpha');
+  const beta = path.join(root, 'beta');
+  for (const dir of [alpha, beta]) {
+    mkdirSync(dir, { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+  }
+  await read(win, `window.baton.setSetting('repos.folders', ${JSON.stringify([alpha, beta])})`);
+  await read(win, `window.baton.runTargets(true)`);
+
+  const openSheet = async (key: string) => {
+    await rail('Tickets');
+    await until(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).some(n => n.textContent === '${key}')`, 5_000);
+    await read(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).find(n => n.textContent === '${key}').closest('button').click()`);
+    await until(win, `document.querySelector('.detail-actions .primary')`, 5_000);
+    await click('.detail-actions .primary');
+    await until(win, `document.querySelector('.folder-button-text') && !document.querySelector('.folder-button-text').textContent.includes('No watched')`, 10_000);
+    // Agents are found by probing a login shell, which takes a few seconds.
+    await until(win, `document.querySelectorAll('.run-controls select option').length > 0`, 20_000);
+    await pause(600);
+  };
+  const sheetState = () => read(win, `({
+    folders: document.querySelector('.folder-button-text')?.textContent ?? null,
+    agent: document.querySelector('.run-controls select')?.value ?? null,
+    agents: document.querySelectorAll('.run-controls select option').length })`);
+  const closeSheet = async () => {
+    await click('.sheet-head .icon-button.boxed');
+    await until(win, `!document.querySelector('.folder-button')`, 3_000);
+  };
+
+  await openSheet('ACME-2393');
+  const firstOpen = await sheetState();
+  // Run across both, starting in beta.
+  await click('.folder-button');
+  await until(win, `document.querySelector('.folder-menu .folder-option')`, 3_000);
+  await read(win, `Array.from(document.querySelectorAll('.folder-menu .folder-option')).forEach(o => { const i = o.querySelector('input'); if (i && !i.checked) i.click(); })`);
+  await pause(200);
+  await read(win, `Array.from(document.querySelectorAll('.folder-menu .folder-option')).find(o => o.textContent.includes('beta'))?.querySelector('button.link')?.click()`);
+  await pause(200);
+  await click('.folder-button');
+  // Pick the second agent, when there is one.
+  const pickedAgent = await read(win, `(() => { const s = document.querySelector('.run-controls select'); if (s.options.length < 2) return null;
+    const v = s.options[1].value; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, v);
+    s.dispatchEvent(new Event('change', { bubbles: true })); return v; })()`);
+  await pause(200);
+  const chosen = await sheetState();
+  await snap('sheet-chosen');
+  await closeSheet();
+
+  await reload();
+  await openSheet('ACME-2393');
+  const reopened = await sheetState();
+  const startsIn = await read(win, `(() => { document.querySelector('.folder-button').click(); return new Promise(r => setTimeout(() => {
+    const o = Array.from(document.querySelectorAll('.folder-menu .folder-option')).find(x => x.querySelector('.folder-main'));
+    r(o ? o.textContent.replace('starts here', '').trim() : null); }, 200)); })()`);
+  await snap('sheet-reopened');
+  await closeSheet();
+
+  // A ticket never run starts from the last ticket's folders.
+  await openSheet('ACME-1000');
+  const newTicket = await sheetState();
+  await closeSheet();
+
+  return {
+    ticketTicked, pullTicked, stored, pullBadge, pullSortActive, pullTickedAfter, ticketBadge, ticketSortActive,
+    ticketTickedAfter, searchAfter, orphanShown, firstOpen, pickedAgent, chosen, reopened, startsIn, newTicket
+  };
+}
+
+async function driveItem92(win: BrowserWindow): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // 4. The budget in the GitHub item's tooltip.
+  const base = fixtureSnapshot(10);
+  win.webContents.send('baton:snapshot', {
+    ...base, githubBudget: { remaining: 4768, limit: 5000, resetAt: '2026-09-28T13:55:38Z', cost: 5 }
+  });
+  await pause(300);
+  const tooltip = await read(win, `Array.from(document.querySelectorAll('.statusbar-item')).find(i => i.textContent.includes('GitHub'))?.getAttribute('title') ?? null`);
+
+  // 3. A failed poll between two good ones must not re-announce what's blocked.
+  const { createHost } = await import('./host');
+  const { Activity } = await import('./notify');
+  const notices: { title: string; body: string }[] = [];
+  const activity = new Activity(createHost(), (notice) => notices.push(notice));
+  const good: Snapshot = { ...base, viewer: 'idrisay', errors: [] };
+  const failed: Snapshot = { ...base, viewer: '', blocked: [], mine: [], reviewRequested: [], errors: [{ provider: 'github', message: 'API rate limit already exceeded' }] };
+  await activity.report(good, true);
+  const afterBaseline = notices.length;
+  await activity.report(failed, false);
+  await activity.report(good, false);
+  const afterFailureAndBack = notices.length;
+  // And something that really did become blocked still gets through.
+  const newly = { ...base.mine[1]!, number: 777, title: 'Newly blocked', mergeable: 'conflicting' as const };
+  await activity.report({ ...good, blocked: [...good.blocked, newly], mine: [...good.mine, newly] }, false);
+  return { tooltip, afterBaseline, afterFailureAndBack, afterRealChange: notices.length, lastNotice: notices[notices.length - 1] ?? null };
+}
+
+/**
+ * Item 108: the run sheet's Agent picker, switched between the agents found
+ * on this Mac; each one's limits line read back and shot. The numbers are
+ * whatever Codex's log and the status-line cache say right now.
+ */
+async function driveItem108(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(2_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.focus();
+  const report: Record<string, unknown> = {};
+  await read(win, `document.querySelector('.rows .row')?.click()`);
+  await until(win, `document.querySelector('.detail-actions button, .run-buttons button')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('button')).find(b => /in an agent/.test(b.textContent))?.click()`);
+  await until(win, `document.querySelector('.run-controls select')?.options.length > 0`, 15_000);
+  await pause(1_500);
+  const options = await read(win, `Array.from(document.querySelector('.run-controls select').options).map(o => ({ value: o.value, text: o.textContent }))`) as { value: string; text: string }[];
+  report['agents'] = options.map((o) => o.text);
+  for (const option of options.filter((o) => /claude|codex|opencode/i.test(o.text)).slice(0, 4)) {
+    await read(win, `(() => { const s = document.querySelector('.run-controls select'); const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      set.call(s, ${JSON.stringify(option.value)}); s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await pause(300);
+    report[option.text] = await read(win, `document.querySelector('.agent-limits')?.innerText ?? null`);
+    await snap(option.value.replace(/[^\w-]/g, '_'));
+  }
+  return report;
+}
+
+/**
+ * Item 101 (option B): the first refresh after launch, played as the poller
+ * publishes it — every service loading, then one by one answering (one of
+ * them failing) — and then the normal view once all are in. Stamped in the
+ * future so the real poller's own first answer can't overtake the script.
+ */
+async function driveItem101(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(2_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.focus();
+  await until(win, `document.querySelector('#root')?.children.length > 0`);
+  const report: Record<string, unknown> = {};
+  report['beforeAnything'] = await read(win, `({ empty: Boolean(document.querySelector('.empty')), boot: Boolean(document.querySelector('.boot')) })`);
+  const base = { ...fixtureSnapshot(0), at: 0, connected: ['github', 'jira', 'sentry'] as never, refreshing: true };
+  const future = Date.now() + 10 * 365 * 24 * 3600 * 1000;
+  const send = (booting: unknown, at = future) => win.webContents.send('baton:snapshot', { ...base, at, booting });
+  const steps = () => read(win, `Array.from(document.querySelectorAll('.boot-step')).map(li => li.className.replace('boot-step ', '') + ': ' + li.textContent)`);
+
+  send([{ provider: 'github', state: 'loading' }, { provider: 'jira', state: 'loading' }, { provider: 'sentry', state: 'loading' }]);
+  await pause(300);
+  report['loading'] = await steps();
+  report['noEmpty'] = await read(win, `!document.querySelector('.empty')`);
+  await snap('loading');
+  send([{ provider: 'github', state: 'done', count: 4 }, { provider: 'jira', state: 'loading' }, { provider: 'sentry', state: 'failed', message: 'HTTP 401 — the token was rejected' }], future + 1);
+  await pause(300);
+  report['partial'] = await steps();
+  await snap('partial');
+  win.webContents.send('baton:snapshot', { ...fixtureSnapshot(10), at: future + 2 });
+  await until(win, `document.querySelector('.rail')`, 5_000).catch(() => undefined);
+  report['after'] = await read(win, `({ boot: Boolean(document.querySelector('.boot')), rail: Boolean(document.querySelector('.rail')) })`);
+  return report;
+}
+
+/**
+ * Item 104: a running session's × must open its "Stop and close?" popover
+ * next to the button and on screen — at the default sidebar size and at a
+ * larger one — and "Stop and close" must close the session.
+ */
+async function driveItem104(win: BrowserWindow, sessions: Sessions, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(2_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.focus();
+  const report: Record<string, unknown> = {};
+  for (const name of ['first agent', 'second agent']) {
+    await sessions.open({ cwd: app.getPath('userData'), title: name, runnerName: 'Claude Code', line: 'sleep 300' });
+  }
+  await read(win, `document.querySelector('.rail-item[aria-label="Sessions"]')?.click()`);
+  await until(win, `document.querySelectorAll('.row.one-line').length >= 2`, 8_000);
+  await pause(1_500);
+
+  const tryClose = async (label: string) => {
+    // Hover the row (the × only shows on hover), then a real click on the ×.
+    const box = await read(win, `(() => { const row = document.querySelectorAll('.row.one-line')[1];
+      const r = row.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`) as { x: number; y: number };
+    // Hover needs real movement into the row, and a window that takes input.
+    win.show();
+    win.focus();
+    win.webContents.focus();
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: box.x + 200, y: box.y + 200 });
+    await pause(100);
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: box.x, y: box.y });
+    await pause(250);
+    const btn = await read(win, `(() => { const row = document.querySelectorAll('.row.one-line')[1];
+      const b = row.querySelector('.session-close'); const r = b.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), shown: getComputedStyle(b).display }; })()`) as { x: number; y: number; shown: string };
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: btn.x, y: btn.y, button: 'left', clickCount: 1 });
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: btn.x, y: btn.y, button: 'left', clickCount: 1 });
+    await pause(400);
+    report[label] = {
+      button: btn,
+      ...(await read(win, `(() => { const p = document.querySelector('.session-close-confirm');
+        if (!p) return { popover: null, armed: Boolean(document.querySelector('.session-close.armed')) };
+        const r = p.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return { popover: { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) },
+          onScreen: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight,
+          onTop: Boolean(hit?.closest('.session-close-confirm')), window: { w: innerWidth, h: innerHeight } }; })()`) as Record<string, unknown>)
+    };
+    await snap(label);
+  };
+
+  await tryClose('at100');
+  await read(win, `document.querySelector('.session-close-confirm button:not(.menu-warn)')?.click()`);
+  await pause(200);
+  // A larger sidebar, as someone with a big screen would set it.
+  await read(win, `localStorage.setItem('baton.sidebar-size', '130'); document.documentElement.style.setProperty('--sidebar-zoom', '1.3')`);
+  await pause(300);
+  await tryClose('at130');
+  await read(win, `document.querySelector('.session-close-confirm .menu-warn')?.click()`);
+  await pause(1_200);
+  report['rowsLeft'] = await read(win, `document.querySelectorAll('.row.one-line').length`);
+  return report;
+}
+
+/**
+ * Item 99 (option B): Settings opens as seven summarised rows; a row opens in
+ * place and another row closes it; search narrows the rows and names the
+ * settings that matched, and choosing one opens its section at it.
+ */
+async function driveItem99(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(2_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const head = (id: string) => read(win, `document.querySelector('.settings-row[data-section="${id}"] .settings-row-head')?.click()`);
+  const openRows = () => read(win, `Array.from(document.querySelectorAll('.settings-row.open')).map(r => r.dataset.section)`);
+  const search = (text: string) => read(win, `(() => { const f = document.getElementById('settings-search'); f.focus(); f.select(); document.execCommand('insertText', false, ${JSON.stringify(text)}); })()`);
+  win.focus();
+  const report: Record<string, unknown> = {};
+
+  await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);
+  await until(win, `document.querySelector('.settings-list')`, 5_000);
+  await pause(400);
+  report['rows'] = await read(win, `Array.from(document.querySelectorAll('.settings-row')).map(r => r.querySelector('.settings-row-title').textContent + ' — ' + r.querySelector('.settings-row-summary').textContent)`);
+  report['searchFocused'] = await read(win, `document.activeElement?.id === 'settings-search'`);
+  await snap('closed');
+
+  await head('text');
+  await pause(200);
+  report['openText'] = await openRows();
+  await head('agents');
+  await pause(300);
+  report['openAgents'] = await openRows();
+  await snap('agents-open');
+  await head('agents');
+  await pause(200);
+  report['allClosed'] = await openRows();
+
+  await search('key');
+  await pause(200);
+  report['searchKey'] = await read(win, `Array.from(document.querySelectorAll('.settings-row')).map(r => ({ row: r.dataset.section, hits: Array.from(r.querySelectorAll('.settings-hit')).map(h => h.textContent) }))`);
+  await snap('search-key');
+  await read(win, `Array.from(document.querySelectorAll('.settings-row[data-section="dictation"] .settings-hit')).find(h => h.textContent === 'API key')?.click()`);
+  await pause(600);
+  report['afterHit'] = await openRows();
+
+  await search('zzz');
+  await pause(150);
+  report['noMatch'] = await read(win, `document.querySelector('.settings-none')?.textContent ?? null`);
+  await search('idle');
+  await pause(150);
+  report['searchIdle'] = await read(win, `Array.from(document.querySelectorAll('.settings-row')).map(r => r.dataset.section)`);
+  return report;
+}
+
+/**
+ * Item 100: ⌘P from the pull requests view, pressed as keys. Typing finds a
+ * file, Enter opens it in the Workspace; ⌘P again lists it as recently
+ * opened; "name:40" opens a file with the caret on line 40.
+ */
+async function driveItem100(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(2_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const press = async (keyCode: string, modifiers: ('meta')[] = []) => {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+    await pause(150);
+  };
+  const type = (text: string) => read(win, `(() => { const f = document.getElementById('quick-open-input'); f.focus(); f.select(); document.execCommand('insertText', false, ${JSON.stringify(text)}); return f.value; })()`);
+  const rows = () => read(win, `Array.from(document.querySelectorAll('.quick-open-row')).slice(0, 5).map(r => r.textContent)`);
+  win.focus();
+  win.webContents.focus();
+  const report: Record<string, unknown> = {};
+
+  await press('P', ['meta']);
+  report['opened'] = await until(win, `document.querySelector('.quick-open')`, 3_000);
+  report['emptyState'] = await read(win, `document.querySelector('.quick-open-empty')?.textContent ?? null`);
+  await type('quickopen');
+  await until(win, `document.querySelectorAll('.quick-open-row').length > 0`, 20_000);
+  report['typed'] = await rows();
+  await snap('typed');
+  await press('Return');
+  await until(win, `document.querySelector('.workspace .tab-path, .tab-path')`, 8_000);
+  await pause(500);
+  report['afterEnter'] = await read(win, `({ picker: Boolean(document.querySelector('.quick-open')), tab: document.querySelector('.tab-path')?.textContent ?? null })`);
+
+  await press('P', ['meta']);
+  await until(win, `document.querySelector('.quick-open-row')`, 3_000);
+  report['recent'] = await rows();
+  await snap('recent');
+
+  await type('poller.ts:40');
+  await until(win, `Array.from(document.querySelectorAll('.quick-open-row')).some(r => r.textContent.includes('poller.ts'))`, 5_000);
+  report['foot'] = await read(win, `document.querySelector('.quick-open-foot')?.textContent ?? null`);
+  await press('Return');
+  await until(win, `(document.querySelector('.status-bar')?.textContent ?? '').includes('Ln 40')`, 8_000);
+  report['atLine'] = await read(win, `document.querySelector('.status-bar')?.textContent ?? null`);
+  await snap('at-line');
+
+  await press('P', ['meta']);
+  await until(win, `document.querySelector('.quick-open')`, 3_000);
+  await press('Escape');
+  report['escCloses'] = await read(win, `!document.querySelector('.quick-open')`);
+  return report;
+}
+
+/**
+ * Item 98: the screenshot's layout — a run on a pull request, its terminal
+ * docked on the right — then "watch". The viewer must cover the window and
+ * be what's on top at every corner of itself, terminal side included.
+ */
+async function driveItem98(win: BrowserWindow, sessions: Sessions, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const store = new RunStore(RunStore.rootFor(app.getPath('userData')));
+  const run = await store.begin({ subject: 'acme/web#42', pull: 'acme/web#42', kind: 'unblock', prompt: 'Unblock it.' });
+  await sessions.open({
+    cwd: app.getPath('userData'), title: 'unblock · acme/web#42', runnerName: 'smoke', line: 'sleep 300',
+    kind: 'unblock', subject: 'acme/web#42', pull: 'acme/web#42', runDirectory: run.directory
+  });
+  await read(win, `localStorage.setItem('baton.terminal-dock', 'right')`);
+  win.focus();
+  await read(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).find(e => e.textContent === '42')?.closest('button')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.runs button.link')).some(b => b.textContent.trim() === 'watch')`, 10_000);
+  await pause(800);
+  const docked = await read(win, `Boolean(document.querySelector('.pane .term, .term'))`);
+  await read(win, `Array.from(document.querySelectorAll('.runs button.link')).find(b => b.textContent.trim() === 'watch').click()`);
+  await until(win, `document.querySelector('.run-viewer')`, 5_000);
+  await pause(400);
+  // capturePage lags the page by a few seconds here (it handed back frames
+  // from before "watch" was clicked); wait, and ask for a fresh frame.
+  await pause(4_000);
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-viewer.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-viewer.png`);
+  return {
+    docked,
+    ...(await read(win, `(() => {
+      const back = document.querySelector('.sheet-backdrop').getBoundingClientRect();
+      const sheet = document.querySelector('.run-viewer').getBoundingClientRect();
+      const onTop = (x, y) => Boolean(document.elementFromPoint(x, y)?.closest('.run-viewer'));
+      return {
+        backdropCoversWindow: back.left === 0 && back.top === 0 && back.width === innerWidth && back.height === innerHeight,
+        inBody: document.querySelector('.sheet-backdrop').parentElement === document.body,
+        corners: [onTop(sheet.left + 8, sheet.top + 8), onTop(sheet.right - 8, sheet.top + 8), onTop(sheet.left + 8, sheet.bottom - 8), onTop(sheet.right - 8, sheet.bottom - 8)]
+      };
+    })()`) as Record<string, unknown>)
+  };
+}
+
+/**
+ * Item 97: the speech model picker in Settings › Dictation, driven by
+ * selecting each kind of provider — whisper.cpp's Test runs the real
+ * whisper-cli on a sample spoken by \`say\`; a cloud provider without a key,
+ * and with a bogus one, must say so plainly.
+ */
+async function driveItem97(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const snap = async (name: string) => {
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const choose = (id: string) => read(win, `(() => { const s = Array.from(document.querySelectorAll('.settings-field select')).find(x => Array.from(x.options).some(o => o.value === 'whisper-cpp'));
+    const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; set.call(s, ${JSON.stringify(id)});
+    s.dispatchEvent(new Event('change', { bubbles: true })); return s.value; })()`);
+  const testResult = async () => {
+    await read(win, `Array.from(document.querySelectorAll('.speech-test button')).find(b => b.textContent.startsWith('Test'))?.click()`);
+    await until(win, `document.querySelector('.speech-test-ok, .speech-test-fail')`, 90_000).catch(() => undefined);
+    return read(win, `(() => { const e = document.querySelector('.speech-test-ok, .speech-test-fail'); return e ? { ok: e.classList.contains('speech-test-ok'), text: e.textContent } : null; })()`);
+  };
+  const scrollTo = () => read(win, `document.querySelector('.speech-test')?.scrollIntoView({ block: 'center' })`);
+  win.focus();
+  const report: Record<string, unknown> = {};
+
+  await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);
+  await until(win, `document.querySelector('.settings-list')`, 5_000);
+  await read(win, `document.querySelector('.settings-row[data-section="dictation"]:not(.open) .settings-row-head')?.click()`);
+  await until(win, `document.querySelector('.settings-field select')`, 5_000);
+  await pause(300);
+  report['default'] = await read(win, `document.querySelector('.speech-test button')?.textContent`);
+
+  await choose('whisper-cpp');
+  await pause(300);
+  report['whisperModels'] = await read(win, `Array.from(document.querySelectorAll('.speech-row select option')).map(o => o.textContent)`);
+  await scrollTo();
+  report['whisperTest'] = await testResult();
+  await snap('whisper-cpp');
+
+  await choose('groq');
+  await pause(300);
+  await scrollTo();
+  report['groqNoKey'] = await testResult();
+  await snap('groq-no-key');
+
+  await choose('openai');
+  await pause(300);
+  await read(win, `(() => { const f = document.querySelector('.speech-row input[type=password]'); f.focus(); document.execCommand('insertText', false, 'sk-bogus-baton-smoke'); })()`);
+  await read(win, `Array.from(document.querySelectorAll('.speech-row button')).find(b => b.textContent === 'Save')?.click()`);
+  await until(win, `document.querySelector('.speech-row input[type=password]')?.placeholder.includes('saved')`, 5_000).catch(() => undefined);
+  report['keySaved'] = await read(win, `document.querySelector('.speech-row input[type=password]')?.placeholder`);
+  report['keyNotEchoed'] = await read(win, `document.querySelector('.speech-row input[type=password]')?.value === ''`);
+  await scrollTo();
+  report['openaiBogusKey'] = await testResult();
+  await snap('openai-bogus-key');
+
+  await choose('apple');
+  await pause(300);
+  await scrollTo();
+  await snap('apple');
+  report['saved'] = await read(win, `window.baton.settings().then(s => ({ provider: s['dictation.provider'], secretInSettings: JSON.stringify(s).includes('sk-bogus') }))`);
+  return report;
+}
+
+/**
+ * Item 96: every theme painted over a real pull request, then each option
+ * driven through Settings the way a person would — the painted attributes
+ * and tokens read back after each click, and a shot of each.
+ */
+async function driveItem96(win: BrowserWindow, sessions: Sessions, prefix: string): Promise<Record<string, unknown>> {
+  const snap = async (name: string) => {
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (selector: string) => read(win, `(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return false; e.click(); return true; })()`);
+  const clickText = (scope: string, text: string) => read(win, `(() => { const e = Array.from(document.querySelectorAll(${JSON.stringify(scope)})).find(b => b.textContent.trim().startsWith(${JSON.stringify(text)})); if (!e) return false; e.click(); return true; })()`);
+  const painted = () => read(win, `(() => { const r = document.documentElement; const css = getComputedStyle(r);
+    return { theme: r.dataset.theme, palette: r.dataset.palette ?? null, accent: r.dataset.accent ?? null, status: r.dataset.status ?? null,
+      shapes: 'shapes' in r.dataset, density: r.dataset.density, rail: css.getPropertyValue('--rail').trim(), clay: css.getPropertyValue('--clay').trim(),
+      pass: css.getPropertyValue('--pass').trim(), bodyBg: getComputedStyle(document.body).backgroundColor,
+      rowPad: getComputedStyle(document.querySelector('.rows .row') ?? document.body).paddingTop,
+      dotGlyph: getComputedStyle(document.querySelector('.rows .dot') ?? document.body, '::before').content }; })()`);
+  const openSettings = async () => {
+    await click('.rail-item[aria-label="Settings"]');
+    await until(win, `document.querySelector('.settings-list')`, 5_000);
+    await read(win, `document.querySelector('.settings-row[data-section="appearance"]:not(.open) .settings-row-head')?.click()`);
+    await pause(200);
+  };
+  const closeSettings = async () => {
+    await click('.sheet-head [aria-label="Close"]');
+    await until(win, `!document.querySelector('.settings-list')`, 5_000);
+  };
+  win.focus();
+  const report: Record<string, unknown> = {};
+
+  await click('.rows .row');
+  await pause(400);
+
+  // 1. Every theme, chosen as "Always one" in Settings.
+  await openSettings();
+  await clickText('.theme-picker button', 'Always one');
+  await pause(150);
+  await snap('settings-fixed');
+  const themes = ['Dark', 'Light', 'OLED Black', 'Cool Graphite', 'Ember Low Light', 'High Contrast', 'Paper Soft'];
+  const perTheme: Record<string, unknown> = {};
+  for (const label of themes) {
+    await openSettings().catch(() => undefined);
+    await clickText('.theme-grid .theme-name', label);
+    await pause(150);
+    await closeSettings();
+    await pause(250);
+    perTheme[label] = await painted();
+    await snap(`theme-${label.toLowerCase().replace(/ /g, '-')}`);
+  }
+  report['themes'] = perTheme;
+  report['savedTheme'] = await read(win, `window.baton.settings().then(s => s['appearance.theme'])`);
+
+  // 2. Options, back on Dark: accent, colour-safe status, shapes off, compact, boosted.
+  await openSettings();
+  await clickText('.theme-grid .theme-name', 'Dark');
+  await clickText('.accent-picker button', 'Teal');
+  await pause(150);
+  report['teal'] = await painted();
+  await snap('settings-teal');
+  await clickText('.accent-picker button', 'macOS');
+  await pause(400);
+  report['macos'] = await painted();
+  await snap('settings-macos-accent');
+  await clickText('.accent-picker button', 'Teal');
+  await clickText('.checkbox-row', 'Colour-safe');
+  await clickText('.theme-picker button', 'Compact');
+  await clickText('.theme-picker button', 'Boosted');
+  await pause(150);
+  await closeSettings();
+  await pause(250);
+  report['options'] = await painted();
+  await snap('options-teal-safe-compact');
+  await openSettings();
+  await clickText('.checkbox-row', 'Show a shape');
+  await pause(150);
+  await closeSettings();
+  report['shapesOff'] = await painted();
+  await snap('shapes-off');
+
+  // 3. A terminal follows the theme live — xterm paints a canvas, not CSS.
+  const termBg = () => read(win, `(() => { const v = document.querySelector('.xterm .xterm-viewport'); return v ? getComputedStyle(v).backgroundColor : null; })()`);
+  await sessions.open({
+    cwd: app.getPath('userData'), title: 'colours', runnerName: 'smoke',
+    line: `printf '\\033[31mred \\033[32mgreen \\033[33myellow \\033[34mblue \\033[35mmagenta \\033[36mcyan \\033[0mplain\\n'; sleep 300`
+  });
+  await click('.rail-item[aria-label="Sessions"]');
+  await until(win, `document.querySelector('.xterm')`, 8_000).catch(() => undefined);
+  await pause(6000);
+  report['terminalDark'] = await termBg();
+  await snap('terminal-dark-boosted');
+  await openSettings();
+  await clickText('.theme-grid .theme-name', 'Cool Graphite');
+  await clickText('.theme-picker button', 'From the theme');
+  await closeSettings();
+  await pause(400);
+  report['terminalGraphite'] = await termBg();
+  await snap('terminal-graphite');
+
+  // 4. The two switching modes.
+  await openSettings();
+  await clickText('.theme-picker button', 'Match macOS');
+  await pause(150);
+  await snap('settings-system');
+  await clickText('.theme-picker button', 'On a schedule');
+  await pause(150);
+  await snap('settings-schedule');
+  report['schedule'] = await painted();
+
+  // Put everything back so the throwaway profile ends where it started.
+  for (const [key, value] of [['appearance.theme', 'system'], ['appearance.accent', 'clay'], ['appearance.colorSafeStatus', false],
+    ['appearance.statusShapes', true], ['appearance.density', 'comfortable'], ['appearance.terminalColors', 'integrated']] as const) {
+    await read(win, `window.baton.setSetting(${JSON.stringify(key)}, ${JSON.stringify(value)})`);
+  }
+  return report;
+}
+
+async function driveItem91(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const snap = async (name: string) => {
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (selector: string) => read(win, `(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return false; e.click(); return true; })()`);
+  // Typed the way a person types, so React sees every field change.
+  const type = (selector: string, text: string) => read(win, `(() => { const f = document.querySelector(${JSON.stringify(selector)});
+    f.focus(); f.select?.(); document.execCommand('insertText', false, ${JSON.stringify(text)}); return f.value; })()`);
+  const rows = () => read(win, `Array.from(document.querySelectorAll('.qc-row')).map(r => ({
+    name: r.querySelector('.qc-row-name')?.firstChild?.textContent, command: r.querySelector('.qc-row-command')?.textContent,
+    running: Boolean(r.querySelector('.dot.live')) }))`);
+  win.focus();
+
+  // 1. Nothing saved: the button says what it is, and opens a new command.
+  const emptyLabel = await read(win, `document.querySelector('.qc-run-name')?.textContent`);
+  await click('.qc-run');
+  await until(win, `document.querySelector('.qc-editor')`, 3_000);
+  // Saving with no name says why.
+  await click('.qc-editor button[type="submit"]');
+  await until(win, `document.querySelector('.qc-error')`, 3_000);
+  const noName = await read(win, `document.querySelector('.qc-error')?.textContent`);
+  const dragRegion = await read(win, `getComputedStyle(document.querySelector('.qc-editor textarea')).webkitAppRegion ?? getComputedStyle(document.querySelector('.qc-editor textarea')).getPropertyValue('-webkit-app-region')`);
+
+  // 2. Two commands. The output is computed by the shell, so seeing it proves it ran.
+  await type('.qc-editor input', 'frontend dev');
+  await type('.qc-editor textarea', 'echo serving-$((6*7)) && sleep 120');
+  await click('.qc-editor button[type="submit"]');
+  await until(win, `document.querySelectorAll('.qc-row').length === 1`, 3_000);
+  await click('.qc-add');
+  await until(win, `document.querySelector('.qc-editor')`, 3_000);
+  await type('.qc-editor input', 'optimize');
+  await type('.qc-editor textarea', 'echo opti$((1+1))mized');
+  await type('.qc-folder input', app.getPath('userData'));
+  await pause(100);
+  await snap('editor');
+  await click('.qc-editor button[type="submit"]');
+  await until(win, `document.querySelectorAll('.qc-row').length === 2`, 3_000);
+  const saved = await rows();
+  await snap('menu');
+
+  // 3. Search and Enter runs the match, in Sessions.
+  await type('.qc-search input', 'opt');
+  await pause(100);
+  const searched = await rows();
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
+  await until(win, `document.querySelector('.rail-item.active')?.getAttribute('aria-label') === 'Sessions'`, 5_000);
+  await until(win, `window.baton.sessions().then(l => l.some(s => s.title === 'optimize'))`, 5_000);
+  const optimize = await read(win, `window.baton.sessions().then(l => l.find(s => s.title === 'optimize'))`) as { id: string; cwd: string; commandId?: string };
+  let output = '';
+  for (let i = 0; i < 30 && !output.includes('opti2mized'); i++) {
+    await pause(300);
+    output = (await read(win, `window.baton.sessionBuffer(${JSON.stringify(optimize.id)})`) as string) ?? '';
+  }
+  const ranOptimize = { ran: output.includes('opti2mized'), cwd: optimize.cwd, tagged: Boolean(optimize.commandId),
+    menuClosed: !(await read(win, `Boolean(document.querySelector('.qc-menu'))`)) };
+
+  // A one-off that finished runs again in the same terminal, not a new one.
+  await pause(800);
+  const titles = () => read(win, `window.baton.sessions().then(l => l.filter(s => s.running).map(s => s.title))`) as Promise<string[]>;
+  const beforeRerun = await titles();
+  await click('.qc-run');
+  let rerunOut = '';
+  for (let i = 0; i < 30 && (rerunOut.match(/opti2mized/g) ?? []).length < 2; i++) {
+    await pause(300);
+    rerunOut = (await read(win, `window.baton.sessionBuffer(${JSON.stringify(optimize.id)})`) as string) ?? '';
+  }
+  const rerun = { sessionsBefore: beforeRerun, sessionsAfter: await titles(), outputs: (rerunOut.match(/opti2mized/g) ?? []).length };
+
+  // 4. The last one run is on the ▶ button; a running server isn't started twice.
+  const splitAfter = await read(win, `document.querySelector('.qc-run-name')?.textContent`);
+  await click('.qc-toggle');
+  await until(win, `document.querySelector('.qc-row')`, 3_000);
+  await read(win, `Array.from(document.querySelectorAll('.qc-row-run')).find(b => b.textContent.includes('frontend dev')).click()`);
+  await until(win, `window.baton.sessions().then(l => l.some(s => s.title === 'frontend dev' && s.running))`, 5_000);
+  await pause(1_500);
+  const before = await titles();
+  await click('.qc-run');
+  await pause(800);
+  const after = await titles();
+  const dev = await read(win, `window.baton.sessions().then(l => l.find(s => s.title === 'frontend dev'))`) as { id: string };
+  let devOut = '';
+  for (let i = 0; i < 20 && !devOut.includes('serving-42'); i++) {
+    await pause(300);
+    devOut = (await read(win, `window.baton.sessionBuffer(${JSON.stringify(dev.id)})`) as string) ?? '';
+  }
+  const reuse = { before, after, servingOutput: devOut.includes('serving-42'),
+    activeIsDev: await read(win, `document.querySelector('.term')?.getAttribute('data-session-id') === ${JSON.stringify(dev.id)}`),
+    splitRunningDot: await read(win, `Boolean(document.querySelector('.qc-run .dot.live'))`) };
+
+  // 5. Edit, duplicate, delete (Cancel first — it asks).
+  await click('.qc-toggle');
+  await until(win, `document.querySelector('.qc-row')`, 3_000);
+  await pause(300);
+  const runningRows = await rows();
+  await read(win, `document.querySelector('.qc-row-actions button[aria-label="Edit optimize"]').click()`);
+  await until(win, `document.querySelector('.qc-editor')`, 3_000);
+  await type('.qc-editor input', 'optimize images');
+  await click('.qc-editor button[type="submit"]');
+  await until(win, `Array.from(document.querySelectorAll('.qc-row-name')).some(n => n.textContent.startsWith('optimize images'))`, 3_000);
+  await read(win, `document.querySelector('.qc-row-actions button[aria-label="Duplicate optimize images"]').click()`);
+  await until(win, `document.querySelectorAll('.qc-row').length === 3`, 3_000);
+  const afterDuplicate = await rows();
+  await read(win, `document.querySelector('.qc-row-actions button[aria-label="Delete optimize images (copy)"]').click()`);
+  await until(win, `document.querySelector('.qc-confirm')`, 3_000);
+  const confirmText = await read(win, `document.querySelector('.qc-confirm span')?.textContent`);
+  await snap('confirm');
+  await read(win, `document.querySelector('.qc-confirm .link').click()`);
+  const afterCancel = (await rows() as unknown[]).length;
+  await read(win, `document.querySelector('.qc-row-actions button[aria-label="Delete optimize images (copy)"]').click()`);
+  await until(win, `document.querySelector('.qc-confirm')`, 3_000);
+  await read(win, `document.querySelector('.qc-confirm .qc-delete').click()`);
+  await until(win, `document.querySelectorAll('.qc-row').length === 2`, 3_000);
+  const afterDelete = await rows();
+
+  // 6. A folder that's gone says so, instead of opening a shell somewhere else.
+  await click('.qc-add');
+  await until(win, `document.querySelector('.qc-editor')`, 3_000);
+  await type('.qc-editor input', 'old project');
+  await type('.qc-editor textarea', 'ls');
+  await type('.qc-folder input', '/nonexistent/baton-smoke');
+  await click('.qc-editor button[type="submit"]');
+  await until(win, `!document.querySelector('.qc-editor')`, 3_000);
+  await read(win, `Array.from(document.querySelectorAll('.qc-row-run')).find(b => b.textContent.includes('old project')).click()`);
+  await until(win, `document.querySelector('.qc-error')`, 3_000);
+  const missingFolder = await read(win, `document.querySelector('.qc-error')?.textContent`);
+  const stored = await read(win, `window.baton.settings().then(s => (s.quickCommands ?? []).map(c => c.name))`);
+  await click('.qc-search .icon-button');
+
+  for (const id of [optimize.id, dev.id]) await read(win, `window.baton.sessionClose(${JSON.stringify(id)})`);
+  return { emptyLabel, noName, dragRegion, saved, searched, ranOptimize, rerun, splitAfter, reuse, runningRows, afterDuplicate, confirmText, afterCancel, afterDelete, missingFolder, stored };
+}
+
+async function driveItem90(win: BrowserWindow, sessions: Sessions, prefix: string): Promise<Record<string, unknown>> {
+  const snap = async (name: string) => {
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // Nothing may really open a browser on the machine running this: record instead.
+  const { shell } = await import('electron');
+  const opened: string[] = [];
+  let stubbed = false;
+  try {
+    (shell as { openExternal: (url: string) => Promise<void> }).openExternal = async (url: string) => { opened.push(url); };
+    stubbed = true;
+  } catch {
+    stubbed = false;
+  }
+
+  // A run whose "agent" is a sleeping shell, attached to the run's folder.
+  const store = new RunStore(RunStore.rootFor(app.getPath('userData')));
+  const run = await store.begin({
+    subject: 'acme/web#42', pull: 'acme/web#42', kind: 'verify', prompt: 'Check it.',
+    environment: 'Dev', site: 'https://dev.example.invalid/'
+  });
+  const session = await sessions.open({
+    cwd: app.getPath('userData'), title: 'verify · acme/web#42', runnerName: 'smoke', line: 'sleep 300',
+    kind: 'verify', subject: 'acme/web#42', pull: 'acme/web#42', runDirectory: run.directory
+  });
+  const shots = path.join(run.directory, 'shots');
+
+  await read(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).find(e => e.textContent === '42')?.closest('button')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.runs button.link')).some(b => b.textContent.trim() === 'watch')`, 10_000);
+  await read(win, `Array.from(document.querySelectorAll('.runs button.link')).find(b => b.textContent.trim() === 'watch').click()`);
+  await until(win, `document.querySelector('.run-viewer .run-now')`, 5_000);
+  const waiting = await read(win, `({
+    live: document.querySelector('.run-live')?.textContent ?? null,
+    now: document.querySelector('.run-now')?.textContent ?? null,
+    siteButton: document.querySelector('.run-site-open')?.textContent ?? null })`);
+
+  // The agent says what it's doing, then takes two screenshots, a second apart.
+  await writeFile(path.join(run.directory, 'status.txt'), 'Signing in as Teacher\n');
+  await until(win, `document.querySelector('.run-now-step')?.textContent === 'Signing in as Teacher'`, 5_000);
+  const picture = (await win.webContents.capturePage()).toPNG();
+  await writeFile(path.join(shots, '01-signed-in.png'), picture);
+  const firstArrived = await until(win, `document.querySelector('.run-now-shot img')?.getAttribute('alt') === '01-signed-in.png'`, 5_000);
+  await pause(1_200);
+  await writeFile(path.join(run.directory, 'status.txt'), 'Opening the lesson page\n');
+  await writeFile(path.join(shots, '02-lesson-page.png'), picture);
+  const secondArrived = await until(win, `document.querySelector('.run-now-shot img')?.getAttribute('alt') === '02-lesson-page.png'`, 5_000);
+  await pause(300);
+  const live = await read(win, `({
+    step: document.querySelector('.run-now-step')?.textContent ?? null,
+    newest: document.querySelector('.run-now-shot img')?.getAttribute('alt') ?? null,
+    taken: document.querySelector('.run-now-caption .run-shot-time')?.textContent ?? null,
+    count: document.querySelector('.run-section-count')?.textContent ?? null,
+    fresh: document.querySelectorAll('.run-shot-item.fresh').length,
+    statusListed: Array.from(document.querySelectorAll('.run-doc-name')).some(e => e.textContent === 'status.txt') })`);
+  await snap('live');
+
+  // D: the viewer's button opens the run's own site — from run.json, not the page.
+  await read(win, `document.querySelector('.run-site-open')?.click()`);
+  await pause(200);
+  const fromViewer = [...opened];
+  // A run whose site isn't http(s) is refused in main, whatever the page asks.
+  const bad = await store.begin({ subject: 'acme/web#42', pull: 'acme/web#42', kind: 'verify', prompt: 'x', environment: 'Odd', site: 'file:///etc/hosts' });
+  const refusedBadScheme = await read(win, `window.baton.runSiteOpen(${JSON.stringify(bad.directory)}).then(() => false, () => true)`);
+  const refusedOutside = await read(win, `window.baton.runSiteOpen('/etc').then(() => false, () => true)`);
+  const refusedWatch = await read(win, `window.baton.runWatch('/etc', true).then(() => false, () => true)`);
+
+  // The agent finishes: Live and Now go, the gallery stays.
+  await read(win, `window.baton.sessionClose(${JSON.stringify(session.id)})`);
+  await until(win, `!document.querySelector('.run-live')`, 10_000);
+  // No settling pause: the viewer must not remount (and empty) as the session goes.
+  const finished = await read(win, `({ live: Boolean(document.querySelector('.run-live')), now: Boolean(document.querySelector('.run-now')),
+    viewerOpen: Boolean(document.querySelector('.run-viewer')),
+    gallery: document.querySelector('.run-viewer-gallery')?.innerText?.slice(0, 200) ?? null,
+    thumbnails: document.querySelectorAll('.run-shot-item').length })`);
+  await read(win, `document.querySelector('.run-viewer .sheet-head .icon-button.boxed')?.click()`);
+
+  // D in the run sheet: Open beside the environment's URL.
+  await until(win, `document.querySelector('.detail-actions .primary')`, 5_000);
+  await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
+  await until(win, `document.querySelector('.env-picker')`, 10_000);
+  await read(win, `Array.from(document.querySelectorAll('.env-picker button')).find(b => b.textContent !== 'None')?.click()`);
+  // The seeded environment has no URL: type one, the way you would.
+  await until(win, `document.querySelector('.run-test-env-site')`, 5_000);
+  const openBeforeUrl = await read(win, `Boolean(document.querySelector('.run-test-env-open'))`);
+  await read(win, `(() => { const f = document.querySelector('.run-test-env-site'); f.focus();
+    document.execCommand('insertText', false, 'https://dev.example.invalid/lesson/7'); })()`);
+  await until(win, `document.querySelector('.run-test-env-open')`, 5_000);
+  const sheetSite = await read(win, `document.querySelector('.run-test-env-site')?.value ?? null`);
+  await read(win, `document.querySelector('.run-test-env-open')?.click()`);
+  await pause(200);
+  await snap('sheet');
+  const fromSheet = opened.slice(fromViewer.length);
+
+  return { stubbed, waiting, firstArrived, secondArrived, live, fromViewer, refusedBadScheme, refusedOutside, refusedWatch, finished, openBeforeUrl, sheetSite, fromSheet };
 }
 
 async function driveItem89(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {

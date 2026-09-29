@@ -359,3 +359,23 @@ export function MicIcon({ size = 16 }: Props) {
     </svg>
   );
 }
+
+/** ▶ — runs a quick command (item 91). */
+export function PlayIcon({ size = 12 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M7 4.8v14.4a1 1 0 0 0 1.5.86l11.6-7.2a1 1 0 0 0 0-1.72L8.5 3.94A1 1 0 0 0 7 4.8z" />
+    </svg>
+  );
+}
+
+/** A bin — deletes a saved quick command, after asking. */
+export function TrashIcon({ size = 14 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M4 7h16" />
+      <path d="M9.5 7V4.8h5V7" />
+      <path d="M6.5 7l.9 12.2a1.5 1.5 0 0 0 1.5 1.3h6.2a1.5 1.5 0 0 0 1.5-1.3L17.5 7" />
+    </svg>
+  );
+}
