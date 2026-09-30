@@ -102,3 +102,32 @@ describe('prices', () => {
     expect(formatUsd(3.836)).toBe('$3.84');
   });
 });
+
+describe('Claude transcripts: resumed conversations and Claude’s own total (item 111)', () => {
+  const line = (id: string, at: string, output: number) => JSON.stringify({
+    type: 'assistant', timestamp: at,
+    message: { id, model: 'claude-opus-5-5', usage: { input_tokens: 1, output_tokens: output, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }
+  });
+  const text = [
+    line('a', '2026-09-29T12:40:00.000Z', 100),
+    JSON.stringify({ type: 'cost-state', totalCostUSD: 5.41 }),
+    line('b', '2026-09-29T13:50:00.000Z', 200),
+    JSON.stringify({ type: 'cost-state', totalCostUSD: 25.8 }),
+    ''
+  ].join('\n');
+
+  it('counts only what happened after the session started', () => {
+    const resumed = new ClaudeTranscript(Date.parse('2026-09-29T13:43:00.000Z'));
+    resumed.feed(text);
+    expect(resumed.models()[0]?.output).toBe(200);
+    const whole = new ClaudeTranscript();
+    whole.feed(text);
+    expect(whole.models()[0]?.output).toBe(300);
+  });
+
+  it("keeps Claude Code's latest conversation total", () => {
+    const t = new ClaudeTranscript();
+    t.feed(text);
+    expect(t.conversationTotal()).toBe(25.8);
+  });
+});

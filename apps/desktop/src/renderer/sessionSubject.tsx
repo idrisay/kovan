@@ -81,7 +81,7 @@ export function sessionLabel(s: SessionInfo): string {
  * header, so all three work the same everywhere a session's name is shown.
  */
 export function SessionName({
-  session, snapshot, onOpenSubject, editing, onEdit, onRename, className
+  session, snapshot, onOpenSubject, editing, onEdit, onRename, className, plainName
 }: {
   session: SessionInfo;
   snapshot: Snapshot;
@@ -90,6 +90,8 @@ export function SessionName({
   onEdit: (editing: boolean) => void;
   onRename: (id: string, title: string) => void;
   className: string;
+  /** No tooltip of its own: the sidebar row shows a hover card instead (item 115). */
+  plainName?: boolean;
 }) {
   const [draft, setDraft] = useState(sessionLabel(session));
   // What the row shows the instant you commit a rename, rather than however
@@ -134,7 +136,7 @@ export function SessionName({
 
   return (
     <>
-      <span className={className} title={session.task ? `${session.task}\nOpened as ${session.title}` : displayTitle}>
+      <span className={className} title={plainName ? undefined : session.task ? `${session.task}\nOpened as ${session.title}` : displayTitle}>
         {prefix}{subject}
       </span>
       {match && (

@@ -80,7 +80,11 @@ export class ActivityFeed {
     }
     const jiraSetUp = Boolean(this.host.config.get('jira.baseUrl', '') && this.host.config.get('jira.email', ''));
     if (snapshot.connected.includes('jira') && jiraSetUp && !failed('jira')) {
-      poll.jira = { tickets: snapshot.tickets };
+      poll.jira = {
+        tickets: snapshot.tickets,
+        ...(snapshot.jiraMentions ? { mentions: snapshot.jiraMentions } : {}),
+        ...(snapshot.jiraAssignedBy ? { assignedBy: snapshot.jiraAssignedBy } : {})
+      };
     }
     return poll;
   }

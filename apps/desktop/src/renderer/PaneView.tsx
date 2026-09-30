@@ -3,6 +3,7 @@ import { Terminal } from './Terminal';
 import { SessionName, sessionLabel, type Selection } from './sessionSubject';
 import { CloseIcon } from './icons';
 import { SessionUsageStrip } from './Usage';
+import { AgentStateBadge, sessionDot } from './sessionCard';
 import type { DropZone, PaneLeaf, PaneSplit, PaneTree } from './paneTree';
 import type { SessionInfo, Snapshot } from './types';
 
@@ -51,10 +52,11 @@ function DropOverlay({ zone }: { zone: DropZone }) {
 }
 
 function PaneTabStrip({
-  leaf, sessions, drag, onFocusTab, onDetachTab
+  leaf, sessions, seen, drag, onFocusTab, onDetachTab
 }: {
   leaf: PaneLeaf;
   sessions: SessionInfo[];
+  seen: (s: SessionInfo) => boolean;
   drag: DragHandlers;
   onFocusTab: (leafId: string, sessionId: string) => void;
   onDetachTab: (sessionId: string) => void;
@@ -72,8 +74,9 @@ function PaneTabStrip({
             className={id === leaf.active ? 'pane-tab active' : 'pane-tab'}
             {...drag.handlers(id, () => onFocusTab(leaf.id, id))}
           >
-            <span className={s.running ? (s.attention ? 'dot running' : 'dot live') : 'dot'} />
+            <span className={sessionDot(s)} />
             <span className="pane-tab-title" title={sessionLabel(s)}>{sessionLabel(s)}</span>
+            <AgentStateBadge session={s} seen={seen(s)} />
             <button
               type="button"
               className="pane-tab-close"
@@ -92,13 +95,14 @@ function PaneTabStrip({
 }
 
 function PaneLeafView({
-  leaf, sessions, snapshot, fontSize, onOpenSubject, onRename,
+  leaf, sessions, snapshot, fontSize, seen, onOpenSubject, onRename,
   drag, onFocusTab, onDetachTab
 }: {
   leaf: PaneLeaf;
   sessions: SessionInfo[];
   snapshot: Snapshot;
   fontSize: number;
+  seen: (s: SessionInfo) => boolean;
   onOpenSubject: (match: Selection) => void;
   onRename: (id: string, title: string) => void;
   drag: DragHandlers;
@@ -112,7 +116,7 @@ function PaneLeafView({
   return (
     <div className="pane-leaf" data-pane-leaf={leaf.id}>
       {leaf.sessions.length > 1 && (
-        <PaneTabStrip leaf={leaf} sessions={sessions} drag={drag} onFocusTab={onFocusTab} onDetachTab={onDetachTab} />
+        <PaneTabStrip leaf={leaf} sessions={sessions} seen={seen} drag={drag} onFocusTab={onFocusTab} onDetachTab={onDetachTab} />
       )}
       {shown ? (
         <>
@@ -124,6 +128,7 @@ function PaneLeafView({
                   editing={renaming} onEdit={setRenaming} onRename={onRename}
                   className="term-title"
                 />
+                <AgentStateBadge session={shown} seen={seen(shown)} />
               </span>
               <span className="term-cwd">{shown.cwd}</span>
             </div>
@@ -201,6 +206,8 @@ function PaneNodeView(props: {
   sessions: SessionInfo[];
   snapshot: Snapshot;
   fontSize: number;
+  /** Whether a session's latest status has been on screen (item 112). */
+  seen: (s: SessionInfo) => boolean;
   onOpenSubject: (match: Selection) => void;
   onRename: (id: string, title: string) => void;
   drag: DragHandlers;
@@ -212,7 +219,7 @@ function PaneNodeView(props: {
   if (node.type === 'leaf') {
     return (
       <PaneLeafView
-        leaf={node} sessions={props.sessions} snapshot={props.snapshot} fontSize={props.fontSize}
+        leaf={node} sessions={props.sessions} snapshot={props.snapshot} fontSize={props.fontSize} seen={props.seen}
         onOpenSubject={props.onOpenSubject} onRename={props.onRename}
         drag={props.drag} onFocusTab={props.onFocusTab} onDetachTab={props.onDetachTab}
       />
@@ -245,6 +252,8 @@ export function PaneView(props: {
   sessions: SessionInfo[];
   snapshot: Snapshot;
   fontSize: number;
+  /** Whether a session's latest status has been on screen (item 112). */
+  seen: (s: SessionInfo) => boolean;
   onOpenSubject: (match: Selection) => void;
   onRename: (id: string, title: string) => void;
   drag: DragHandlers;

@@ -70,6 +70,12 @@ export function findLeafById(tree: PaneTree, leafId: string): PaneLeaf | undefin
   return undefined;
 }
 
+/** The tab showing in each pane: what is on screen. */
+export function shownSessions(tree: PaneTree | undefined): string[] {
+  if (!tree) return [];
+  return tree.type === 'leaf' ? [tree.active] : tree.children.flatMap((c) => shownSessions(c.node));
+}
+
 /** Left-to-right, top-to-bottom — used only to pick somewhere to land a
  *  session that was not dropped anywhere specific (a plain sidebar click). */
 export function firstLeaf(tree: PaneTree): PaneLeaf {

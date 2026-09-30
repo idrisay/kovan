@@ -41,6 +41,9 @@ import {
   sentryTicketFixture, ticketFixture
 } from './smoke';
 import { Sessions } from './sessions';
+import { PtyHosts } from './ptyClient';
+import { AgentStatus } from './agentStatus';
+import { ProblemLog } from './problems';
 import { Agents } from './agents';
 import type { TestEnvironmentSave, TestSelection } from './testEnvironments';
 import { Workspaces } from './workspace';
@@ -127,7 +130,8 @@ function deliverActivity(inbox: ActivityEvent[], fresh: ActivityEvent[], quiet: 
       const n = new Notification({
         title: activityLabel(event.kind),
         subtitle: event.who ? `${event.label} · ${event.who}` : event.label,
-        body: event.title
+        // A mention says what was written (item 119).
+        body: event.excerpt ? `“${event.excerpt}”` : event.title
       });
       n.on('click', () => open(event.subject));
       n.show();
@@ -148,10 +152,18 @@ const fileIndex = new FileIndex();
 const runWatcher = new RunWatcher((message, error) => host.log.warn(message, error));
 // A ticket key in a terminal's title only counts for a project Baton already
 // has tickets from, as for branch names in `nameTerminal` below.
+// Sessions live in a background terminal host so quitting Baton doesn't end
+// them (item 114), and agents report Working / Input / Done (item 112).
+const agentStatus = new AgentStatus(app.getPath('userData'));
+// A service that didn't answer, and the ones before it (item 120).
+const problems = new ProblemLog(app.getPath('userData'));
 const sessions = new Sessions((text) => {
   const key = ticketKeyInTitle(text.toUpperCase());
   const projects = new Set(poller.current().tickets.map((t) => t.key.split('-')[0]));
   return key && projects.has(key.split('-')[0]!) ? key : undefined;
+}, {
+  hosts: new PtyHosts(app.getPath('userData'), (message) => host.log.info(message)),
+  statusDir: agentStatus.dir
 });
 const quickCommands = new QuickCommands(host, sessions);
 const detailHttp = new HttpClient(host.log);
@@ -484,8 +496,23 @@ app.whenReady().then(async () => {
     quit: () => app.quit()
   });
 
+  // Before the first window: what was running when Baton last quit is there
+  // from the start, and so is what its agents said while Baton was away.
+  try {
+    const restored = await sessions.restore();
+    if (restored) host.log.info(`picked up ${restored} session(s) from the terminal host`);
+  } catch (error) {
+    host.log.warn('could not pick up sessions from the terminal host', error);
+  }
+  void agentStatus.watch((id, state) => sessions.setStatus(id, state));
+
   poller.onDidChange((snapshot) => {
     broadcast(snapshot);
+    if (!snapshot.refreshing && snapshot.at > 0) {
+      const polled: ProviderId[] = ['github', 'jira', 'sentry'];
+      const answered = snapshot.connected.filter((id) => polled.includes(id) && !snapshot.errors.some((e) => e.provider === id));
+      void problems.record(snapshot.errors, answered, snapshot.at);
+    }
     if (!snapshot.refreshing) {
       void activity.report(snapshot, firstRefresh);
       void activityFeed.report(snapshot, firstRefresh);
@@ -499,6 +526,10 @@ app.whenReady().then(async () => {
   // --- IPC. Every channel is read-only about secrets: tokens are set through
   // --- here but never sent back out, so the renderer cannot leak one.
   ipcMain.handle('baton:snapshot', () => poller.current());
+  ipcMain.handle('baton:problems', () => problems.list());
+  problems.onDidChange(({ log, started }) => {
+    if (window && !window.isDestroyed()) window.webContents.send('baton:problems', { log, started });
+  });
   ipcMain.handle('baton:refresh', () => poller.refresh(true));
   ipcMain.handle('baton:refresh-provider', (_event, id: PolledProvider) => poller.refreshProvider(id));
   ipcMain.handle('baton:open-external', (_event, url: string) => shell.openExternal(url));
@@ -798,7 +829,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('baton:session-resize', (_event, id: string, cols: number, rows: number) => {
     sessions.resize(id, cols, rows);
   });
-  ipcMain.handle('baton:session-close', (_event, id: string) => sessions.close(id));
+  ipcMain.handle('baton:session-close', (_event, id: string) => {
+    sessions.close(id);
+    agentStatus.forget(id);
+  });
   ipcMain.handle('baton:session-rename', (_event, id: string, title: string) => {
     sessions.rename(id, title);
   });
@@ -840,6 +874,7 @@ app.whenReady().then(async () => {
 
   if (process.env['BATON_SMOKE'] === 'pty') {
     console.log(JSON.stringify(await smokePty(sessions, agents), null, 2));
+    sessions.disposeAll();
     app.exit(0);
     return;
   }
@@ -856,9 +891,13 @@ app.whenReady().then(async () => {
       // error nowhere in the output. A smoke that cannot fail is not a check.
       try {
         console.log(JSON.stringify(await smokeUi(win, poller, mode, activityFeed, sessions), null, 2));
+        // `app.exit` skips will-quit: a smoke run's sessions end here, or the
+        // terminal host keeps them (item 114).
+        sessions.disposeAll();
         app.exit(0);
       } catch (err) {
         console.error('smoke failed:', err instanceof Error ? err.stack ?? err.message : err);
+        sessions.disposeAll();
         app.exit(1);
       }
     });
@@ -902,16 +941,18 @@ app.on('window-all-closed', () => {
   // Intentionally empty.
 });
 
-// Cmd+Q is now one key away in any window, and quitting ends every terminal
-// with it. Ask first when something is still running there.
+// Quitting no longer stops anything (item 114): the sessions live in the
+// terminal host and come back on the next start, so there is nothing to ask.
+// A session that had to run inside Baton (no host could start) is the
+// exception, and only then is it worth a question.
 let quitConfirmed = false;
 app.on('before-quit', (event) => {
-  const live = sessions.list().filter((s) => s.running).length;
+  const live = sessions.list().filter((s) => s.running && !s.hosted).length;
   if (quitConfirmed || live === 0 || process.env['BATON_SMOKE']) return;
   const choice = dialog.showMessageBoxSync({
     type: 'warning',
     message: `Quit Baton and stop ${live === 1 ? 'the running session' : `${live} running sessions`}?`,
-    detail: 'Their terminals close and anything running in them stops.',
+    detail: 'These couldn\'t be moved to the background terminal host, so they stop when Baton quits.',
     buttons: ['Cancel', 'Quit'],
     defaultId: 0,
     cancelId: 0
@@ -929,6 +970,9 @@ app.on('will-quit', () => {
   usage.dispose();
   running.dispose();
   poller.stop();
-  sessions.disposeAll();
+  agentStatus.dispose();
+  // A smoke run leaves nothing behind; a real quit leaves the agents working.
+  if (process.env['BATON_SMOKE']) sessions.disposeAll();
+  else sessions.detachAll();
   tray?.dispose();
 });

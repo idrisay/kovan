@@ -104,7 +104,8 @@
     },
     "electronVersion": "33.4.11",
     "asarUnpack": [
-      "**/node_modules/node-pty/**"
+      "**/node_modules/node-pty/**",
+      "out/main/ptyHost.mjs"
     ],
     "npmRebuild": true,
     "extraResources": [

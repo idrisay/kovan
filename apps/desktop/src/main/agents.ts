@@ -34,6 +34,7 @@ import {
 } from '@baton/core';
 import { isAppFrame, resolveFrame } from '@baton/core/node';
 import { AgentLimitsReader } from './agentLimits';
+import { AgentStatus } from './agentStatus';
 import { RunStore, available, type RunKind, type Runner } from '@baton/agent';
 import { findClones, runTargets, type RunTarget } from '@baton/git';
 import { HttpClient, JiraClient, SentryClient, type RawSentryFrame } from '@baton/providers';
@@ -130,6 +131,7 @@ export class Agents {
 
   /** Plan limits, from what the agents write themselves (item 108). */
   readonly limits = new AgentLimitsReader(app.getPath('userData'));
+  readonly status = new AgentStatus(app.getPath('userData'));
 
   constructor(
     private readonly host: DesktopHost,
@@ -333,16 +335,21 @@ export class Agents {
       ...(request.kind === 'verify' || request.test ? await this.testEnvironments.env(request.test ?? {}) : {})
     };
 
-    // A Claude session records its plan limits for the run sheet (item 108).
+    // A Claude session records its plan limits for the run sheet (item 108),
+    // and every agent that can says Working / Input / Done (item 112).
     const base = withExtraDirs(this.runnerFor(runner, request.kind, request.model), extras.map((f) => f.path));
-    const limitArgs = await this.limits.claudeArgs(base);
+    const status = await this.status.forRunner(base);
+    const limitSettings = await this.limits.claudeSettings(base);
+    const settings = limitSettings || status.claudeSettings ? { ...limitSettings, ...status.claudeSettings } : undefined;
+    const extraArgs = [...(settings ? ['--settings', JSON.stringify(settings)] : []), ...status.args];
     const result = await this.sessions.run({
-      runner: limitArgs.length ? { ...base, leadingArgs: [...base.leadingArgs, ...limitArgs] } : base,
+      runner: extraArgs.length ? { ...base, leadingArgs: [...base.leadingArgs, ...extraArgs] } : base,
       prompt,
       cwd,
       title: `${request.kind} · ${subjectId}`,
       run,
-      env
+      env: { ...env, ...status.env },
+      statusSource: status.source
     });
 
     if ('error' in result) {

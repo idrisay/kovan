@@ -314,6 +314,8 @@ export function TestEnvironmentPicker({
 
   const accounts = state?.accounts.filter((a) => a.environmentId === environmentId) ?? [];
   const accountKey = accounts.map((a) => a.id).join(',');
+  const chosenCount = accounts.filter((a) => !unticked.has(a.id)).length;
+  const [showAccounts, setShowAccounts] = useState(false);
   const savedSite = state?.environments.find((e) => e.id === environmentId)?.site ?? '';
 
   // A fresh environment starts from its saved URL.
@@ -424,6 +426,18 @@ export function TestEnvironmentPicker({
       {environment && (
         accounts.length === 0 ? (
           <p className="settings-note">No accounts on {environment.name}. Add them in Settings → Environments.</p>
+        ) : !showAccounts ? (
+          // Item 117: one line until you want to change it; the full list of
+          // checkboxes took three rows of the run sheet every time.
+          <div className="run-test-accounts-summary">
+            <span className="run-test-accounts-count">
+              {chosenCount === accounts.length ? `All ${accounts.length} accounts` : `${chosenCount} of ${accounts.length} accounts`}
+            </span>
+            <span className="run-test-accounts-names" title={accounts.filter((a) => !unticked.has(a.id)).map(describeAccount).join('\n')}>
+              {accounts.filter((a) => !unticked.has(a.id)).map((a) => a.role || a.label || a.username.split('@')[0]).join(' · ')}
+            </span>
+            <button type="button" className="link" onClick={() => setShowAccounts(true)}>Change</button>
+          </div>
         ) : (
           <div className="run-test-accounts" role="group" aria-label="Accounts">
             {accounts.map((a) => (

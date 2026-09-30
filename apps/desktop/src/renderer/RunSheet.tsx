@@ -35,6 +35,17 @@ function readChoices(): RunChoices {
   }
 }
 
+/** Whether the prompt was last left unfolded (item 117). */
+const PROMPT_OPEN_KEY = 'baton.run-prompt-open';
+
+function remember(key: string, value: boolean): void {
+  try { localStorage.setItem(key, value ? '1' : '0'); } catch { /* a convenience */ }
+}
+
+function recall(key: string): boolean {
+  try { return localStorage.getItem(key) === '1'; } catch { return false; }
+}
+
 function writeChoices(update: (current: RunChoices) => RunChoices): void {
   try {
     localStorage.setItem(CHOICES_KEY, JSON.stringify(update(readChoices())));
@@ -86,6 +97,7 @@ export function RunSheet({
   // only rebuilt for you while you have not touched it.
   const [edited, setEdited] = useState(false);
   const [stale, setStale] = useState(false);
+  const [promptOpen, setPromptOpen] = useState(() => recall(PROMPT_OPEN_KEY));
   const firstBuild = useRef(true);
 
   const subject = { pull, issue, sentry };
@@ -230,7 +242,7 @@ export function RunSheet({
                 </option>
               ))}
             </select>
-            <AgentLimitsNote entry={limits?.[runnerId]} />
+            <AgentLimitsNote entry={limits?.[runnerId]} compact />
           </label>
           <FolderField
             targets={targets} cwd={cwd} extras={extraCwds} runner={runner}
@@ -269,6 +281,15 @@ export function RunSheet({
                 <button type="button" className="link" onClick={() => rebuild(test)}>Rebuild prompt</button>
               </>
             )}
+            {' · '}
+            {/* Item 117: folded to a few lines by default — it's there to check
+                and tweak, and at full height it made the sheet a whole screen. */}
+            <button
+              type="button" className="link"
+              onClick={(e) => { e.preventDefault(); setPromptOpen((v) => { remember(PROMPT_OPEN_KEY, !v); return !v; }); }}
+            >
+              {promptOpen ? 'Fold' : `Show all ${prompt.split('\n').length} lines`}
+            </button>
           </span>
           <span className="prompt-field">
             <textarea
@@ -276,7 +297,8 @@ export function RunSheet({
               value={prompt}
               onChange={(e) => { setPrompt(e.target.value); setEdited(true); }}
               spellCheck={false}
-              rows={18}
+              rows={promptOpen ? 18 : 5}
+              className={promptOpen ? undefined : 'folded'}
             />
             <DictateButton field={() => document.getElementById('run-prompt')} label="Dictate into the prompt" />
           </span>

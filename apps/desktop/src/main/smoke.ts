@@ -27,9 +27,11 @@ import * as path from 'node:path';
 import type { Agents } from './agents';
 import type { ActivityFeed } from './activityFeed';
 import type { Poller, Snapshot } from './poller';
-import type { Sessions } from './sessions';
-import { reviewBasis } from '@baton/core';
-import { RunStore } from '@baton/agent';
+import { Sessions } from './sessions';
+import { PtyHosts } from './ptyClient';
+import { AgentStatus } from './agentStatus';
+import { reviewBasis, trackProblems } from '@baton/core';
+import { RunStore, type Runner } from '@baton/agent';
 
 export type SmokeMode = '1' | 'seeded' | 'live' | 'pty' | 'workspace';
 
@@ -639,6 +641,36 @@ export async function smokeUi(
   // Items 83–85 on their own: a pull request with nothing to report (the one
   // that blanked the window), the repository on every row, and the
   // "unresolved" chip's wording. `BATON_SMOKE_ITEM83=<shot prefix>`.
+  // Item 119: mentions and assignments in Activity.
+  if (process.env['BATON_SMOKE_ITEM119'] && mode === 'seeded') {
+    return { item119: await driveItem119(win, process.env['BATON_SMOKE_ITEM119']) };
+  }
+
+  // Item 120: connection problems in the status bar.
+  if (process.env['BATON_SMOKE_ITEM120'] && mode === 'seeded') {
+    return { item120: await driveItem120(win, process.env['BATON_SMOKE_ITEM120']) };
+  }
+
+  // Item 118: the detail header, per density.
+  if (process.env['BATON_SMOKE_ITEM118'] && mode === 'seeded') {
+    return { item118: await driveItem118(win, process.env['BATON_SMOKE_ITEM118']) };
+  }
+
+  // Items 116, 117: Back / Forward, and the folded run sheet.
+  if (process.env['BATON_SMOKE_ITEM116'] && mode === 'seeded') {
+    return { item116: await driveItem116(win, process.env['BATON_SMOKE_ITEM116']) };
+  }
+
+  // Items 112, 114, 115: status badges, the hover card, the terminal host.
+  if (process.env['BATON_SMOKE_ITEM112'] && mode === 'seeded' && sessions) {
+    return { item112: await driveItem112(win, sessions, process.env['BATON_SMOKE_ITEM112']) };
+  }
+
+  // Item 110, the header's link row: `BATON_SMOKE_ITEM110=<shot prefix>`.
+  if (process.env['BATON_SMOKE_ITEM110'] && mode === 'seeded') {
+    return { item110: await driveItem110(win, process.env['BATON_SMOKE_ITEM110']) };
+  }
+
   // Item 108, plan limits in the run sheet: `BATON_SMOKE_ITEM108=<shot prefix>`.
   if (process.env['BATON_SMOKE_ITEM108'] && mode === 'seeded') {
     return { item108: await driveItem108(win, process.env['BATON_SMOKE_ITEM108']) };
@@ -1415,7 +1447,7 @@ export async function smokeUi(
     const openQuickTerminal = () =>
       read(
         win,
-        `Array.from(document.querySelectorAll('.detail-actions .ghost'))
+        `Array.from(document.querySelectorAll('.detail-related .detail-place'))
           .find(b => b.textContent.includes('Terminal'))?.click()`
       );
 
@@ -3716,10 +3748,275 @@ async function driveItem92(win: BrowserWindow): Promise<Record<string, unknown>>
 }
 
 /**
+ * Item 110 (option A): GitHub and Terminal beside the ticket chip on a pull
+ * request, Jira and Terminal on a ticket; the action bar on one line.
+ */
+async function driveItem110(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(2_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const header = () => read(win, `(() => {
+    const places = Array.from(document.querySelectorAll('.detail-related .detail-place')).map(b => b.textContent.trim());
+    const actions = document.querySelector('.detail-actions');
+    const buttons = Array.from(actions?.querySelectorAll(':scope > button, :scope > * button') ?? []);
+    const tops = new Set(buttons.map(b => Math.round(b.getBoundingClientRect().top)));
+    return { places, actions: buttons.map(b => b.textContent.trim().replace(/\s+/g, ' ')), lines: tops.size };
+  })()`);
+  win.focus();
+  const report: Record<string, unknown> = {};
+  await read(win, `document.querySelector('.rows .row')?.click()`);
+  await until(win, `document.querySelector('.detail-related .detail-place')`, 8_000);
+  await pause(600);
+  report['pull'] = await header();
+  await snap('pull');
+  await read(win, `document.querySelector('.rail-item[aria-label="Tickets"]')?.click()`);
+  await until(win, `document.querySelector('.rows .row')`, 5_000).catch(() => undefined);
+  await read(win, `document.querySelector('.rows .row')?.click()`);
+  await until(win, `document.querySelector('.detail-related .detail-place')`, 8_000).catch(() => undefined);
+  await pause(600);
+  report['ticket'] = await header();
+  await snap('ticket');
+  return report;
+}
+
+/**
  * Item 108: the run sheet's Agent picker, switched between the agents found
  * on this Mac; each one's limits line read back and shot. The numbers are
  * whatever Codex's log and the status-line cache say right now.
  */
+/**
+ * Items 116 and 117. Back / Forward across views and selections; then the
+ * run sheet folded (prompt, accounts, limits) and unfolded.
+ */
+async function driveItem116(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(2_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  const where = () => read(win, `({ view: document.querySelector('.rail-item.active')?.getAttribute('data-view'),
+    selected: document.querySelector('.row.selected .row-title, .row.selected .title')?.textContent?.trim() ?? null,
+    back: !document.querySelector('.history-nav [aria-label="Back"]').disabled,
+    forward: !document.querySelector('.history-nav [aria-label="Forward"]').disabled,
+    backTitle: document.querySelector('.history-nav [aria-label="Back"]').title })`);
+  await until(win, `document.querySelector('.rows .row')`, 10_000);
+  // Pull request 1, then a ticket, then another pull request.
+  await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+  await pause(400);
+  await read(win, `document.querySelector('.rail-item[data-view="tickets"]')?.click()`);
+  await pause(400);
+  await read(win, `document.querySelectorAll('.rows .row')[1]?.click()`);
+  await pause(400);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await pause(400);
+  await read(win, `document.querySelectorAll('.rows .row')[1]?.click()`);
+  await pause(400);
+  report['start'] = await where();
+  await snap('nav');
+  const click = (label: string) => read(win, `document.querySelector('.history-nav [aria-label="${label}"]')?.click()`);
+  const steps: unknown[] = [];
+  for (const label of ['Back', 'Back', 'Back', 'Forward']) {
+    await click(label);
+    await pause(400);
+    steps.push({ after: label, ...(await where() as object) });
+  }
+  report['steps'] = steps;
+  // ⌘] goes forward as well.
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: ']', modifiers: ['meta'] });
+  await pause(400);
+  report['afterCmdBracket'] = await where();
+
+  // Item 117: the run sheet, with accounts to fold.
+  const state = await read(win, `window.baton.testEnvironments()`) as { environments: { id: string; name: string }[]; accounts: unknown[] };
+  const env = state.environments[0]?.id ?? 'local';
+  await read(win, `window.baton.testEnvironmentsSave(${JSON.stringify({
+    environments: state.environments.length ? state.environments : [{ id: 'local', name: 'Local', site: 'https://app.example.test/en' }],
+    defaultEnvironment: env,
+    accounts: [
+      { id: 'a1', environmentId: env, label: 'Admin', role: 'school admin', segment: 'b2b', username: 'admin@example.invalid', notes: '' },
+      { id: 'a2', environmentId: env, label: 'Teacher', role: 'teacher', segment: 'b2b', username: 'teacher@example.invalid', notes: '' },
+      { id: 'a3', environmentId: env, label: 'Student', role: 'student', segment: 'b2b', username: 'student@example.invalid', notes: '' },
+      { id: 'a4', environmentId: env, label: 'Joiner', role: 'student', segment: 'b2c', username: 'joiner@example.invalid', notes: '' },
+      { id: 'a5', environmentId: env, label: 'Parent', role: 'parent', segment: 'b2c', username: 'parent@example.invalid', notes: '' }
+    ],
+    passwords: {}
+  })})`);
+  await read(win, `document.querySelector('.rail-item[data-view="tickets"]')?.click()`);
+  await pause(300);
+  await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('button')).some(b => /in an agent/.test(b.textContent))`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('button')).find(b => /in an agent/.test(b.textContent))?.click()`);
+  await until(win, `document.querySelector('.run-controls select')?.options.length > 0`, 15_000);
+  await read(win, `Array.from(document.querySelectorAll('.env-picker button')).find(b => b.textContent.trim() !== 'None')?.click()`);
+  await pause(1_500);
+  const sheet = () => read(win, `(() => { const s = document.querySelector('.sheet'); const r = s.getBoundingClientRect();
+    return { height: Math.round(r.height), window: innerHeight, accounts: document.querySelector('.run-test-accounts-summary')?.innerText ?? 'list',
+      rows: document.getElementById('run-prompt')?.rows, limits: document.querySelector('.agent-limits')?.innerText ?? null }; })()`);
+  report['folded'] = await sheet();
+  await snap('sheet-folded');
+  await read(win, `document.querySelector('.run-test-accounts-summary .link')?.click()`);
+  await read(win, `Array.from(document.querySelectorAll('.prompt-label .link')).find(b => /Show all/.test(b.textContent))?.click()`);
+  await pause(400);
+  report['unfolded'] = await sheet();
+  await snap('sheet-unfolded');
+  // Leave it folded for the next person.
+  await read(win, `Array.from(document.querySelectorAll('.prompt-label .link')).find(b => /Fold/.test(b.textContent))?.click()`);
+  return report;
+}
+
+/**
+ * Item 118: the detail header — option C (toolbar) on comfortable, option D
+ * (two lines) on compact — for a ticket, a pull request and a Sentry issue;
+ * and on comfortable, that the toolbar stays while the pane scrolls.
+ * `BATON_DENSITY=compact` for the compact run.
+ */
+async function driveItem118(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(2_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.show();
+  win.focus();
+  const density = process.env['BATON_DENSITY'] === 'compact' ? 'compact' : 'comfortable';
+  await read(win, `window.baton.setSetting('appearance.density', '${density}')`);
+  win.webContents.reload();
+  await pause(2_500);
+  // The reload drops the seeded snapshot: send it again.
+  win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+  await until(win, `document.querySelector('.rows .row')`, 15_000);
+  const report: Record<string, unknown> = { density };
+  const head = () => read(win, `(() => {
+    const bar = document.querySelector('.detail-toolbar'); const h = document.querySelector('.detail-head');
+    return { toolbar: bar ? bar.innerText.replace(/\\n+/g, ' | ') : null, head: h ? h.innerText.replace(/\\n+/g, ' | ').slice(0, 300) : null,
+      headHeight: h ? Math.round(h.getBoundingClientRect().height) : null, chips: [...document.querySelectorAll('.detail-related-link')].map((c) => c.textContent) };
+  })()`);
+  for (const [view, name] of [['tickets', 'ticket'], ['pulls', 'pull'], ['sentry', 'sentry']] as const) {
+    await read(win, `document.querySelector('.rail-item[data-view="${view}"]')?.click()`);
+    await pause(400);
+    await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+    await pause(1_200);
+    report[name] = await head();
+    await snap(`${density}-${name}`);
+  }
+  // A pull request's ticket chip opens that ticket (the note on option C).
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await pause(300);
+  await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+  await pause(800);
+  await read(win, `document.querySelector('.detail-related-link')?.click()`);
+  await pause(800);
+  report['chipOpens'] = await read(win, `({ view: document.querySelector('.rail-item.active')?.getAttribute('data-view'), title: document.querySelector('.detail-head h2')?.textContent })`);
+  if (density === 'comfortable') {
+    await read(win, `document.querySelector('.detail-scroll').scrollTop = 600`);
+    await pause(300);
+    report['afterScroll'] = await read(win, `(() => { const bar = document.querySelector('.detail-toolbar').getBoundingClientRect();
+      const pane = document.querySelector('.detail-scroll').getBoundingClientRect();
+      return { scrolled: document.querySelector('.detail-scroll').scrollTop, toolbarTop: Math.round(bar.top - pane.top) }; })()`);
+    await snap('comfortable-scrolled');
+  }
+  return report;
+}
+
+/**
+ * Item 119: a mention and an assignment arriving — the toast, the Activity
+ * rows with who and what was written, and the new switch in Settings.
+ */
+async function driveItem119(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(2_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="activity"]')`, 15_000);
+  const report: Record<string, unknown> = {};
+  const now = Date.now();
+  const mention = {
+    id: 'mentioned:ACME-2393:100', kind: 'mentioned', at: now, subject: 'ACME-2393', label: 'ACME-2393',
+    title: 'Make cut-off tables scroll and reveal check-in row actions on hover', who: 'Giovanni',
+    excerpt: '@Idris can you check the parent view on the iPad before we move it to QA?', url: 'https://example.invalid/browse/ACME-2393', read: false
+  };
+  const assigned = {
+    id: 'new-ticket:ACME-1000:2026-09-30', kind: 'new-ticket', at: now - 60_000, subject: 'ACME-1000', label: 'ACME-1000',
+    title: 'Tidy up the empty-state copy on the dashboard', who: 'Yisong', url: 'https://example.invalid/browse/ACME-1000', read: false
+  };
+  win.webContents.send('baton:activity', [mention, assigned]);
+  win.webContents.send('baton:activity-toast', [mention]);
+  await pause(600);
+  report['toast'] = await read(win, `document.querySelector('.toast')?.innerText ?? null`);
+  await snap('toast');
+  await read(win, `document.querySelector('.rail-item[data-view="activity"]')?.click()`);
+  await pause(800);
+  report['rows'] = await read(win, `[...document.querySelectorAll('.rows .row')].slice(0, 2).map((r) => r.innerText.replace(/\\n+/g, ' | '))`);
+  await snap('activity');
+  report['settingsKinds'] = await read(win, `window.baton.settings().then(() => true)`);
+  return report;
+}
+
+/**
+ * Item 120 (option B): Sentry times out. No strip; a toast, a red chip in the
+ * status bar, and the chip's popover with Now and the earlier problems.
+ */
+async function driveItem120(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(2_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.statusbar [data-provider]')`, 15_000);
+  const report: Record<string, unknown> = {};
+  const timeout = 'Request to https://sentry.io/api/0/organizations/acme/issues/?query=is%3Aunresolved&limit=25&statsPeriod=14d timed out after 15000ms';
+  const now = Date.now();
+  const day = 86_400_000;
+  let log = trackProblems([], [{ provider: 'github', message: 'HTTP 401 Bad credentials' }], [], now - 2 * day).log;
+  log = trackProblems(log, [], ['github'], now - 2 * day + 20 * 60_000).log;
+  log = trackProblems(log, [{ provider: 'jira', message: 'HTTP 429 Too Many Requests' }], [], now - day).log;
+  log = trackProblems(log, [], ['jira'], now - day + 60_000).log;
+  log = trackProblems(log, [{ provider: 'sentry', message: timeout }], [], now - 11 * 60_000).log;
+  const last = trackProblems(log, [{ provider: 'sentry', message: timeout }], [], now);
+  win.webContents.send('baton:snapshot', { ...fixtureSnapshot(10), connected: ['github', 'jira', 'sentry'], errors: [{ provider: 'sentry', message: timeout }] });
+  win.webContents.send('baton:problems', { log: last.log, started: [last.log[0]] });
+  await pause(600);
+  report['strip'] = await read(win, `Boolean(document.querySelector('.errors'))`);
+  report['chip'] = await read(win, `[...document.querySelectorAll('.statusbar [data-provider]')].map((b) => b.textContent + (b.classList.contains('problem') ? ' (red)' : ''))`);
+  report['toast'] = await read(win, `document.querySelector('.problem-toast')?.innerText ?? null`);
+  await snap('toast');
+  await read(win, `document.querySelector('.statusbar [data-provider="sentry"]').click()`);
+  await pause(400);
+  report['popover'] = await read(win, `(() => { const p = document.querySelector('.problems-pop'); if (!p) return null; const r = p.getBoundingClientRect();
+    return { text: p.innerText, onScreen: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight }; })()`);
+  await snap('popover');
+  await snap('popover-2');
+  await read(win, `document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); document.body.click()`);
+  await pause(300);
+  report['closesOnOutsideClick'] = await read(win, `!document.querySelector('.problems-pop')`);
+  return report;
+}
+
 async function driveItem108(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const snap = async (name: string) => {
@@ -3792,6 +4089,108 @@ async function driveItem101(win: BrowserWindow, prefix: string): Promise<Record<
  * next to the button and on screen — at the default sidebar size and at a
  * larger one — and "Stop and close" must close the session.
  */
+/**
+ * Items 112, 114 and 115 together. Three sessions whose shells write their
+ * status the way an agent's hook does (one through the real hook script),
+ * the badges they get, the hover card on a ticket's session, and then a
+ * second client picking the same sessions up from the terminal host — what a
+ * restarted Baton does.
+ */
+async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(2_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  // The seeded fixture's own ticket and pull request.
+  const snapshot = { ticket: 'ACME-2393', pull: 'acme/web#42' };
+  report['subjects'] = snapshot;
+  const userData = app.getPath('userData');
+  const status = new AgentStatus(userData);
+  const claude = await status.forRunner({ id: 'claude', name: 'Claude Code', command: 'claude', leadingArgs: [], acceptsPrompt: true, promptFile: false } as unknown as Runner);
+  report['claudeHooks'] = Object.keys((claude.claudeSettings?.['hooks'] ?? {}) as object);
+  const hook = path.join(userData, 'bin', 'baton-agent-status.sh');
+
+  const done = await sessions.open({
+    cwd: userData, title: `implement · ${snapshot.ticket ?? 'ACME-1'}`, subject: snapshot.ticket, kind: 'implement', runnerName: 'Claude Code',
+    statusSource: 'claude', line: `sleep 1; echo '{}' | '${hook}' done claude; sleep 300`
+  });
+  const input = await sessions.open({
+    cwd: userData, title: `review · ${snapshot.pull ?? 'a/b#1'}`, subject: snapshot.pull, kind: 'review', runnerName: 'Codex',
+    statusSource: 'claude', line: `sleep 1; echo '{"notification_type":"permission_prompt"}' | '${hook}' input claude; sleep 300`
+  });
+  await sessions.open({
+    cwd: userData, title: 'implement · ACME-2', subject: 'ACME-2', kind: 'implement', runnerName: 'OpenCode',
+    statusSource: 'opencode', line: 'sleep 300'
+  });
+  // An idle "waiting for your input" after a turn must not turn Done into Input.
+  await pause(2_500);
+  await sessions.open({ cwd: userData, title: 'plain terminal', runnerName: 'Shell', line: `echo '{"notification_type":"idle_prompt"}' | BATON_SESSION_ID=${done.id} '${hook}' input claude` });
+  await read(win, `document.querySelector('.rail-item[aria-label="Sessions"]')?.click()`);
+  await until(win, `document.querySelectorAll('.row.one-line').length >= 4`, 8_000);
+  await pause(3_000);
+  report['states'] = sessions.list().map((s) => ({ title: s.title, status: s.status, hosted: s.hosted }));
+  report['badges'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-state')?.textContent ?? '—'))`);
+  await snap('badges');
+
+  // Hover the ticket's session for the card.
+  const box = await read(win, `(() => { const row = [...document.querySelectorAll('.row.one-line')].find((r) => r.textContent.includes(${JSON.stringify(snapshot.ticket ?? 'ACME-1')}));
+    const r = row.getBoundingClientRect(); return { x: Math.round(r.left + 60), y: Math.round(r.top + r.height / 2) }; })()`) as { x: number; y: number };
+  win.webContents.focus();
+  win.webContents.sendInputEvent({ type: 'mouseMove', x: box.x + 300, y: box.y + 300 });
+  await pause(100);
+  win.webContents.sendInputEvent({ type: 'mouseMove', x: box.x, y: box.y });
+  await pause(50);
+  win.webContents.sendInputEvent({ type: 'mouseMove', x: box.x + 4, y: box.y });
+  await until(win, `Boolean(document.querySelector('.hover-card'))`, 4_000);
+  report['card'] = await read(win, `(() => { const c = document.querySelector('.hover-card'); if (!c) return null; const r = c.getBoundingClientRect();
+    return { text: c.innerText, box: { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) },
+      onScreen: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight }; })()`);
+  await snap('card');
+  // The pull request's session too.
+  const box2 = await read(win, `(() => { const row = [...document.querySelectorAll('.row.one-line')].find((r) => r.textContent.includes('review'));
+    const r = row.getBoundingClientRect(); return { x: Math.round(r.left + 60), y: Math.round(r.top + r.height / 2) }; })()`) as { x: number; y: number };
+  win.webContents.sendInputEvent({ type: 'mouseMove', x: box2.x, y: box2.y });
+  await pause(50);
+  win.webContents.sendInputEvent({ type: 'mouseMove', x: box2.x + 4, y: box2.y });
+  await pause(1_200);
+  report['pullCard'] = await read(win, `document.querySelector('.hover-card')?.innerText ?? null`);
+  await snap('pull-card');
+  win.webContents.sendInputEvent({ type: 'mouseMove', x: box.x + 900, y: box.y + 300 });
+
+  // Opening the Done session clears its badge.
+  await read(win, `[...document.querySelectorAll('.row.one-line')].find((r) => r.textContent.includes(${JSON.stringify(snapshot.ticket ?? 'ACME-1')}))?.click()`);
+  await pause(1_500);
+  report['afterOpen'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-state')?.textContent ?? '—'))`);
+  await snap('after-open');
+
+  // Finishing while another session is on screen: Done stays until it's looked at.
+  // Rows select on pointer events, so a real click.
+  win.webContents.sendInputEvent({ type: 'mouseDown', x: box2.x, y: box2.y, button: 'left', clickCount: 1 });
+  win.webContents.sendInputEvent({ type: 'mouseUp', x: box2.x, y: box2.y, button: 'left', clickCount: 1 });
+  await pause(800);
+  sessions.setStatus(done.id, 'working');
+  await pause(300);
+  sessions.setStatus(done.id, 'done');
+  await pause(1_000);
+  report['doneUnseen'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-state')?.textContent ?? '—'))`);
+  await snap('done-unseen');
+
+  // Item 114: what a restarted Baton gets back from the terminal host.
+  const again = new Sessions(undefined, { hosts: new PtyHosts(userData) });
+  report['restored'] = await again.restore();
+  report['restoredSessions'] = again.list().map((s) => ({ title: s.title, running: s.running, hosted: s.hosted, status: s.status, subject: s.subject }));
+  report['restoredBuffer'] = again.buffer(input.id).length;
+  again.detachAll();
+  return report;
+}
+
 async function driveItem104(win: BrowserWindow, sessions: Sessions, prefix: string): Promise<Record<string, unknown>> {
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const snap = async (name: string) => {

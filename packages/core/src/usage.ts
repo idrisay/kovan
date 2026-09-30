@@ -158,6 +158,25 @@ export function formatUsd(usd: number): string {
 export class ClaudeTranscript {
   private readonly messages = new Map<string, ModelUsage>();
   private rest = '';
+  /** Claude Code's own running total for the whole conversation (item 111). */
+  private conversationUsd?: number;
+
+  /**
+   * @param since Epoch ms: responses before it are not this session's (item
+   *   111). A conversation resumed in a new terminal (`claude --resume` or
+   *   `--continue`) keeps writing to the same transcript, and reading it from
+   *   the top counted the earlier terminal's spend a second time.
+   */
+  constructor(private readonly since = 0) {}
+
+  /**
+   * Claude Code's `cost-state` total: everything the conversation has cost
+   * since it first started — earlier terminals it was resumed from,
+   * subagents, the small helper calls — i.e. what its status line shows.
+   */
+  conversationTotal(): number | undefined {
+    return this.conversationUsd;
+  }
 
   feed(chunk: string): void {
     const text = this.rest + chunk;
@@ -167,9 +186,17 @@ export class ClaudeTranscript {
   }
 
   private line(line: string): void {
+    if (line.includes('"cost-state"')) {
+      try {
+        const state = JSON.parse(line) as { type?: string; totalCostUSD?: unknown };
+        if (state.type === 'cost-state' && typeof state.totalCostUSD === 'number') this.conversationUsd = state.totalCostUSD;
+      } catch { /* not ours */ }
+      return;
+    }
     if (!line.includes('"usage"')) return;
     let entry: {
       type?: string;
+      timestamp?: string;
       requestId?: string;
       message?: {
         id?: string;
@@ -191,6 +218,7 @@ export class ClaudeTranscript {
     const message = entry.message;
     const usage = message?.usage;
     if (entry.type !== 'assistant' || !usage || !message?.model || message.model === '<synthetic>') return;
+    if (this.since && entry.timestamp && Date.parse(entry.timestamp) < this.since) return;
     const key = message.id ?? entry.requestId ?? `line-${this.messages.size}`;
     const written = usage.cache_creation_input_tokens ?? 0;
     const hour = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
@@ -296,6 +324,13 @@ export interface UsageRecord {
   startedAt: number;
   updatedAt: number;
   models: ModelUsage[];
+  /**
+   * Claude Code's own total for the whole conversation, when it has written
+   * one (item 111). More than this session's cost when the conversation was
+   * resumed here from an earlier terminal — it is what Claude's status line
+   * shows.
+   */
+  conversationUsd?: number;
 }
 
 export function recordCounts(record: UsageRecord): TokenCounts {

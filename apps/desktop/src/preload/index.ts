@@ -164,6 +164,14 @@ const api = {
     return () => ipcRenderer.removeListener('baton:activity-open', handler);
   },
 
+  // Connection problems (item 120)
+  problems: () => ipcRenderer.invoke('baton:problems'),
+  onProblems: (listener: (update: unknown) => void) => {
+    const handler = (_event: unknown, update: unknown) => listener(update);
+    ipcRenderer.on('baton:problems', handler);
+    return () => ipcRenderer.removeListener('baton:problems', handler);
+  },
+
   // Log (item 83)
   logError: (report: unknown) => ipcRenderer.invoke('baton:error-log', report),
   revealLog: () => ipcRenderer.invoke('baton:log-reveal'),

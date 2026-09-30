@@ -49,6 +49,8 @@ interface Reader {
 
 interface Tracked {
   readers: Map<string, Reader>;
+  /** When the Baton session started: earlier transcript lines aren't its own. */
+  since?: number;
   /** Stops one last read being repeated forever for a closed session. */
   finished: boolean;
 }
@@ -155,7 +157,7 @@ export class Usage {
       for (const config of configs) {
         const transcript = await claudeTranscript(config, child.pid);
         if (transcript && !tracked.readers.has(transcript)) {
-          tracked.readers.set(transcript, { file: transcript, parser: new ClaudeTranscript(), offset: 0 });
+          tracked.readers.set(transcript, { file: transcript, parser: new ClaudeTranscript(sessionSince(info.startedAt)), offset: 0 });
           this.host.log.info(`usage: session ${info.id} → ${transcript}`);
         }
       }
@@ -173,13 +175,26 @@ export class Usage {
   /** Reads whatever each log gained since last time; true when the totals moved. */
   private async read(info: SessionInfo, tracked: Tracked): Promise<boolean> {
     if (tracked.readers.size === 0) return false;
+    // A Claude conversation's subagents write their own transcripts, in a
+    // folder beside the conversation's (item 111). They are part of what the
+    // session cost, and appear whenever the agent starts one.
+    for (const reader of [...tracked.readers.values()]) {
+      if (!(reader.parser instanceof ClaudeTranscript) || reader.file.includes(`${path.sep}subagents${path.sep}`)) continue;
+      const folder = path.join(reader.file.replace(/\.jsonl$/, ''), 'subagents');
+      for (const name of await readdir(folder).catch(() => [] as string[])) {
+        const file = path.join(folder, name);
+        if (!name.endsWith('.jsonl') || tracked.readers.has(file)) continue;
+        tracked.readers.set(file, { file, parser: new ClaudeTranscript(sessionSince(info.startedAt)), offset: 0 });
+        this.host.log.info(`usage: session ${info.id} → subagent ${file}`);
+      }
+    }
     let grew = false;
     for (const reader of tracked.readers.values()) {
       const size = await stat(reader.file).then((s) => s.size).catch(() => -1);
       if (size < 0 || size === reader.offset) continue;
       if (size < reader.offset) {
         // Rewritten from scratch; start over rather than read garbage.
-        reader.parser = reader.parser instanceof CodexLog ? new CodexLog() : new ClaudeTranscript();
+        reader.parser = reader.parser instanceof CodexLog ? new CodexLog() : new ClaudeTranscript(sessionSince(info.startedAt));
         reader.offset = 0;
       }
       const handle = await open(reader.file, 'r');
@@ -208,10 +223,28 @@ export class Usage {
       source: [...tracked.readers.values()].some((r) => r.parser instanceof CodexLog) ? 'codex' : 'claude',
       startedAt: previous?.startedAt ?? info.startedAt,
       updatedAt: Date.now(),
-      models
+      models,
+      ...(conversationUsd(tracked) !== undefined ? { conversationUsd: conversationUsd(tracked)! } : {})
     });
     return true;
   }
+}
+
+/** A little before the session started: its first response can't be earlier,
+ *  but the clocks of two processes needn't agree to the millisecond. */
+function sessionSince(startedAt: number): number {
+  return startedAt - 5_000;
+}
+
+/** Claude Code's own total for the conversation, from its main transcript. */
+function conversationUsd(tracked: Tracked): number | undefined {
+  let best: number | undefined;
+  for (const reader of tracked.readers.values()) {
+    if (!(reader.parser instanceof ClaudeTranscript) || reader.file.includes(`${path.sep}subagents${path.sep}`)) continue;
+    const total = reader.parser.conversationTotal();
+    if (total !== undefined) best = Math.max(best ?? 0, total);
+  }
+  return best;
 }
 
 // --- Finding the logs ---------------------------------------------------------------

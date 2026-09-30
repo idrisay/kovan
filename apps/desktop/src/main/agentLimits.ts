@@ -70,13 +70,13 @@ export class AgentLimitsReader {
   }
 
   /**
-   * The extra arguments a Claude-family session is started with: a
-   * `--settings` that points its status line at the recorder, keeping the
-   * rest of your status-line settings (padding, refresh interval) as they are.
-   * Empty for any other agent, or if the recorder can't be written.
+   * What a Claude-family session's `--settings` gets: its status line pointed
+   * at the recorder, keeping the rest of your status-line settings (padding,
+   * refresh interval) as they are. Nothing for any other agent, or if the
+   * recorder can't be written.
    */
-  async claudeArgs(runner: Runner): Promise<string[]> {
-    if (modelFamily(runner.command) !== 'claude') return [];
+  async claudeSettings(runner: Runner): Promise<Record<string, unknown> | undefined> {
+    if (modelFamily(runner.command) !== 'claude') return undefined;
     try {
       await mkdir(path.join(this.userData, 'bin'), { recursive: true });
       await mkdir(this.dir, { recursive: true });
@@ -90,9 +90,9 @@ export class AgentLimitsReader {
         type: 'command',
         command: `${shellQuote(script)} ${shellQuote(this.recordFile(runner.id))} ${shellQuote(next)}`
       };
-      return ['--settings', JSON.stringify({ statusLine })];
+      return { statusLine };
     } catch {
-      return [];
+      return undefined;
     }
   }
 

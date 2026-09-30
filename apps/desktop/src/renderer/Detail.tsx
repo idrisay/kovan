@@ -11,14 +11,15 @@ import { Prose } from './Prose';
 import { CardTitle, CopyResult, QuickButton, QuickCard, ReviewDecision, VerdictBadge, useQuick } from './Quick';
 import { KIND_LABEL } from './RunSheet';
 import { useFold } from './folds';
+import { useAppearance } from './appearance';
 import { SubjectUsage } from './Usage';
 import { RunViewer } from './RunViewer';
 import { Terminal } from './Terminal';
 import { useTerminalFontSize } from './terminalFontSize';
 import { findRelatedPulls, findSubject, type Selection } from './sessionSubject';
 import {
-  ChevronIcon, CloseIcon, DockBottomIcon, DockLeftIcon, DockRightIcon, DockTopIcon, HideIcon, OpenLinkIcon,
-  TerminalIcon
+  ChevronIcon, CloseIcon, DockBottomIcon, DockLeftIcon, DockRightIcon, DockTopIcon, GitHubIcon, HideIcon, JiraIcon,
+  OpenLinkIcon, SentryIcon, TerminalIcon
 } from './icons';
 import type {
   AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, ReviewThread, Reviewer, RunKind, SentryFrame,
@@ -66,20 +67,114 @@ function StatusPill({ tone, label, title }: { tone: string; label: string; title
   );
 }
 
-/** The pull request(s) or ticket this one names in its own title, the other
- *  half of the link `SessionName`'s open-link icon already follows from a
- *  session back to whatever it was started on. */
-function RelatedLinks({ links }: { links: { label: string; onClick: () => void }[] }) {
-  if (links.length === 0) return null;
+/** Everything the top of a pull request, ticket or Sentry issue shows (item 118). */
+interface HeadParts {
+  /** Where it lives: "Jira › ACME-2453", "acme/billing › #205". */
+  crumb: { where: string; id: string };
+  /** The short id compact density leads with: "ACME-2453", "billing #205". */
+  key: string;
+  status?: { tone: string; label: string; title?: string };
+  title: string;
+  /** The details line, one span each. */
+  meta: React.ReactNode;
+  /** Related tickets or pull requests: chips that open them in Baton. */
+  links: { label: string; onClick: () => void }[];
+  service: { label: string; icon: JSX.Element; url: string };
+  onTerminal: () => void;
+  actions: React.ReactNode;
+  /** Under the details: more states, the ticket's pull requests. */
+  below?: React.ReactNode;
+}
+
+function PlaceIcons({ service, onTerminal }: Pick<HeadParts, 'service' | 'onTerminal'>) {
   return (
-    <div className="detail-related">
+    <>
+      <button
+        type="button" className="icon-button detail-place-icon" aria-label={`Open on ${service.label}`}
+        title={`Open on ${service.label}`} onClick={() => void window.baton.openExternal(service.url)}
+      >
+        {service.icon}
+      </button>
+      <button type="button" className="icon-button detail-place-icon" aria-label="Open a terminal for this" title="Open a terminal for this" onClick={onTerminal}>
+        <TerminalIcon size={13} />
+      </button>
+    </>
+  );
+}
+
+function LinkChips({ links }: Pick<HeadParts, 'links'>) {
+  return (
+    <>
       {links.map((link, i) => (
-        <button key={i} type="button" className="detail-related-link" onClick={link.onClick}>
+        <button key={i} type="button" className="detail-related-link" title={`Open ${link.label}`} onClick={link.onClick}>
           <OpenLinkIcon size={11} />
           {link.label}
         </button>
       ))}
+    </>
+  );
+}
+
+/**
+ * Comfortable density (item 118, option C): a thin toolbar across the top of
+ * the pane — where this lives, the way out (the service, a terminal) and its
+ * related chips on the left, what Baton does on the right. Sticky, so the
+ * agent button is one click away however far down the description you are.
+ */
+function DetailToolbar(parts: HeadParts) {
+  return (
+    <div className="detail-toolbar">
+      <span className="detail-crumb" title={`${parts.crumb.where} › ${parts.crumb.id}`}>
+        <span className="detail-crumb-where">{parts.crumb.where}</span>
+        <span aria-hidden="true">›</span>
+        <strong>{parts.crumb.id}</strong>
+      </span>
+      <PlaceIcons service={parts.service} onTerminal={parts.onTerminal} />
+      <LinkChips links={parts.links} />
+      {/* The actions as one group: when the pane is too narrow for them they
+          move, whole, to a right-aligned second row. */}
+      <div className="detail-toolbar-end">
+        <div className="detail-toolbar-actions">{parts.actions}</div>
+      </div>
     </div>
+  );
+}
+
+/**
+ * The header under the toolbar (comfortable): the title, then its state and
+ * details on one quiet line. On compact density (option D) it is two lines on
+ * its own, with no toolbar: a state dot, the id, the title and the actions,
+ * then the details and the related chips.
+ */
+function DetailHead({ parts, compact }: { parts: HeadParts; compact: boolean }) {
+  if (compact) {
+    return (
+      <header className="detail-head compact">
+        <div className="detail-head-line">
+          {parts.status && <span className={`dot ${parts.status.tone}`} title={parts.status.title ?? parts.status.label} />}
+          <span className="detail-pill-repo">{parts.key}</span>
+          <h2 title={parts.title}>{parts.title}</h2>
+          <PlaceIcons service={parts.service} onTerminal={parts.onTerminal} />
+          <div className="detail-toolbar-actions">{parts.actions}</div>
+        </div>
+        <div className="detail-meta">
+          <LinkChips links={parts.links} />
+          {parts.status && <span>{parts.status.label}</span>}
+          {parts.meta}
+        </div>
+        {parts.below}
+      </header>
+    );
+  }
+  return (
+    <header className="detail-head">
+      <h2>{parts.title}</h2>
+      <div className="detail-meta">
+        {parts.status && <StatusPill tone={parts.status.tone} label={parts.status.label} title={parts.status.title} />}
+        {parts.meta}
+      </div>
+      {parts.below}
+    </header>
   );
 }
 
@@ -860,9 +955,17 @@ export function PullPane({
   // not filed separately under the pull request that happened to open it.
   const ticketKey = ticketKeyInTitle(pull.title);
   const subject = ticketKey || `${pull.repo}#${pull.number}`;
-  // The ticket this PR names, if it is one currently on screen — the other
-  // direction of the link a ticket's own "related PRs" row follows.
-  const relatedTicket = ticketKey ? findSubject(ticketKey, snapshot)?.issue : undefined;
+  // The header's ticket chip (item 118): the key in the title, else in the
+  // branch (`fix/ACME-2393-…`). It opens the ticket in Baton when it's
+  // loaded, and in Jira otherwise — the link is worth more than its absence.
+  const chipKey = ticketKey || ticketKeyInTitle((pull.headRef ?? detail?.headRef ?? '').toUpperCase());
+  const chipTicket = chipKey ? findSubject(chipKey, snapshot)?.issue : undefined;
+  const jiraBase = snapshot.tickets[0]?.url.replace(/[A-Z][A-Z0-9]+-\d+$/, '');
+  const ticketChip = chipTicket
+    ? { label: chipTicket.key, onClick: () => onOpenSubject({ issue: chipTicket }) }
+    : chipKey && jiraBase
+      ? { label: chipKey, onClick: () => void window.baton.openExternal(`${jiraBase}${chipKey}`) }
+      : undefined;
 
   // Only the session App.tsx currently has in mind, and only when it is
   // actually this pull's own — otherwise a run started elsewhere would
@@ -897,58 +1000,59 @@ export function PullPane({
     error || !detail || detail.body || unresolved.length > 0 || detail.comments.length > 0 || showSummary
   );
 
+  // The header's parts, drawn as a toolbar + title (comfortable) or two
+  // lines (compact) — item 118.
+  const compact = useAppearance().density === 'compact';
+  const head: HeadParts = {
+    crumb: { where: pull.repo, id: `#${pull.number}` },
+    key: `${repoName(pull.repo)} #${pull.number}`,
+    status: { tone: TONE[headline.id], label: headline.label, title: headline.hint },
+    title: pull.title,
+    meta: (
+      <>
+        <span>{pull.author}</span>
+        <span>{isMerged(pull) ? `merged ${formatAge(pull.mergedAt!)}` : formatAge(pull.updatedAt)}</span>
+        {detail && (
+          <span>
+            wants to merge into <code>{detail.baseRef}</code> from <code>{detail.headRef}</code>
+          </span>
+        )}
+      </>
+    ),
+    links: ticketChip ? [ticketChip] : [],
+    service: { label: 'GitHub', icon: <GitHubIcon size={13} />, url: pull.url },
+    onTerminal: openQuickTerminal,
+    // Agent runs first, then the quick model reads.
+    actions: (
+      <>
+        <RunButtons kinds={kinds} onRun={(kind) => onRun(kind, pull)} />
+        <span className="action-divider" />
+        <QuickButton kind="pull-summary" label="Summarize" runningLabel="Summarizing" state={summary.state} onRun={summary.run} />
+        <QuickButton
+          kind="pull-review"
+          label="Review"
+          runningLabel="Reviewing"
+          state={review.state}
+          onRun={review.run}
+          tooltip="Sends the diff to the model on the button's tag (NVIDIA through nv-review, or any opencode model). It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Can take several minutes."
+        />
+      </>
+    ),
+    // The pill already says the headline state; this lists the rest, and
+    // goes when there is no rest ("Approved" twice).
+    below: pullFlags(pull).some((flag) => flag.id !== headline.id) ? (
+      <div className="detail-states">
+        <States pull={pull} max={6} skip={headline.id} />
+      </div>
+    ) : undefined
+  };
+
   return (
     <div className="detail-shell">
     <div className="detail-scroll">
+    {!compact && <DetailToolbar {...head} />}
     <div className="detail reading">
-      <header className="detail-head">
-        <div className="detail-pill-row">
-          <StatusPill tone={TONE[headline.id]} label={headline.label} title={headline.hint} />
-          <span className="detail-pill-repo">{pull.repo} #{pull.number}</span>
-        </div>
-        <h2>{pull.title}</h2>
-        <div className="detail-meta">
-          <span>{pull.author}</span>
-          <span>{isMerged(pull) ? `merged ${formatAge(pull.mergedAt!)}` : formatAge(pull.updatedAt)}</span>
-          {detail && (
-            <span>
-              wants to merge into <code>{detail.baseRef}</code> from <code>{detail.headRef}</code>
-            </span>
-          )}
-        </div>
-        <RelatedLinks
-          links={relatedTicket ? [{ label: relatedTicket.key, onClick: () => onOpenSubject({ issue: relatedTicket }) }] : []}
-        />
-        {/* The pill above already says the headline state; this line lists
-            the rest, and goes when there is no rest ("Approved" twice). */}
-        {pullFlags(pull).some((flag) => flag.id !== headline.id) && (
-          <div className="detail-states">
-            <States pull={pull} max={6} skip={headline.id} />
-          </div>
-        )}
-        {/* One row of actions, the agent runs first: they are the reason this
-            app exists, and 'Open on GitHub' is the escape hatch. */}
-        <div className="detail-actions">
-          <RunButtons kinds={kinds} onRun={(kind) => onRun(kind, pull)} />
-          <span className="action-divider" />
-          <QuickButton kind="pull-summary" label="Summarize" runningLabel="Summarizing" state={summary.state} onRun={summary.run} />
-          <QuickButton
-            kind="pull-review"
-            label="Review"
-            runningLabel="Reviewing"
-            state={review.state}
-            onRun={review.run}
-            tooltip="Sends the diff to the model on the button's tag (NVIDIA through nv-review, or any opencode model). It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Can take several minutes."
-          />
-          <span className="action-divider" />
-          <button className="ghost" onClick={openQuickTerminal}>
-            <TerminalIcon size={13} /> Terminal
-          </button>
-          <button className="ghost" onClick={() => void window.baton.openExternal(pull.url)}>
-            Open on GitHub
-          </button>
-        </div>
-      </header>
+      <DetailHead parts={head} compact={compact} />
 
       {/*
         Two columns once the pane is wide enough: what you read on the left at
@@ -1163,47 +1267,49 @@ export function TicketPane({
   // link a pull request's own header follows back to its ticket.
   const relatedPulls = findRelatedPulls(issue.key, snapshot);
 
+  const compact = useAppearance().density === 'compact';
+  const head: HeadParts = {
+    crumb: { where: 'Jira', id: issue.key },
+    key: issue.key,
+    status: { tone: issue.statusCategory === 'done' ? 'pass' : 'waiting', label: issue.status },
+    title: issue.summary,
+    meta: (
+      <>
+        <span>{issue.issueType}</span>
+        {issue.priority && <span>{issue.priority}</span>}
+        {issue.assignee && <span>{issue.assignee}</span>}
+        <span>{formatAge(issue.updated)}</span>
+      </>
+    ),
+    links: [],
+    service: { label: 'Jira', icon: <JiraIcon size={13} />, url: issue.url },
+    onTerminal: openQuickTerminal,
+    actions: (
+      <>
+        <RunButtons kinds={['implement']} onRun={(kind) => onRun(kind, issue)} />
+        {older > 0 && (
+          <>
+            <span className="action-divider" />
+            <QuickButton
+              kind="ticket-condense"
+              label={`Condense ${older} earlier comment${older === 1 ? '' : 's'}`}
+              runningLabel="Condensing"
+              state={condense.state}
+              onRun={condense.run}
+            />
+          </>
+        )}
+      </>
+    ),
+    below: <TicketPulls pulls={relatedPulls} onOpen={(pull) => onOpenSubject({ pull })} />
+  };
+
   return (
     <div className="detail-shell">
     <div className="detail-scroll">
+    {!compact && <DetailToolbar {...head} />}
     <div className="detail reading">
-      <header className="detail-head">
-        <div className="detail-pill-row">
-          <StatusPill tone={issue.statusCategory === 'done' ? 'pass' : 'waiting'} label={issue.status} />
-          <span className="detail-pill-repo">{issue.key}</span>
-        </div>
-        <h2>
-          {issue.summary}
-        </h2>
-        <div className="detail-meta">
-          <span>{issue.issueType}</span>
-          {issue.priority && <span>{issue.priority}</span>}
-          <span>{formatAge(issue.updated)}</span>
-        </div>
-        <TicketPulls pulls={relatedPulls} onOpen={(pull) => onOpenSubject({ pull })} />
-        <div className="detail-actions">
-          <RunButtons kinds={['implement']} onRun={(kind) => onRun(kind, issue)} />
-          {older > 0 && (
-            <>
-              <span className="action-divider" />
-              <QuickButton
-                kind="ticket-condense"
-                label={`Condense ${older} earlier comment${older === 1 ? '' : 's'}`}
-                runningLabel="Condensing"
-                state={condense.state}
-                onRun={condense.run}
-              />
-              <span className="action-divider" />
-            </>
-          )}
-          <button className="ghost" onClick={openQuickTerminal}>
-            <TerminalIcon size={13} /> Terminal
-          </button>
-          <button className="ghost" onClick={() => void window.baton.openExternal(issue.url)}>
-            Open in Jira
-          </button>
-        </div>
-      </header>
+      <DetailHead parts={head} compact={compact} />
 
       <div className="detail-body">
         <div className="detail-main">
@@ -1353,43 +1459,37 @@ export function SentryPane({
 
   const openQuickTerminal = useQuickTerminal(undefined, issue.shortId, onOpenSession);
 
-  return (
-    <div className="detail-shell">
-    <div className="detail-scroll">
-    <div className="detail reading">
-      <header className="detail-head">
-        <h2>{issue.title}</h2>
-        <div className="detail-meta">
-          <span className="key">{issue.shortId}</span>
-          <span>{issue.project}</span>
-          <span>{formatAge(issue.lastSeen)}</span>
-        </div>
-        <div className="detail-states">
-          <span className="state">
-            <span className={`dot ${levelTone(issue.level)}`} />
-            {issue.level} · {issue.count} events · {issue.userCount} users affected
-          </span>
-        </div>
-        <div className="detail-actions">
-          <div className="run-buttons">
-            <button className="primary" disabled={loadingFrames} onClick={() => onRun(issue, frames)}>
-              Fix in an agent
-            </button>
-            <button
-              className="primary outline"
-              disabled={ticketBusy || Boolean(ticketResult)}
-              onClick={() => void createTicket()}
-            >
-              {ticketBusy ? 'Creating…' : ticketResult ? 'Ticket created' : 'Create ticket'}
-            </button>
-          </div>
-          <button className="ghost" onClick={openQuickTerminal}>
-            <TerminalIcon size={13} /> Terminal
-          </button>
-          <button className="ghost" onClick={() => void window.baton.openExternal(issue.permalink)}>
-            Open in Sentry
-          </button>
-        </div>
+  const compact = useAppearance().density === 'compact';
+  const head: HeadParts = {
+    crumb: { where: issue.project, id: issue.shortId },
+    key: issue.shortId,
+    status: { tone: levelTone(issue.level), label: issue.level },
+    title: issue.title,
+    meta: (
+      <>
+        <span>{issue.count} events · {issue.userCount} users affected</span>
+        <span>{formatAge(issue.lastSeen)}</span>
+      </>
+    ),
+    links: [],
+    service: { label: 'Sentry', icon: <SentryIcon size={13} />, url: issue.permalink },
+    onTerminal: openQuickTerminal,
+    actions: (
+      <div className="run-buttons">
+        <button className="primary" disabled={loadingFrames} onClick={() => onRun(issue, frames)}>
+          Fix in an agent
+        </button>
+        <button
+          className="primary outline"
+          disabled={ticketBusy || Boolean(ticketResult)}
+          onClick={() => void createTicket()}
+        >
+          {ticketBusy ? 'Creating…' : ticketResult ? 'Ticket created' : 'Create ticket'}
+        </button>
+      </div>
+    ),
+    below: (
+      <>
         {ticketResult && (
           <p className="quiet small">
             Filed as{' '}
@@ -1399,7 +1499,16 @@ export function SentryPane({
           </p>
         )}
         {ticketError && <div className="error boxed">{ticketError}</div>}
-      </header>
+            </>
+    )
+  };
+
+  return (
+    <div className="detail-shell">
+    <div className="detail-scroll">
+    {!compact && <DetailToolbar {...head} />}
+    <div className="detail reading">
+      <DetailHead parts={head} compact={compact} />
 
       <div className="detail-body">
         <div className="detail-main">

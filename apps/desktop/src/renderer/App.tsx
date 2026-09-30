@@ -17,6 +17,7 @@ import { RunningAgentsPane, RunningAgentsRow, idleAgents, useRunningAgents } fro
 import { Resizer } from './Resizer';
 import { useTerminalFontSize } from './terminalFontSize';
 import { findSubject, type Selection, SessionName } from './sessionSubject';
+import { AgentStateBadge, SessionHoverCard, sessionDot, useHoverCard, useSeenStatus } from './sessionCard';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ActivityList, ActivityToasts, useActivity } from './Activity';
 import { DictationLayer } from './Dictation';
@@ -25,6 +26,8 @@ import { QuickCommands } from './QuickCommands';
 import { loadViewPrefs, saveViewPrefs } from './viewPrefs';
 import { startAppearance } from './appearance';
 import { QuickOpen } from './QuickOpen';
+import { ProblemsPopover, ProblemToast, useProblems } from './Problems';
+import { useNavHistory } from './navHistory';
 import type { ActivityEvent } from './types';
 
 /** What the detail pane is showing, in words — for its error card and the log (item 83). */
@@ -35,13 +38,13 @@ function paneWhere(selected: Selection): string {
   return 'the detail pane';
 }
 import {
-  activateTab, detachSession, focusSession, moveSession, pruneTree, resizeSplit,
+  activateTab, detachSession, focusSession, moveSession, pruneTree, resizeSplit, shownSessions,
   type DropZone, type PaneTree
 } from './paneTree';
 import { PaneView, type DragHandlers, type DragState } from './PaneView';
 import {
   PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon, SentryIcon, AgentsIcon, BellIcon,
-  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon, CloseIcon
+  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon, CloseIcon, BackIcon, ForwardIcon
 } from './icons';
 
 type ViewId = 'pulls' | 'tickets' | 'sentry' | 'activity' | 'workspace' | 'sessions' | 'agents';
@@ -61,6 +64,30 @@ const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JS
 ];
 
 const VIEW_IDS = VIEWS.map((v) => v.id);
+
+/** A step in Back / Forward (item 116). */
+interface Place { view: ViewId; subject?: string; session?: string }
+
+function placeKey(p: Place): string {
+  return `${p.view}|${p.subject ?? ''}|${p.session ?? ''}`;
+}
+
+/**
+ * Opening a view and then picking in it is one step, not two: Back from a
+ * ticket goes to where you were before Tickets, not to Tickets with nothing
+ * picked.
+ */
+function placeRefines(current: Place, next: Place): boolean {
+  return current.view === next.view && !current.subject && !current.session && Boolean(next.subject || next.session);
+}
+
+/** "Tickets · ACME-696", for the buttons' tooltips. */
+function placeLabel(p: Place, sessions: SessionInfo[]): string {
+  const view = VIEWS.find((v) => v.id === p.view)?.label ?? p.view;
+  const session = p.session ? sessions.find((s) => s.id === p.session) : undefined;
+  const what = p.subject ?? (session ? session.task ?? session.title : undefined);
+  return what ? `${view} · ${what}` : view;
+}
 
 const EMPTY: Snapshot = {
   at: 0, viewer: '', blocked: [], mine: [], reviewRequested: [],
@@ -570,6 +597,8 @@ function StatusBar({
 }) {
   const running = sessions.filter((s) => s.running).length;
   const failed = new Set(snapshot.errors.map((e) => e.provider));
+  const problems = useProblems();
+  const [problemsAnchor, setProblemsAnchor] = useState<HTMLElement>();
 
   return (
     <footer className="statusbar">
@@ -578,21 +607,38 @@ function StatusBar({
           <span className="statusbar-item quiet">Nothing connected</span>
         ) : (
           snapshot.connected.map((id) => (
-            <span
+            // A button (item 120): any service's name opens what's wrong now
+            // and the problems before; a failing one is a red chip.
+            <button
               key={id}
-              className="statusbar-item"
+              type="button"
+              data-provider={id}
+              className={failed.has(id) ? 'statusbar-item problem' : 'statusbar-item'}
+              aria-haspopup="dialog"
+              aria-expanded={problemsAnchor ? true : undefined}
               title={[
-                failed.has(id) ? snapshot.errors.find((e) => e.provider === id)?.message : undefined,
+                failed.has(id) ? problems.log.find((p) => p.provider === id && p.clearedAt === undefined)?.title : undefined,
                 // Item 92: GitHub's hourly budget, so a rate limit is never a surprise.
-                id === 'github' && snapshot.githubBudget ? describeGitHubBudget(snapshot.githubBudget) : undefined
-              ].filter(Boolean).join('\n\n') || undefined}
+                id === 'github' && snapshot.githubBudget ? describeGitHubBudget(snapshot.githubBudget) : undefined,
+                'Connection problems, now and earlier'
+              ].filter(Boolean).join('\n\n')}
+              onClick={(e) => { const el = e.currentTarget; setProblemsAnchor((a) => (a ? undefined : el)); }}
             >
               <span className={`dot ${failed.has(id) ? 'fail' : 'pass'}`} />
               {STATUSBAR_PROVIDER[id] ?? id}
-            </span>
+            </button>
           ))
         )}
       </div>
+      {problemsAnchor && <ProblemsPopover anchor={problemsAnchor} log={problems.log} onClose={() => setProblemsAnchor(undefined)} />}
+      <ProblemToast
+        started={problems.started}
+        onDetails={() => {
+          const el = document.querySelector<HTMLElement>(`.statusbar [data-provider="${problems.started[0]?.provider}"]`)
+            ?? document.querySelector<HTMLElement>('.statusbar [data-provider]');
+          if (el) setProblemsAnchor(el);
+        }}
+      />
       <span className="spacer" />
       <div className="statusbar-group">
         <button
@@ -716,6 +762,49 @@ export function App() {
     setView('agents');
     setAgentsPane('agents');
   }), []);
+
+  // Back and forward (item 116): where you are is the view, what's open in
+  // it, and on Sessions the session on screen.
+  const place = useMemo<Place>(() => {
+    if (view === 'sessions') return { view, ...(activeSession ? { session: activeSession } : {}) };
+    const pull = selected.pull ? `${selected.pull.repo}#${selected.pull.number}` : undefined;
+    if (view === 'pulls') return { view, ...(pull ? { subject: pull } : {}) };
+    if (view === 'tickets') return { view, ...(selected.issue ? { subject: selected.issue.key } : {}) };
+    if (view === 'sentry') return { view, ...(selected.sentry ? { subject: selected.sentry.shortId } : {}) };
+    if (view === 'activity') {
+      const subject = pull ?? selected.issue?.key ?? selected.sentry?.shortId;
+      return { view, ...(subject ? { subject } : {}) };
+    }
+    return { view };
+  }, [view, activeSession, selected]);
+  const latest = useRef(snapshot);
+  latest.current = snapshot;
+  const goTo = useCallback((p: Place) => {
+    setView(p.view);
+    if (p.session) setActiveSession(p.session);
+    if (p.view !== 'sessions' && p.view !== 'workspace' && p.view !== 'agents') {
+      setSelected((p.subject ? findSubject(p.subject, latest.current) : undefined) ?? {});
+    }
+  }, []);
+  const nav = useNavHistory(place, placeKey, goTo, placeRefines);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (event.key !== '[' && event.key !== ']') return;
+      // The code editor's own ⌘[ / ⌘] indent and outdent.
+      if (event.target instanceof Element && event.target.closest('.cm-editor')) return;
+      event.preventDefault();
+      if (event.key === '[') nav.back(); else nav.forward();
+    };
+    // A mouse's own back and forward buttons.
+    const onMouse = (event: MouseEvent) => {
+      if (event.button === 3) { event.preventDefault(); nav.back(); }
+      if (event.button === 4) { event.preventDefault(); nav.forward(); }
+    };
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('mouseup', onMouse);
+    return () => { window.removeEventListener('keydown', onKey, true); window.removeEventListener('mouseup', onMouse); };
+  }, [nav]);
 
   // Seeded from disk, then kept painted — see `appearance.tsx`.
   useEffect(startAppearance, []);
@@ -1065,6 +1154,20 @@ export function App() {
   return (
     <div className="app">
       <header className="titlebar">
+        <nav className="history-nav" aria-label="History">
+          <button
+            type="button" className="icon-button" disabled={!nav.canBack} onClick={nav.back}
+            aria-label="Back" title={nav.previous ? `Back to ${placeLabel(nav.previous, sessions)} (⌘[)` : 'Back (⌘[)'}
+          >
+            <BackIcon />
+          </button>
+          <button
+            type="button" className="icon-button" disabled={!nav.canForward} onClick={nav.forward}
+            aria-label="Forward" title={nav.next ? `Forward to ${placeLabel(nav.next, sessions)} (⌘])` : 'Forward (⌘])'}
+          >
+            <ForwardIcon />
+          </button>
+        </nav>
         <span className="wordmark">Baton</span>
         {snapshot.viewer && <span className="viewer">{snapshot.viewer}</span>}
         <span className="spacer" />
@@ -1081,13 +1184,8 @@ export function App() {
         )}
       </header>
 
-      {snapshot.errors.length > 0 && (
-        <div className="errors">
-          {snapshot.errors.map((e) => (
-            <div key={e.provider} className="error"><strong>{e.provider}</strong> {e.message}</div>
-          ))}
-        </div>
-      )}
+      {/* No strip for a service that didn't answer (item 120): the status
+          bar's chip and a toast say it, and its popover keeps the history. */}
 
       {nothingConnected && !connecting ? (
         <Empty onConnect={() => setConnecting(true)} />
@@ -1456,10 +1554,12 @@ function NewSessionMenu({
 }
 
 function SessionRow({
-  session, selected, snapshot, onSelect, onOpenSubject, onRename, drag, onMove
+  session, selected, seen, snapshot, onSelect, onOpenSubject, onRename, drag, onMove
 }: {
   session: SessionInfo;
   selected: boolean;
+  /** Whether its latest status has been on screen (item 112). */
+  seen: boolean;
   snapshot: Snapshot;
   onSelect: () => void;
   onOpenSubject: (match: Selection) => void;
@@ -1472,13 +1572,10 @@ function SessionRow({
   const drop = drag.state?.reorder?.targetId === session.id && drag.state.sessionId !== session.id
     ? (drag.state.reorder.after ? ' drop-after' : ' drop-before')
     : '';
-  // The ticket or pull request's own title, in the row's tooltip, so a row
-  // still says what the work is when its name is only a key.
-  const match = session.subject ? findSubject(session.subject, snapshot) : undefined;
-  const about = match?.pull?.title ?? match?.issue?.summary ?? match?.sentry?.title;
-  const stateText = session.running
-    ? (session.attention ? 'waiting for you' : session.runnerName)
-    : `exited ${session.exitCode ?? ''}`;
+  // What the work is, beyond the name — the ticket or pull request and the
+  // session itself — in a card after a moment's hover (item 115).
+  const hover = useHoverCard();
+  const drags = editing ? undefined : drag.handlers(session.id, onSelect);
 
   // A div, not a button: the name inside it carries a link to the ticket and
   // a rename control of its own, and HTML will not nest those in a button —
@@ -1492,8 +1589,10 @@ function SessionRow({
         data-session-row={session.id}
         role="button"
         tabIndex={0}
-        title={about ? `${about}\n${stateText}` : stateText}
-        {...(editing ? {} : drag.handlers(session.id, onSelect))}
+        {...drags}
+        onMouseEnter={hover.handlers.onMouseEnter}
+        onMouseLeave={hover.handlers.onMouseLeave}
+        onPointerDown={(e) => { hover.handlers.onPointerDown(); drags?.onPointerDown(e); }}
         onKeyDown={(e) => {
           if (editing) return;
           if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
@@ -1511,17 +1610,19 @@ function SessionRow({
             `attention` in main/sessions.ts), the ticket or PR title and the
             state in words move to the tooltip. */}
         <span className="row-top">
-          <span className={session.running ? (session.attention ? 'dot running' : 'dot live') : 'dot'} />
+          <span className={sessionDot(session)} />
           <SessionName
             session={session} snapshot={snapshot} onOpenSubject={onOpenSubject}
             editing={editing} onEdit={setEditing} onRename={onRename}
-            className="row-title"
+            className="row-title" plainName
           />
+          <AgentStateBadge session={session} seen={seen} />
           <SessionUsageChip id={session.id} />
           {!editing && <SessionCloseButton session={session} />}
           <span className="row-age">{formatAge(new Date(session.startedAt).toISOString())}</span>
         </span>
       </div>
+      {!editing && <SessionHoverCard anchor={hover.anchor} session={session} snapshot={snapshot} />}
     </li>
   );
 }
@@ -1879,6 +1980,9 @@ function Sessions({
     })
   }), [dragState, selectSession, moveInOrder]);
 
+  // A Done is news until the session has been on screen (item 112).
+  const seen = useSeenStatus(sessions, job ? [] : shownSessions(pane.tree));
+
   return (
     <>
       <aside className="queue" aria-label="Sessions">
@@ -1902,6 +2006,7 @@ function Sessions({
                   key={s.id}
                   session={s}
                   selected={s.id === active && !job}
+                  seen={seen(s)}
                   snapshot={snapshot}
                   onSelect={() => selectSession(s.id)}
                   onOpenSubject={onOpenSubject}
@@ -1951,6 +2056,7 @@ function Sessions({
             sessions={sessions}
             snapshot={snapshot}
             fontSize={fontSize}
+            seen={seen}
             onOpenSubject={onOpenSubject}
             onRename={onRename}
             drag={drag}

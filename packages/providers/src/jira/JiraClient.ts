@@ -3,7 +3,9 @@ import {
   JIRA_MEDIA_PATTERN,
   adfToMarkdown,
   markdownToAdf,
+  mentionsIn,
   type JiraIssue,
+  type JiraMention,
   type JiraTransition
 } from '@baton/core';
 import { HttpError, type HttpClient } from '../http';
@@ -202,6 +204,42 @@ export class JiraClient {
       mutating: true
     });
     return { key: response.key, url: this.browseUrl(response.key) };
+  }
+
+  /** You, as Jira knows you: the id a mention of you carries (item 119). */
+  async myself(signal?: CancelSignal): Promise<{ accountId: string; displayName: string }> {
+    return this.http.json<{ accountId: string; displayName: string }>(this.api('/myself'), { headers: this.headers, signal });
+  }
+
+  /**
+   * Where issues updated since `since` mention you, in the given projects —
+   * see `mentionsIn`. Jira has no public list of your notifications, so this
+   * reads the recently updated issues' descriptions and comments itself.
+   */
+  async mentionsSince(
+    accountId: string, projects: readonly string[], since: number, signal?: CancelSignal
+  ): Promise<JiraMention[]> {
+    if (projects.length === 0) return [];
+    const minutes = Math.min(24 * 60, Math.max(1, Math.ceil((Date.now() - since) / 60_000) + 1));
+    const jql = `project in (${projects.map((p) => `"${p.replace(/"/g, '')}"`).join(',')}) AND updated >= -${minutes}m ORDER BY updated DESC`;
+    const response = await this.http.json<{ issues: Parameters<typeof mentionsIn>[0] }>(this.api('/search/jql'), {
+      method: 'POST',
+      headers: this.headers,
+      body: { jql, maxResults: 50, fields: ['summary', 'description', 'created', 'updated', 'reporter', 'comment'] },
+      signal
+    });
+    return mentionsIn(response.issues ?? [], accountId, since, (key) => this.browseUrl(key));
+  }
+
+  /** Who last assigned this issue to the account, from its history (item 119). */
+  async assignedBy(key: string, accountId: string, signal?: CancelSignal): Promise<string | undefined> {
+    const raw = await this.http.json<{
+      changelog?: { histories?: { created: string; author?: { accountId?: string; displayName?: string }; items?: { field?: string; to?: string | null }[] }[] };
+    }>(this.api(`/issue/${encodeURIComponent(key)}?fields=summary&expand=changelog`), { headers: this.headers, signal });
+    const histories = [...(raw.changelog?.histories ?? [])].sort((a, b) => Date.parse(b.created) - Date.parse(a.created));
+    const change = histories.find((h) => h.items?.some((i) => i.field === 'assignee' && i.to === accountId));
+    if (!change || change.author?.accountId === accountId) return undefined;
+    return change.author?.displayName;
   }
 
   async verify(signal?: CancelSignal): Promise<string> {

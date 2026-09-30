@@ -14,6 +14,7 @@ export * from './jira/taskSort';
 export * from './jira/transitions';
 export * from './jira/promptTemplate';
 export * from './jira/diagnose';
+export * from './jira/mentions';
 
 export * from './sentry/orgSlug';
 
@@ -53,3 +54,4 @@ export * from './runChoices';
 export * from './quickOpen';
 export * from './runPages';
 export * from './limits';
+export * from './problems';

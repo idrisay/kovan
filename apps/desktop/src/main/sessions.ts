@@ -22,8 +22,6 @@
 
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { IPty } from 'node-pty';
-import { spawn } from 'node-pty';
 import {
   loginShell,
   shellEnvironment,
@@ -35,6 +33,8 @@ import {
 import { EventEmitter } from '@baton/host';
 import { usefulTerminalTitle } from '@baton/core';
 import { scanForBell, scanForTitles } from './bell';
+import type { AgentState, StatusSource } from './agentStatus';
+import { localPty, type Pty, type PtyHosts } from './ptyClient';
 
 export interface SessionInfo {
   id: string;
@@ -70,10 +70,21 @@ export interface SessionInfo {
   commandId?: string;
   /** Renamed by hand: the name is theirs and nothing retitles it. */
   renamed?: boolean;
+  /**
+   * What the agent says it is doing (item 112), for the agents that can say:
+   * see `agentStatus.ts`. Unset for plain terminals and other runners, which
+   * keep the bell's `attention`.
+   */
+  status?: AgentState;
+  /** When `status` last changed, epoch ms — what "seen" is measured against. */
+  statusAt?: number;
+  statusSource?: StatusSource;
+  /** Whether it lives in the terminal host and outlives Baton (item 114). */
+  hosted?: boolean;
 }
 
 interface Session extends SessionInfo {
-  pty: IPty;
+  pty: Pty;
   /** Carried between chunks: an OSC string can straddle two of them. */
   inOsc: boolean;
   /** An OSC title string split across two chunks. */
@@ -98,13 +109,28 @@ export class Sessions {
 
   constructor(
     /** The ticket a program's title names, when it names one Baton knows. */
-    private readonly ticketIn: (text: string) => string | undefined = () => undefined
+    private readonly ticketIn: (text: string) => string | undefined = () => undefined,
+    private readonly options: {
+      /** The terminal host (item 114); without it sessions end with Baton. */
+      hosts?: PtyHosts;
+      /** Where agents write their status (item 112), handed to every session. */
+      statusDir?: string;
+    } = {}
   ) {}
 
   list(): SessionInfo[] {
     return [...this.sessions.values()]
       .map(strip)
       .sort((a, b) => b.startedAt - a.startedAt);
+  }
+
+  /**
+   * Tells the list, and each host what to give back to a restarted Baton.
+   * Only on a real change — never per chunk of output.
+   */
+  private publish(): void {
+    for (const session of this.sessions.values()) session.pty.describe(strip(session));
+    this.changed.fire(this.list());
   }
 
   /** Each session's shell process id — what token usage walks down from to find its agents. */
@@ -115,6 +141,31 @@ export class Sessions {
   /** Replay for a window that opened after the session started. */
   buffer(id: string): string {
     return this.sessions.get(id)?.buffer ?? '';
+  }
+
+  /**
+   * The sessions a terminal host kept while Baton was away (item 114), as
+   * they were left: still running, or finished with their scrollback.
+   */
+  async restore(): Promise<number> {
+    const restored = await this.options.hosts?.restore() ?? [];
+    for (const r of restored) {
+      const meta = r.meta as Partial<SessionInfo> | undefined;
+      if (!meta?.id || this.sessions.has(meta.id)) continue;
+      const session: Session = {
+        ...(meta as SessionInfo),
+        running: r.running,
+        exitCode: r.exitCode,
+        hosted: true,
+        pty: r.pty,
+        inOsc: false,
+        buffer: r.buffer
+      };
+      this.sessions.set(session.id, session);
+      this.attach(session);
+    }
+    if (restored.length) this.publish();
+    return restored.length;
   }
 
   /**
@@ -135,28 +186,15 @@ export class Sessions {
     runDirectory?: string;
     /** A quick command's id: its name is the session's, and stays. */
     commandId?: string;
+    /** The agent in it reports Working / Input / Done (item 112). */
+    statusSource?: StatusSource;
   }): Promise<SessionInfo> {
     const id = randomUUID();
     // The environment a login shell produces, not the four-entry PATH a GUI
     // launch inherits. Without this the agent cannot find its own tools.
     const base = await shellEnvironment.environment();
 
-    const pty = spawn(loginShell(), ['-l'], {
-      name: 'xterm-256color',
-      cols: 120,
-      rows: 34,
-      cwd: options.cwd,
-      env: {
-        ...base,
-        ...options.env,
-        TERM: 'xterm-256color',
-        // Tells a prompt or a wrapper that it is inside Baton, the way
-        // TERM_PROGRAM does for other terminals.
-        TERM_PROGRAM: 'Baton'
-      }
-    });
-
-    const session: Session = {
+    const info: SessionInfo = {
       id,
       title: options.title,
       cwd: options.cwd,
@@ -166,33 +204,36 @@ export class Sessions {
       pull: options.pull,
       runDirectory: options.runDirectory,
       ...(options.commandId ? { commandId: options.commandId, renamed: true } : {}),
+      ...(options.statusSource ? { statusSource: options.statusSource, status: 'working' as const, statusAt: Date.now() } : {}),
       startedAt: Date.now(),
       running: true,
-      attention: false,
-      pty,
-      inOsc: false,
-      buffer: ''
+      attention: false
     };
+    const spawn = {
+      id,
+      file: loginShell(),
+      args: ['-l'],
+      cols: 120,
+      rows: 34,
+      cwd: options.cwd,
+      env: {
+        ...base,
+        ...options.env,
+        TERM: 'xterm-256color',
+        // Tells a prompt or a wrapper that it is inside Baton, the way
+        // TERM_PROGRAM does for other terminals.
+        TERM_PROGRAM: 'Baton',
+        // Which session an agent's status hook writes for (item 112).
+        BATON_SESSION_ID: id,
+        ...(this.options.statusDir ? { BATON_STATUS_DIR: this.options.statusDir } : {})
+      },
+      meta: info
+    };
+    const pty = this.options.hosts ? await this.options.hosts.spawn(spawn) : localPty(spawn);
+
+    const session: Session = { ...info, hosted: pty.hosted, pty, inOsc: false, buffer: '' };
     this.sessions.set(id, session);
-
-    pty.onData((data) => {
-      session.buffer = (session.buffer + data).slice(-BUFFER_LIMIT);
-      const scan = scanForBell(data, session.inOsc);
-      session.inOsc = scan.inOsc;
-      // Only worth a `changed` broadcast on the transition — the list would
-      // otherwise republish on every single chunk a busy agent prints.
-      let changed = scan.bell && !session.attention;
-      if (changed) session.attention = true;
-      if (!session.kind) changed = this.retitle(session, data) || changed;
-      if (changed) this.changed.fire(this.list());
-      this.output.fire({ id, data });
-    });
-
-    pty.onExit(({ exitCode }) => {
-      session.running = false;
-      session.exitCode = exitCode;
-      this.changed.fire(this.list());
-    });
+    this.attach(session);
 
     if (options.line) {
       // Waits for the shell's own startup output to go quiet, rather than a
@@ -206,6 +247,7 @@ export class Sessions {
       let sent = false;
       let idle: NodeJS.Timeout;
       const settle = () => {
+        if (sent) return;
         clearTimeout(idle);
         idle = setTimeout(send, 250);
       };
@@ -214,7 +256,6 @@ export class Sessions {
         sent = true;
         clearTimeout(idle);
         clearTimeout(ceiling);
-        quiet.dispose();
         pty.write(`${line}\r`);
       };
       // Nothing printed yet by a shell that shows its prompt without a word
@@ -223,11 +264,51 @@ export class Sessions {
       idle = setTimeout(send, 600);
       // Whatever the profile does, it does not get forever.
       const ceiling = setTimeout(send, 4_000);
-      const quiet = pty.onData(settle);
+      pty.onData(settle);
     }
 
-    this.changed.fire(this.list());
+    this.publish();
     return strip(session);
+  }
+
+  /** Follows a session's output and its end, whether just opened or picked up again. */
+  private attach(session: Session): void {
+    session.pty.onData((data) => {
+      session.buffer = (session.buffer + data).slice(-BUFFER_LIMIT);
+      const scan = scanForBell(data, session.inOsc);
+      session.inOsc = scan.inOsc;
+      // Only worth a `changed` broadcast on the transition — the list would
+      // otherwise republish on every single chunk a busy agent prints.
+      let changed = scan.bell && !session.attention;
+      if (changed) session.attention = true;
+      // Codex says when a turn ends, not when it stops for an approval; its
+      // bell mid-turn is that stop (item 112).
+      if (scan.bell && session.statusSource === 'codex' && session.status === 'working') {
+        changed = this.setState(session, 'input') || changed;
+      }
+      if (!session.kind) changed = this.retitle(session, data) || changed;
+      if (changed) this.publish();
+      this.output.fire({ id: session.id, data });
+    });
+
+    session.pty.onExit(({ exitCode }) => {
+      session.running = false;
+      session.exitCode = exitCode;
+      this.publish();
+    });
+  }
+
+  /** What an agent's status hook wrote (item 112). */
+  setStatus(id: string, state: AgentState): void {
+    const session = this.sessions.get(id);
+    if (session && this.setState(session, state)) this.publish();
+  }
+
+  private setState(session: Session, state: AgentState): boolean {
+    if (session.status === state) return false;
+    session.status = state;
+    session.statusAt = Date.now();
+    return true;
   }
 
   /** Starts an agent on a piece of work, filing it as a run. */
@@ -238,6 +319,7 @@ export class Sessions {
     title: string;
     run: AgentRun;
     env: Record<string, string>;
+    statusSource?: StatusSource;
   }): Promise<SessionInfo | { error: string }> {
     const line =
       options.runner.invocation === 'loginShell'
@@ -261,7 +343,8 @@ export class Sessions {
       kind: options.run.kind,
       subject: options.run.subject,
       pull: options.run.pull || undefined,
-      runDirectory: options.run.directory
+      runDirectory: options.run.directory,
+      statusSource: options.statusSource
     });
   }
 
@@ -283,11 +366,11 @@ export class Sessions {
    * a dev server, a test run — as opposed to a prompt waiting for input.
    * What a quick command (item 91) asks before starting itself again.
    */
-  busy(id: string): boolean {
+  async busy(id: string): Promise<boolean> {
     const session = this.sessions.get(id);
     if (!session?.running) return false;
     const shell = path.basename(loginShell()).replace(/^-/, '');
-    const foreground = (session.pty.process ?? '').replace(/^-/, '');
+    const foreground = (await session.pty.foreground()).replace(/^-/, '');
     return Boolean(foreground) && path.basename(foreground) !== shell;
   }
 
@@ -305,10 +388,16 @@ export class Sessions {
     // Typing back is the actual "I saw it" — clearer than a timer, and it is
     // the one action every one of these CLIs requires before it does anything
     // else, so it can never miss a real reply.
+    let changed = false;
     if (session.attention) {
       session.attention = false;
-      this.changed.fire(this.list());
+      changed = true;
     }
+    // Codex's reply or approval sets it going again; the others say so themselves.
+    if (session.statusSource === 'codex' && session.status !== 'working' && data.includes('\r')) {
+      changed = this.setState(session, 'working') || changed;
+    }
+    if (changed) this.publish();
     session.pty.write(data);
   }
 
@@ -321,7 +410,7 @@ export class Sessions {
     session.title = trimmed;
     session.renamed = true;
     session.task = undefined;
-    this.changed.fire(this.list());
+    this.publish();
   }
 
   resize(id: string, cols: number, rows: number): void {
@@ -338,7 +427,8 @@ export class Sessions {
   close(id: string): void {
     const session = this.sessions.get(id);
     if (!session) return;
-    if (session.running) {
+    // A hosted session is also forgotten by its host, running or not.
+    if (session.running || session.hosted) {
       try {
         session.pty.kill();
       } catch {
@@ -346,13 +436,28 @@ export class Sessions {
       }
     }
     this.sessions.delete(id);
-    this.changed.fire(this.list());
+    this.publish();
   }
 
+  /** Ends every session — for tests, and a Baton with no terminal host. */
   disposeAll(): void {
     for (const id of [...this.sessions.keys()]) {
       this.close(id);
     }
+    this.output.dispose();
+    this.changed.dispose();
+  }
+
+  /**
+   * Baton is quitting (item 114): sessions in the terminal host keep
+   * running and come back on the next start; any that live inside Baton
+   * (no host could be started) end with it.
+   */
+  detachAll(): void {
+    for (const session of this.sessions.values()) {
+      if (!session.hosted) try { session.pty.kill(); } catch { /* gone */ }
+    }
+    this.options.hosts?.detach();
     this.output.dispose();
     this.changed.dispose();
   }

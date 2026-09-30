@@ -17,7 +17,8 @@ const TONE: Record<ActivityKind, string> = {
   approved: 'pass',
   'changes-requested': 'fail',
   'new-ticket': 'waiting',
-  'new-comment': 'running'
+  'new-comment': 'running',
+  mentioned: 'running'
 };
 
 /** The inbox, kept in step with main. */
@@ -76,6 +77,8 @@ function Line({ event }: { event: ActivityEvent }) {
         <span className="spacer" />
         <span className="row-age">{formatAge(new Date(event.at).toISOString())}</span>
       </span>
+      {/* A mention says what was written, not only where (item 119). */}
+      {event.excerpt && <span className="activity-excerpt">“{event.excerpt}”</span>}
     </>
   );
 }
@@ -88,7 +91,7 @@ export function ActivityList({ inbox, filter, selectedId, onOpen }: {
 }) {
   const q = filter.trim().toLowerCase();
   const shown = q
-    ? inbox.filter((e) => `${e.title} ${e.label} ${e.who ?? ''} ${activityLabel(e.kind)}`.toLowerCase().includes(q))
+    ? inbox.filter((e) => `${e.title} ${e.label} ${e.who ?? ''} ${e.excerpt ?? ''} ${activityLabel(e.kind)}`.toLowerCase().includes(q))
     : inbox;
   if (shown.length === 0) {
     return (
@@ -210,6 +213,7 @@ export function ActivityToasts({ onOpen, onShowAll }: {
             {event.label}{event.who ? ` · ${event.who}` : ''}
           </div>
           <div className="toast-title">{event.title}</div>
+          {event.excerpt && <div className="toast-excerpt">“{event.excerpt}”</div>}
           <div className="toast-actions">
             <button
               type="button" className="ghost"

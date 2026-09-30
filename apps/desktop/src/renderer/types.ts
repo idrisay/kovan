@@ -27,6 +27,8 @@ export type {
 export type WorkspaceStatus = RepoStatus & { changes: number };
 
 export type { ThemeChoice } from '@baton/core';
+import type { Problem } from '@baton/core';
+export type { Problem };
 import type { SpeechProviderId } from '@baton/core';
 export type { RunnerLimits } from '../main/agentLimits';
 import type { RunnerLimits } from '../main/agentLimits';
@@ -53,6 +55,12 @@ export interface SessionInfo {
   renamed?: boolean;
   /** The quick command (item 91) running in it, if any. */
   commandId?: string;
+  /** What the agent says it is doing (item 112) — see `status` on `SessionInfo` in main. */
+  status?: 'working' | 'input' | 'done';
+  statusAt?: number;
+  statusSource?: 'claude' | 'codex' | 'opencode';
+  /** Lives in the terminal host, so it outlives Baton (item 114). */
+  hosted?: boolean;
 }
 
 export interface Snapshot {
@@ -229,6 +237,9 @@ export interface BatonApi {
   activity(): Promise<{ inbox: ActivityEvent[]; open?: string }>;
   /** Marks events read; returns the inbox after. */
   activityRead(ids: string[] | 'all'): Promise<ActivityEvent[]>;
+  /** Connection problems, newest first (item 120). */
+  problems(): Promise<Problem[]>;
+  onProblems(listener: (update: { log: Problem[]; started: Problem[] }) => void): () => void;
   onActivity(listener: (inbox: ActivityEvent[]) => void): () => void;
   /** New events while the window is in front: show them as toasts. */
   onActivityToast(listener: (events: ActivityEvent[]) => void): () => void;

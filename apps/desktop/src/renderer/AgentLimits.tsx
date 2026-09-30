@@ -30,10 +30,32 @@ function tone(w: LimitWindow): string {
   return w.usedPercent >= 90 ? 'fail' : w.usedPercent >= 70 ? 'running' : 'pass';
 }
 
-export function AgentLimitsNote({ entry }: { entry?: RunnerLimits }) {
+export function AgentLimitsNote({ entry, compact }: {
+  entry?: RunnerLimits;
+  /** One line — each window's short name, meter and percentage; the rest in the tooltip (item 117). */
+  compact?: boolean;
+}) {
   if (!entry) return null;
   const now = Date.now();
   const { limits, day } = entry;
+  if (limits && compact) {
+    const detail = [
+      ...limits.windows.map((w) => `${w.label}: ${w.reset ? 'reset' : `${Math.round(w.usedPercent)}%`}${!w.reset && w.resetsAt ? `, resets ${when(w.resetsAt, now)}` : ''}`),
+      `As of ${ago(limits.asOf, now)}${limits.plan ? ` · ${limits.plan} plan` : ''}${limits.shared ? ' · from your status line, last Claude account used' : ''}.`,
+      `From ${limits.source}. Baton sends no request for these.`
+    ].join('\n');
+    return (
+      <div className="agent-limits compact" title={detail}>
+        {limits.windows.map((w) => (
+          <span key={w.label} className={`agent-limit ${w.reset ? 'reset' : tone(w)}`}>
+            <span className="agent-limit-label">{w.label === '5 hours' ? '5h' : w.label}</span>
+            <span className="agent-limit-bar" aria-hidden="true"><i style={{ width: `${Math.max(2, w.usedPercent)}%` }} /></span>
+            <span className="agent-limit-value">{w.reset ? 'reset' : `${Math.round(w.usedPercent)}%`}</span>
+          </span>
+        ))}
+      </div>
+    );
+  }
   if (limits) {
     return (
       <div className="agent-limits" title={`From ${limits.source}${limits.plan ? ` · ${limits.plan} plan` : ''}. Baton sends no request for these.`}>

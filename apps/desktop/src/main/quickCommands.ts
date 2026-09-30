@@ -23,13 +23,17 @@ const LAST = 'quickCommands.last';
 export class QuickCommands {
   constructor(private readonly host: DesktopHost, private readonly sessions: Sessions) {}
 
-  list(): { commands: QuickCommand[]; last: string; busy: string[] } {
-    const commands = normalizeQuickCommands(this.host.config.get<unknown>(KEY, []));
+  private commands(): QuickCommand[] {
+    return normalizeQuickCommands(this.host.config.get<unknown>(KEY, []));
+  }
+
+  async list(): Promise<{ commands: QuickCommand[]; last: string; busy: string[] }> {
+    const commands = this.commands();
     const last = this.host.config.get<string>(LAST, '');
     // Still doing something, not just an open terminal at a prompt.
-    const busy = this.sessions.list()
-      .filter((s) => s.commandId && s.running && this.sessions.busy(s.id))
-      .map((s) => s.commandId!);
+    const open = this.sessions.list().filter((s) => s.commandId && s.running);
+    const busy = (await Promise.all(open.map(async (s) => (await this.sessions.busy(s.id)) ? s.commandId! : undefined)))
+      .filter((id): id is string => Boolean(id));
     return { commands, last: commands.some((c) => c.id === last) ? last : commands[0]?.id ?? '', busy };
   }
 
@@ -39,7 +43,7 @@ export class QuickCommands {
   > {
     const checked = validateQuickCommand(input);
     if (!checked.ok) return checked;
-    const { commands } = this.list();
+    const commands = this.commands();
     const id = typeof input.id === 'string' && commands.some((c) => c.id === input.id) ? input.id : randomUUID();
     const next = commands.some((c) => c.id === id)
       ? commands.map((c) => (c.id === id ? { id, ...checked.value } : c))
@@ -49,7 +53,7 @@ export class QuickCommands {
   }
 
   async duplicate(id: string): Promise<string | undefined> {
-    const { commands } = this.list();
+    const commands = this.commands();
     const at = commands.findIndex((c) => c.id === id);
     if (at < 0) return undefined;
     const copy = { ...commands[at]!, id: randomUUID(), name: copyName(commands[at]!.name, commands.map((c) => c.name)) };
@@ -58,7 +62,7 @@ export class QuickCommands {
   }
 
   async remove(id: string): Promise<void> {
-    await this.host.config.set(KEY, this.list().commands.filter((c) => c.id !== id));
+    await this.host.config.set(KEY, this.commands().filter((c) => c.id !== id));
   }
 
   /**
@@ -68,7 +72,7 @@ export class QuickCommands {
    */
   async run(id: string): Promise<{ ok: true; sessionId: string; reused: boolean } | { ok: false; error: string }> {
     // (The folder is checked only for a new terminal: an open one is already in it.)
-    const command = this.list().commands.find((c) => c.id === id);
+    const command = this.commands().find((c) => c.id === id);
     if (!command) return { ok: false, error: 'That command no longer exists.' };
     await this.host.config.set(LAST, id);
 
@@ -77,7 +81,7 @@ export class QuickCommands {
     // finished)? Run it again right there, instead of opening another tab.
     const open = this.sessions.list().find((s) => s.commandId === id && s.running);
     if (open) {
-      if (!this.sessions.busy(open.id)) this.sessions.retype(open.id, command.command);
+      if (!(await this.sessions.busy(open.id))) this.sessions.retype(open.id, command.command);
       return { ok: true, sessionId: open.id, reused: true };
     }
 

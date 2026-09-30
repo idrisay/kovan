@@ -13,6 +13,7 @@ import { QUICK_KIND_LABEL, formatAge, type QuickJob } from '@baton/core';
 import { Prose } from './Prose';
 import { ChevronIcon, CloseIcon, OpenLinkIcon } from './icons';
 import { findSubject, type Selection } from './sessionSubject';
+import { HoverCard, JobCard, useHoverCard } from './sessionCard';
 import type { Snapshot } from './types';
 
 export function useQuickJobs(): QuickJob[] {
@@ -96,13 +97,15 @@ export function QuickJobRow({
   const now = useNow(job.status === 'running');
   const match = findSubject(job.subject, snapshot);
   const running = job.status === 'running';
+  // The pull request or ticket it read, in a card on hover (item 115).
+  const hover = useHoverCard();
   return (
     <li>
       <div
         className={['row one-line quick-job', running ? 'running' : 'finished', selected ? 'selected' : ''].join(' ').trim()}
         role="button"
         tabIndex={0}
-        title={statusText(job, now)}
+        {...hover.handlers}
         onClick={onSelect}
         onKeyDown={(e) => {
           if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
@@ -146,6 +149,12 @@ export function QuickJobRow({
           <span className={`quick-job-state ${job.status}`}>{rowState(job, now)}</span>
         </span>
       </div>
+      <HoverCard anchor={hover.anchor}>
+        <JobCard
+          subject={job.subject} kind={QUICK_KIND_LABEL[job.kind]} state={statusText(job, now)}
+          startedAt={job.startedAt} snapshot={snapshot}
+        />
+      </HoverCard>
     </li>
   );
 }

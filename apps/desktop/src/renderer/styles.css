@@ -292,6 +292,10 @@ button { font: inherit; cursor: pointer; }
   -webkit-app-region: drag;
 }
 .titlebar button, .titlebar input { -webkit-app-region: no-drag; }
+/* Back / Forward (item 116), right of the traffic lights like VS Code's. */
+.history-nav { display: flex; align-items: center; gap: 2px; margin-left: -6px; }
+.history-nav .icon-button { width: 26px; height: 26px; color: var(--meta); }
+.history-nav .icon-button:disabled { color: var(--dim); opacity: 0.45; cursor: default; background: none; }
 
 .wordmark {
   font-family: var(--display);
@@ -770,9 +774,70 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   font-family: var(--mono); font-size: 11px;
 }
 .detail-related-link:hover { background: color-mix(in srgb, var(--clay) 14%, transparent); color: var(--clay-bright); }
+/* The places beside the chips (item 110): the service it came from, and a
+   terminal. Quieter than the chips — a way out, not a related item. */
+.detail-related { align-items: center; }
+.detail-related-sep { width: 1px; height: 16px; background: var(--hair-strong); margin: 0 2px; }
+.detail-place {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--wash); border: 1px solid var(--hair-strong); border-radius: 7px;
+  padding: 3px 9px; color: var(--secondary); font-size: 12px;
+}
+.detail-place:hover { color: var(--title); border-color: color-mix(in srgb, var(--clay) 40%, transparent); }
+.detail-place svg { flex: none; }
 /* One row: the agent runs, then the escape hatch out to the web. */
 .detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 .run-buttons { display: contents; }
+
+/* Item 118. Comfortable: a toolbar pinned across the top of the pane (where
+   it lives, its related chips; the service, a terminal and what Baton does),
+   then the title and one quiet line of state and details. Its edges line up
+   with the reading column under it. */
+.detail-toolbar {
+  position: sticky; top: 0; z-index: 4;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding-block: 8px; padding-inline: max(30px, calc((100% - var(--page)) / 2 + 30px));
+  background: color-mix(in srgb, var(--editor) 88%, var(--rail));
+  border-bottom: 1px solid var(--hair);
+  zoom: var(--reading-zoom, 1);
+}
+.detail-crumb { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--meta); }
+.detail-crumb svg { flex: none; }
+.detail-crumb-where { min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-crumb strong { font-family: var(--mono); font-weight: 500; color: var(--body); white-space: nowrap; }
+.detail-toolbar .detail-related-link { padding: 2px 8px; }
+.detail-toolbar-end {
+  margin-left: auto; flex: 0 0 auto; max-width: 100%;
+  display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px;
+}
+/* The quick-model buttons keep their model and FREE/cost tag (money visible
+   before it's spent), a size smaller up here. */
+.detail-toolbar .quick, .detail-head.compact .quick { padding: 3px 8px; font-size: 11.5px; }
+.detail-toolbar-actions { gap: 6px; }
+.detail-toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.detail-toolbar-actions .action-divider { width: 1px; height: 20px; background: var(--hair-strong); margin: 0 2px; }
+.detail-toolbar > .action-divider { width: 1px; height: 20px; background: var(--hair-strong); margin: 0 2px; }
+.detail-toolbar-actions button.primary { padding: 5px 12px; font-size: 12.5px; }
+.detail-place-icon { width: 28px; height: 28px; color: var(--meta); }
+.detail-place-icon:hover { color: var(--title); }
+.detail-head .detail-meta { align-items: center; }
+
+/* Compact (option D): two lines and no toolbar — a state dot, the id, the
+   title (shortened on the line, whole in its tooltip) and the actions, then
+   the details and related chips. */
+:root[data-density='compact'] .detail { padding-top: 12px; }
+.detail-head.compact .detail-head-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.detail-head.compact .detail-head-line > .dot { flex: none; }
+.detail-head.compact h2 {
+  flex: 1 1 240px; min-width: 0; margin: 0;
+  font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.detail-head.compact .detail-place-icon { width: 24px; height: 24px; }
+.detail-head.compact .detail-toolbar-actions button.primary { padding: 3px 10px; font-size: 12px; }
+.detail-head.compact .detail-meta { margin-top: 4px; padding-left: 16px; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
+.detail-head.compact .detail-meta > * { flex: none; }
+.detail-head.compact .detail-related-link { padding: 0 7px; font-size: 10.5px; }
+.detail-head.compact .detail-states { margin-top: 6px; padding-left: 16px; }
 
 .detail section { margin-top: 26px; }
 .detail h3 {
@@ -1351,6 +1416,8 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   font-family: var(--mono); font-size: 11.5px; line-height: 1.6;
   resize: vertical; min-height: 240px;
 }
+/* Folded (item 117): a few lines to glance at; "Show all" gives the full height. */
+.prompt-label textarea.folded { min-height: 0; }
 
 /* --- Sessions and terminal ---------------------------------------------- */
 
@@ -2786,3 +2853,109 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .agent-limit.reset .agent-limit-bar i { background: var(--dim); }
 .agent-limit-value { flex: none; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .agent-limits-age { font-size: 10px; color: var(--dim); }
+/* The run sheet's one-line form (item 117): the details are in its tooltip. */
+.agent-limits.compact { flex-direction: row; flex-wrap: wrap; gap: 4px 12px; cursor: default; }
+.agent-limits.compact .agent-limit-label { width: auto; }
+.agent-limits.compact .agent-limit-bar { width: 40px; }
+
+/* Test accounts folded to one line in the run sheet (item 117). */
+.run-test-accounts-summary { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12.5px; min-width: 0; }
+.run-test-accounts-summary .link { flex: none; padding: 0; }
+.run-test-accounts-count { flex: none; color: var(--muted); }
+.run-test-accounts-names { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--meta); }
+
+/* Item 111: Claude's own total for a resumed conversation, beside this
+   session's cost — quieter than it, since it isn't this session's spend. */
+.usage-conversation { color: var(--muted); }
+
+/* A mention's first words (item 119), under its row and in its toast. */
+.activity-excerpt {
+  display: block; margin-top: 3px; font-size: 12px; color: var(--secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.toast-excerpt { margin-top: 4px; font-size: 12px; color: var(--secondary); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Connection problems (item 120, option B): a failing service's name in the
+   status bar is a red chip; any service's name opens the popover above it
+   with what's wrong now and earlier; a toast says it once when it starts. */
+.statusbar-item.problem {
+  color: var(--blocked-bright);
+  background: color-mix(in srgb, var(--blocked) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blocked) 40%, transparent);
+  border-radius: 6px;
+}
+.menu.problems-pop { position: fixed; top: auto; right: auto; z-index: 60; width: min(400px, calc(100vw - 16px)); padding: 8px; gap: 2px; }
+.problems-pop .menu-head { margin-top: 4px; }
+.problems-none { margin: 2px 8px 6px; color: var(--muted); font-size: 12px; }
+.problem-now { display: flex; align-items: flex-start; gap: 9px; padding: 6px 8px; }
+.problem-now > .dot { margin-top: 6px; flex: none; }
+.problem-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; align-items: flex-start; }
+.problem-text strong { color: var(--title); font-weight: 500; font-size: 12.5px; }
+.problem-text small { color: var(--meta); font-size: 11.5px; }
+.problems-pop .problem-text .link { width: auto; padding: 0; font-size: 11.5px; }
+.problems-pop .problem-retry {
+  flex: none; width: auto; padding: 3px 10px; font-size: 12px;
+  border: 1px solid var(--hair-strong); border-radius: 7px; color: var(--body);
+}
+.problems-earlier { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; }
+.problem-row {
+  display: grid; grid-template-columns: 76px 1fr auto; gap: 10px; align-items: baseline;
+  padding: 5px 8px; border-top: 1px solid var(--hair); font-size: 12px;
+}
+.problem-when { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+.problem-title { color: var(--body); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.problem-cleared { font-family: var(--mono); font-size: 10.5px; color: var(--pass); white-space: nowrap; }
+.problem-toast {
+  position: fixed; right: 16px; bottom: 44px; z-index: 70; width: min(320px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: 3px; padding: 10px 12px;
+  background: var(--card); border: 1px solid var(--hair-strong); border-left: 3px solid var(--blocked-bright);
+  border-radius: 10px; box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45); font-size: 12px; color: var(--meta);
+}
+.problem-toast strong { color: var(--title); font-weight: 500; font-size: 12.5px; }
+.problem-toast-actions { display: flex; gap: 12px; margin-top: 3px; }
+.problem-toast .link { padding: 0; font-size: 12px; }
+
+/* What the agent says it is doing (item 112): a small word after the name.
+   Working quiet with a spinner; Input amber (it waits on you); Done green
+   until the session has been on screen. */
+.session-state {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  padding: 0 6px; height: 17px; border-radius: 9px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap;
+  border: 1px solid var(--hair-strong); color: var(--muted);
+}
+.session-state.input {
+  color: var(--running); border-color: color-mix(in srgb, var(--running) 45%, transparent);
+  background: color-mix(in srgb, var(--running) 12%, transparent);
+}
+.session-state.done {
+  color: var(--pass); border-color: color-mix(in srgb, var(--pass) 45%, transparent);
+  background: color-mix(in srgb, var(--pass) 10%, transparent);
+}
+.session-state-spin {
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 1.5px solid var(--hair-strong); border-top-color: var(--muted);
+  animation: boot-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .session-state-spin { animation: none; } }
+.term-head-title-row .session-state { margin-left: 6px; }
+.pane-tab .session-state { height: 15px; font-size: 10px; padding: 0 5px; }
+
+/* A session's card on hover (item 115): the work it's about, then the
+   session itself. Portalled, so the sidebar's zoom and scroll don't reach it. */
+.menu.hover-card {
+  position: fixed; right: auto; z-index: 60; width: 300px; max-width: calc(100vw - 16px);
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 3px;
+  pointer-events: none; font-size: 12px;
+}
+.hover-card-kind { font-size: 11px; color: var(--muted); }
+.hover-card-title { color: var(--title); font-size: 13px; font-weight: 600; line-height: 1.35; margin-bottom: 4px; }
+.hover-card-session { color: var(--body); font-size: 12px; margin-bottom: 2px; }
+.hover-card-line { display: flex; gap: 8px; line-height: 1.45; }
+.hover-card-line:has(.hover-card-value:empty) { display: none; }
+.hover-card-label { flex: none; width: 76px; color: var(--dim); }
+.hover-card-value { min-width: 0; color: var(--body); overflow-wrap: anywhere; }
+.hover-card-add { color: var(--pass); font-family: var(--mono); }
+.hover-card-del { color: var(--blocked-bright); font-family: var(--mono); }
+.hover-card-rule { height: 1px; background: var(--hair); margin: 6px 0 4px; }
+.hover-card-note { margin: 0; color: var(--dim); font-size: 11.5px; }

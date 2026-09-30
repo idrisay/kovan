@@ -121,6 +121,17 @@ export function SessionUsageStrip({ id }: { id: string }) {
       <span>{formatTokens(totalTokens(counts))} tokens</span>
       {hit !== undefined && <span>{Math.round(hit * 100)}% cached</span>}
       <span className="usage-cost">{costText(totals)}</span>
+      {/* Claude's status line shows the whole conversation's cost, including
+          earlier terminals it was resumed from (item 111). When that is more
+          than this session's, both are shown, so the two numbers agree. */}
+      {record.conversationUsd !== undefined && record.conversationUsd - totals.usd > 0.01 && (
+        <span
+          className="usage-conversation"
+          title={`Claude Code's own total for this conversation: ${formatUsd(record.conversationUsd)} — what its status line shows. It includes earlier terminals this conversation was resumed from; ${costText(totals)} is what was spent in this one.`}
+        >
+          conversation {formatUsd(record.conversationUsd)}
+        </span>
+      )}
     </span>
   );
 }

@@ -13,6 +13,7 @@ import {
   isBlocked,
   sortPulls,
   type JiraIssue,
+  type JiraMention,
   type ProviderId,
   type PullSummary,
   type RepoRef,
@@ -61,6 +62,13 @@ export interface Snapshot {
    * refresh (those keep showing the data they already have).
    */
   booting?: BootStep[];
+  /**
+   * For Activity (item 119), from the last Jira refresh: where you were
+   * mentioned since the check before, and who assigned the newly listed
+   * tickets. Absent when Jira wasn't asked or didn't say.
+   */
+  jiraMentions?: JiraMention[];
+  jiraAssignedBy?: Record<string, string>;
 }
 
 export interface BootStep {
@@ -100,6 +108,12 @@ export class Poller {
   private inFlight?: AbortController;
   private lastRun = 0;
   private readonly refreshingProviders = new Set<PolledProvider>();
+  /** Item 119: you as Jira knows you, what was checked, and what the last check found. */
+  private jiraMe?: { accountId: string };
+  private mentionsCheckedAt?: number;
+  private lastTicketKeys?: Set<string>;
+  private readonly assigners = new Map<string, string>();
+  private jiraActivity: Pick<Snapshot, 'jiraMentions' | 'jiraAssignedBy'> = {};
 
   constructor(private readonly host: DesktopHost) {
     this.http = new HttpClient(host.log);
@@ -193,6 +207,7 @@ export class Poller {
       loadingMerged: false,
       ...((github?.budget ?? this.snapshot.githubBudget) ? { githubBudget: github?.budget ?? this.snapshot.githubBudget } : {}),
       tickets: jira ?? [],
+      ...(jira ? this.jiraActivity : {}),
       sentryIssues: sentry ?? [],
       connected,
       errors,
@@ -249,7 +264,7 @@ export class Poller {
     } else if (id === 'jira') {
       const jira = await this.loadJira(connected, controller.signal, errors);
       if (jira) {
-        patch = { tickets: jira };
+        patch = { tickets: jira, ...this.jiraActivity };
       }
     } else {
       const sentry = await this.loadSentry(connected, controller.signal, errors);
@@ -391,7 +406,7 @@ export class Poller {
     }
     try {
       const client = new JiraClient(this.http, site, email, token);
-      return await client.search(
+      const tickets = await client.search(
         this.host.config.get(
           'jira.tasksJql',
           'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC'
@@ -399,6 +414,8 @@ export class Poller {
         this.host.config.get('jira.tasksLimit', 100),
         signal
       );
+      this.jiraActivity = await this.loadJiraActivity(client, tickets, signal);
+      return tickets;
     } catch (err) {
       if (!signal.aborted) {
         errors.push({ provider: 'jira', message: message(err) });
@@ -406,6 +423,48 @@ export class Poller {
       }
       return undefined;
     }
+  }
+
+  /**
+   * Mentions and assignments for Activity (item 119). Its own failures stay
+   * its own: the ticket list is already in, and a mention check that didn't
+   * answer is simply tried again next refresh, from the same point.
+   */
+  private async loadJiraActivity(
+    client: JiraClient, tickets: readonly JiraIssue[], signal: AbortSignal
+  ): Promise<Pick<Snapshot, 'jiraMentions' | 'jiraAssignedBy'>> {
+    const out: Pick<Snapshot, 'jiraMentions' | 'jiraAssignedBy'> = {};
+    try {
+      this.jiraMe ??= await client.myself(signal);
+      const me = this.jiraMe.accountId;
+
+      // Who assigned the tickets new since the last refresh — at most a few
+      // requests, and only when there is something new.
+      const before = this.lastTicketKeys;
+      this.lastTicketKeys = new Set(tickets.map((t) => t.key));
+      if (before) {
+        for (const ticket of tickets.filter((t) => !before.has(t.key)).slice(0, 5)) {
+          const who = await client.assignedBy(ticket.key, me, signal).catch(() => undefined);
+          if (who) this.assigners.set(ticket.key, who);
+        }
+      }
+      const assignedBy = Object.fromEntries(tickets.filter((t) => this.assigners.has(t.key)).map((t) => [t.key, this.assigners.get(t.key)!]));
+      if (Object.keys(assignedBy).length) out.jiraAssignedBy = assignedBy;
+
+      if (this.host.config.get('activity.mentioned', true)) {
+        const projects = [...new Set(tickets.map((t) => t.key.split('-')[0]!))];
+        const startedAt = Date.now();
+        // The first check looks back a little and sets the baseline.
+        const since = this.mentionsCheckedAt ?? startedAt - 10 * 60_000;
+        out.jiraMentions = await client.mentionsSince(me, projects, since, signal);
+        // A minute's overlap: an edit landing mid-check is caught next time,
+        // and Activity never reports the same mention twice.
+        this.mentionsCheckedAt = startedAt - 60_000;
+      }
+    } catch (err) {
+      if (!signal.aborted) this.host.log.warn('Jira mentions check failed', err);
+    }
+    return out;
   }
 
   /**

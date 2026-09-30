@@ -20,13 +20,15 @@
 
 import type { PullSummary } from './github/pullStatus';
 import type { JiraIssue } from './types';
+import type { JiraMention } from './jira/mentions';
 
 export type ActivityKind =
   | 'review-requested'
   | 'approved'
   | 'changes-requested'
   | 'new-ticket'
-  | 'new-comment';
+  | 'new-comment'
+  | 'mentioned';
 
 export const ACTIVITY_KINDS: { kind: ActivityKind; label: string; setting: string; description: string }[] = [
   {
@@ -42,8 +44,13 @@ export const ACTIVITY_KINDS: { kind: ActivityKind; label: string; setting: strin
     description: 'A reviewer asks for changes on one of your pull requests.'
   },
   {
-    kind: 'new-ticket', label: 'New ticket', setting: 'activity.newTicket',
-    description: 'A ticket newly assigned to you appears in Tickets.'
+    // Still `new-ticket` inside, so the setting and past entries carry over.
+    kind: 'new-ticket', label: 'Assigned to you', setting: 'activity.newTicket',
+    description: 'A ticket is assigned to you, and who assigned it.'
+  },
+  {
+    kind: 'mentioned', label: 'Mentioned', setting: 'activity.mentioned',
+    description: 'Somebody mentions you on a Jira ticket or in one of its comments (item 119).'
   },
   {
     kind: 'new-comment', label: 'New comment', setting: 'activity.newComment',
@@ -69,6 +76,8 @@ export interface ActivityEvent {
   title: string;
   /** Who did it, when known: the author asking, the commenter. */
   who?: string;
+  /** What they wrote, for a mention: the first words. */
+  excerpt?: string;
   url: string;
   read: boolean;
 }
@@ -86,14 +95,27 @@ export interface ActivitySeen {
     commentBasis?: string;
   };
   /** Set once Jira has answered at least once. */
-  jira?: { tickets: string[] };
+  jira?: {
+    tickets: string[];
+    /** `KEY:where` of mentions already reported; unset until mentions were first read. */
+    mentions?: string[];
+  };
 }
 
 /** What one poll returned. A provider is absent when it didn't answer. */
 export interface ActivityPoll {
   github?: { viewer: string; mine: readonly PullSummary[]; reviewRequested: readonly PullSummary[] };
-  jira?: { tickets: readonly JiraIssue[] };
+  jira?: {
+    tickets: readonly JiraIssue[];
+    /** Where you were mentioned since the last check; absent when it wasn't checked. */
+    mentions?: readonly JiraMention[];
+    /** Who assigned each newly listed ticket to you, where Jira says. */
+    assignedBy?: Readonly<Record<string, string>>;
+  };
 }
+
+/** How many reported mentions are remembered, so one is never reported twice. */
+export const MENTIONS_KEPT = 300;
 
 /**
  * What a comment count counts. When this changes, the counts saved under the
@@ -192,15 +214,33 @@ export function diffActivity(
       const fresh = poll.jira.tickets.filter((ticket) => !had.has(ticket.key));
       if (fresh.length <= FLOOD) {
         for (const ticket of fresh) {
+          const who = poll.jira.assignedBy?.[ticket.key];
           events.push({
-            id: `new-ticket:${ticket.key}`,
+            // With when it changed: assigned to you again later is news again.
+            id: `new-ticket:${ticket.key}:${ticket.updated}`,
             kind: 'new-ticket', at: now, subject: ticket.key, label: ticket.key,
-            title: ticket.summary, url: ticket.url
+            title: ticket.summary, ...(who ? { who } : {}), url: ticket.url
           });
         }
       }
     }
-    next.jira = { tickets: poll.jira.tickets.map((ticket) => ticket.key) };
+    let mentioned = before?.mentions;
+    if (poll.jira.mentions) {
+      const known = new Set(mentioned ?? []);
+      const fresh = poll.jira.mentions.filter((m) => !known.has(`${m.key}:${m.where}`));
+      // The first read only sets the baseline, as for everything else.
+      if (mentioned && fresh.length <= FLOOD) {
+        for (const m of fresh) {
+          events.push({
+            id: `mentioned:${m.key}:${m.where}`,
+            kind: 'mentioned', at: now, subject: m.key, label: m.key, title: m.summary,
+            ...(m.who ? { who: m.who } : {}), excerpt: m.excerpt, url: m.url
+          });
+        }
+      }
+      mentioned = [...(mentioned ?? []), ...fresh.map((m) => `${m.key}:${m.where}`)].slice(-MENTIONS_KEPT);
+    }
+    next.jira = { tickets: poll.jira.tickets.map((ticket) => ticket.key), ...(mentioned ? { mentions: mentioned } : {}) };
   }
 
   return { events, seen: next };

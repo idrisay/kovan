@@ -87,13 +87,17 @@ Reuse these before writing new CSS. A new component goes in this list.
 | `.primary` | Starts an agent that **writes** (changes code, opens a PR) | Unblock in an agent, Work on this |
 | `.primary.outline` | Starts an agent that only **reads and reports** | Check it shipped, Review |
 | `.quick` (dashed blue) | Not an agent: a quick model turning text Baton already has into shorter text | Summarize, nv-review |
-| `.ghost` | Everything else: secondary actions, Settings actions | Terminal, Open on GitHub, Add a row |
+| `.ghost` | Everything else: secondary actions, Settings actions | Add a row |
+| `.detail-place` | Where the item lives elsewhere, in a detail header's link row beside the related chips | GitHub / Jira / Sentry (with its mark), Terminal |
 | `.link` | Inline, low-weight action inside text or a table row | Remove, Reset, Cancel, Save as default |
 | `.icon-button` | Icon-only, borderless. Needs `aria-label` **and** `title` | Row actions, rename |
 | `.icon-button.boxed` | Icon-only with a box, for a header's own control | Close ✕ on sheets and terminals |
 
 Put at most one `.primary` in a row. Separate groups of different weights with
-the existing vertical rule, not with space alone.
+the existing vertical rule, not with space alone. A detail header's action bar
+holds only what Baton does — agent runs, then quick model reads; opening the
+item on its service, or a terminal for it, goes in the link row above
+(`RelatedLinks` `places`, item 110), which keeps the bar on one line.
 
 ### Surfaces and containers
 
@@ -303,7 +307,74 @@ Terminal colours are read from the painted tokens (`terminalTheme()` in
 `Terminal.tsx`) and re-applied live on any appearance change; Boosted lifts
 them toward full contrast.
 
+**Sessions outlive Baton (item 114).** Every pty lives in the terminal host
+(`main/ptyHost.ts`, built as `ptyHost.mjs` and unpacked from the archive). It
+is the app binary in Node mode, started detached, one per build, and it talks
+to Baton over a Unix socket in `$TMPDIR` (`main/ptyClient.ts`). On start,
+`Sessions.restore()` picks up every host of this profile. On quit,
+`detachAll()` leaves them running; only `close()` ends a session. The host
+keeps each session's `SessionInfo` (sent on every change), the tail of its
+output and whether it runs, and exits once it is unwatched and empty. The
+host protocol only ever grows optional fields, since an older host serves its
+sessions across an update. When no host can start, sessions run in-process
+as before, and quitting asks first again for those. A smoke run exits
+through `app.exit`, which skips `will-quit`, so `index.ts` calls `disposeAll()`
+first.
+
+**Agent status (item 112).** Agents Baton starts report Working / Input /
+Done themselves (`main/agentStatus.ts`), and Baton never guesses it from
+output:
+- Claude: hooks in the `--settings` it already gets.
+- Codex: `notify`, chained to your own; its bell mid-turn means Input.
+- OpenCode: a plugin through `OPENCODE_CONFIG_CONTENT`.
+
+Each writes one word to `userData/status/<BATON_SESSION_ID>`, and Baton
+watches that folder. The badge is `.session-state` (not `.agent-state`, which
+is Agents › Running's). Done hides once the session has been on screen
+(`useSeenStatus`); Input stays until answered.
+
+**Hover card (item 115).** A session or Quick model row shows `HoverCard`
+(`sessionCard.tsx`) after 500 ms: the subject from the loaded snapshot, never
+fetched, then the session. It is portalled like every popover over the
+sidebar, and it replaces the row's `title`.
+
 ### Keyboard
+
+**Back / Forward (item 116).** The ← → arrows in the title bar, and ⌘[ / ⌘]
+(except in the code editor) and the mouse's side buttons, walk
+`navHistory.ts`. A step is a `Place`: view + subject (+ session on Sessions).
+A view opened and then picked in is one step (`placeRefines`). Going back
+changes only the state that makes up the place, so no "restoring" flag is
+needed. A new kind of place goes into `Place` and `goTo`, not into its own
+history.
+
+**Detail header (item 118).** A pull request, ticket and Sentry issue build one
+`HeadParts` (crumb, key, status, title, meta, chips, service, terminal,
+actions, below) and draw it two ways by density:
+- Comfortable: `DetailToolbar`, which is sticky inside `.detail-scroll` and
+  outside the reading column's padding, with the actions as one group that
+  wraps whole, and then `DetailHead` (title plus a pill-and-details line).
+- Compact: `DetailHead compact`, two lines and no toolbar.
+
+Chips always open the item in Baton, and in the service when it isn't loaded.
+A new header item goes into `HeadParts`, not into one pane.
+
+**Connection problems (item 120).** There is no error strip.
+- `ProblemLog` (main) folds every finished refresh into `trackProblems` (core): it opens, counts and clears problems, per service.
+- `describeProblem` turns raw errors into words. A new kind of failure goes there, with a test.
+- The status bar's service names are buttons that open `ProblemsPopover` (Now with Retry and Copy details, then Earlier). A failing one is `.statusbar-item.problem`.
+- `ProblemToast` says it once when a problem starts.
+
+**Jira in Activity (item 119).**
+- Mentions are found by account id (`mentionsIn`), never by name, from the tickets updated since the last check in your projects (`JiraClient.mentionsSince`).
+- The poller also asks who assigned newly listed tickets (`assignedBy`).
+- Both ride on the snapshot (`jiraMentions`, `jiraAssignedBy`) into `diffActivity`, which baselines the first read like everything else.
+- A mention entry carries an `excerpt`, shown in its row, its toast and its notification.
+
+**Big sheets fold (item 117).** Long, rarely changed parts of a sheet start
+folded, with a link saying what's hidden ("Show all 112 lines",
+"Change"). The run sheet's prompt, its test accounts and its plan limits
+(`AgentLimitsNote compact`) work this way.
 
 ⌘F focuses the sidebar filter (except inside the code editor). ⌘P opens
 go-to-file (`QuickOpen.tsx`, item 100) from anywhere: recent files first
@@ -340,7 +411,9 @@ visible focus state.
    sizes), per thing, not globally, when the thing differs.
 7. **Baton is a normal Dock app** with a menu bar glyph as well. Opening
    it, clicking its Dock icon or Cmd+Tabbing to it shows the window; closing
-   the window keeps it running. Quitting asks first while sessions run.
+   the window keeps it running. Quitting leaves the sessions running in the
+   terminal host (item 114); it asks first only for sessions that run inside
+   Baton because no host could start.
 8. **Everything in the main process keeps working with no window open.**
    Poller, sessions, quick jobs and notifications live in `src/main`. The
    renderer only asks and listens.
