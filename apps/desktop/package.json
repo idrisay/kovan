@@ -1,5 +1,5 @@
 {
-  "name": "@baton/desktop",
+  "name": "@kovan/desktop",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,12 +10,12 @@
     "start": "electron-vite preview",
     "pack": "node scripts/build-dictate.mjs && electron-vite build && electron-builder --dir",
     "dist": "node scripts/build-dictate.mjs && electron-vite build && electron-builder --mac --arm64",
-    "smoke": "node scripts/build-dictate.mjs && electron-vite build && BATON_SMOKE=1 electron .",
-    "smoke:seeded": "node scripts/build-dictate.mjs && electron-vite build && BATON_SMOKE=seeded electron .",
-    "smoke:live": "node scripts/build-dictate.mjs && electron-vite build && BATON_SMOKE=live electron .",
+    "smoke": "node scripts/build-dictate.mjs && electron-vite build && KOVAN_SMOKE=1 electron .",
+    "smoke:seeded": "node scripts/build-dictate.mjs && electron-vite build && KOVAN_SMOKE=seeded electron .",
+    "smoke:live": "node scripts/build-dictate.mjs && electron-vite build && KOVAN_SMOKE=live electron .",
     "typecheck": "tsc --noEmit",
     "install:app": "npm run dist && node ../../scripts/install-app.mjs",
-    "smoke:workspace": "node scripts/build-dictate.mjs && electron-vite build && BATON_SMOKE=workspace electron ."
+    "smoke:workspace": "node scripts/build-dictate.mjs && electron-vite build && KOVAN_SMOKE=workspace electron ."
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
@@ -50,11 +50,11 @@
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
-    "@baton/agent": "*",
-    "@baton/core": "*",
-    "@baton/git": "*",
-    "@baton/host": "*",
-    "@baton/providers": "*",
+    "@kovan/agent": "*",
+    "@kovan/core": "*",
+    "@kovan/git": "*",
+    "@kovan/host": "*",
+    "@kovan/providers": "*",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
@@ -65,10 +65,10 @@
     "react-dom": "^18.3.1",
     "vite": "^5.4.11"
   },
-  "productName": "Baton",
+  "productName": "Kovan",
   "build": {
-    "appId": "com.idrisay.baton",
-    "productName": "Baton",
+    "appId": "com.idrisay.kovan",
+    "productName": "Kovan",
     "directories": {
       "output": "release",
       "buildResources": "resources"
@@ -98,8 +98,8 @@
       "gatekeeperAssess": false,
       "extendInfo": {
         "NSUserNotificationAlertStyle": "banner",
-        "NSMicrophoneUsageDescription": "Baton listens only while you dictate: double-tap ⌘ to start, and again to stop.",
-        "NSSpeechRecognitionUsageDescription": "Baton turns what you dictate into text on this Mac."
+        "NSMicrophoneUsageDescription": "Kovan listens only while you dictate: double-tap ⌘ to start, and again to stop.",
+        "NSSpeechRecognitionUsageDescription": "Kovan turns what you dictate into text on this Mac."
       }
     },
     "electronVersion": "33.4.11",
@@ -118,8 +118,8 @@
         "to": "trayTemplate@2x.png"
       },
       {
-        "from": "resources/bin/baton-dictate",
-        "to": "bin/baton-dictate"
+        "from": "resources/bin/kovan-dictate",
+        "to": "bin/kovan-dictate"
       }
     ]
   },

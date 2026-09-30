@@ -7,8 +7,8 @@
  * make the poll several times more expensive for data nobody is looking at.
  */
 
-import type { CancelSignal } from '@baton/host';
-import { graphqlEndpoint } from '@baton/core';
+import type { CancelSignal } from '@kovan/host';
+import { graphqlEndpoint } from '@kovan/core';
 import type { HttpClient } from '../http';
 
 export interface ReviewComment {
@@ -82,7 +82,7 @@ export interface PullDetail {
 }
 
 const DETAIL_QUERY = `
-query BatonPullDetail($owner: String!, $name: String!, $number: Int!) {
+query KovanPullDetail($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       number title url body additions deletions changedFiles

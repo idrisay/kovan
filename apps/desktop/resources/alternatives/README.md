@@ -1,12 +1,21 @@
 # Icon
 
-**In use: `C5-conductor`**, a conductor's baton with two sweeping arcs in clay
-on near-black. Codex drew it (`C5-conductor-source.png`, chosen from six
+**In use: `K-cells`** (since the rename to Kovan, 2026-09-30), a K built from
+seven hive cells: an off-white stem, a clay arm (working) and a grey arm
+(waiting), on a near-black tile. Picked from ten options, five by Codex and five
+by Claude (https://claude.ai/artifact/51VPzLg52bzRTquqrGBoZN).
+`python3 build-k-cells.py` draws it, writes `icon.icns` and both menu bar
+glyphs, and a proof (`proof-k-cells.png`).
+
+## Before that: `C5-conductor`
+
+A conductor's baton with two sweeping arcs in clay
+on near-black, from when the app was called Baton. Codex drew it (`C5-conductor-source.png`, chosen from six
 concepts); `python3 build-conductor.py` centres it on Apple's icon grid and
 writes `icon.icns`. The menu bar glyph is redrawn by hand in the same idea
 (`python3 tray-conductor.py`), since traced from the icon it faded at 16pt.
 
-## Earlier icon
+## Earlier still
 
 A **ceremonial baton** — cord and tassel, red shaft with cross-lacing, spear
 tip, bulb — drawn flat in three colours.
@@ -53,7 +62,7 @@ python3 build.py     # icon.icns + trayTemplate, straight into resources/
 ```
 
 `build.py`'s `CHOICE` is the palette dict. Then
-`npm run dist --workspace @baton/desktop`.
+`npm run dist --workspace @kovan/desktop`.
 
 ## The menu bar glyph
 

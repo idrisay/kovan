@@ -96,7 +96,7 @@ const CLAUDE_BUCKETS: [string, string][] = [
 /**
  * What Claude Code hands its status line: `rate_limits.five_hour` and
  * `seven_day` (plus per-model weekly buckets), each `{ used_percentage,
- * resets_at }`. Baton's status-line wrapper saves that payload for the
+ * resets_at }`. Kovan's status-line wrapper saves that payload for the
  * Claude sessions it starts; `recordedAt` is when it did.
  */
 export function claudeLimitsFromStatusPayload(payload: unknown, recordedAt: number): AgentLimits | undefined {
@@ -112,11 +112,11 @@ export function claudeLimitsFromStatusPayload(payload: unknown, recordedAt: numb
     const resetsAt = secondsToMs(w['resets_at']) ?? isoToMs(w['resets_at']);
     windows.push({ label, usedPercent: used, ...(resetsAt ? { resetsAt } : {}) });
   }
-  return windows.length ? { asOf: recordedAt, source: 'Claude Code, from a session in Baton', windows } : undefined;
+  return windows.length ? { asOf: recordedAt, source: 'Claude Code, from a session in Kovan', windows } : undefined;
 }
 
 /** ccstatusline's own cache (`~/.cache/ccstatusline/usage.json`), when that
- *  status line is installed — a head start before Baton has recorded any. */
+ *  status line is installed — a head start before Kovan has recorded any. */
 export function claudeLimitsFromCcstatusline(cache: unknown, modifiedAt: number): AgentLimits | undefined {
   if (!cache || typeof cache !== 'object') return undefined;
   const c = cache as Record<string, unknown>;
@@ -132,7 +132,7 @@ export function claudeLimitsFromCcstatusline(cache: unknown, modifiedAt: number)
   if (pct(c['weeklyOpusUsage'])) add('Week · Opus', c['weeklyOpusUsage'], c['weeklyResetAt']);
   if (pct(c['weeklySonnetUsage'])) add('Week · Sonnet', c['weeklySonnetUsage'], c['weeklyResetAt']);
   // One cache for whichever Claude account last drew the status line — so
-  // for an account Baton hasn't recorded yet it may be another account's.
+  // for an account Kovan hasn't recorded yet it may be another account's.
   return windows.length ? { asOf: modifiedAt, source: 'your status line, last Claude account used', shared: true, windows } : undefined;
 }
 

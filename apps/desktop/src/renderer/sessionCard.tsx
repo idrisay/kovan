@@ -5,13 +5,13 @@
  *   permission prompt waiting on you) or Done (its turn is over). Done is news
  *   only until you look: it goes once the session has been on screen.
  * - A card on hover (item 115) with the pull request, ticket or Sentry issue
- *   the session is about — only what Baton already has loaded, nothing is
+ *   the session is about — only what Kovan already has loaded, nothing is
  *   fetched for it — and the session itself: agent, folder, age, cost.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { formatAge, pullFlags } from '@baton/core';
+import { formatAge, pullFlags } from '@kovan/core';
 import type { SessionInfo, Snapshot } from './types';
 import { findRelatedPulls, findSubject, sessionLabel } from './sessionSubject';
 import { SessionUsageChip } from './Usage';
@@ -192,7 +192,7 @@ function SessionCard({ session, snapshot }: { session: SessionInfo; snapshot: Sn
       <Line label="Agent">{session.runnerName}</Line>
       <Line label="Folder"><span className="mono">{session.cwd.replace(home, '~')}</span></Line>
       <Line label="Started">{age(new Date(session.startedAt).toISOString())}</Line>
-      <Line label="Now">{state}{session.hosted ? '' : ' · ends when Baton quits'}</Line>
+      <Line label="Now">{state}{session.hosted ? '' : ' · ends when Kovan quits'}</Line>
       <Line label="Cost"><SessionUsageChip id={session.id} /></Line>
     </>
   );

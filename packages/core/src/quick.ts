@@ -1,12 +1,12 @@
 /**
  * The quick model: a free, slower, non-frontier model used for exactly two
  * read-only jobs — summarising why a pull request is blocked, and condensing
- * a ticket's older comments. It reads text Baton already has and returns
+ * a ticket's older comments. It reads text Kovan already has and returns
  * text. It is never an agent run: it writes no code and is never offered for
  * implement/unblock/review/verify.
  *
  * Everything here is pure so the renderer can share it (the out-of-date check
- * runs in both processes). The spawning lives in `@baton/agent`'s `quick.ts`
+ * runs in both processes). The spawning lives in `@kovan/agent`'s `quick.ts`
  * and the desktop app's `main/quick.ts`.
  */
 
@@ -71,7 +71,7 @@ export interface QuickResult {
   basis: QuickBasis;
   /** A code review's recommendation, from its last line. */
   verdict?: ReviewVerdict;
-  /** Set once the review has been posted to GitHub from Baton. */
+  /** Set once the review has been posted to GitHub from Kovan. */
   submitted?: { event: ReviewEvent; at: string; url?: string };
 }
 
@@ -120,7 +120,7 @@ export const QUICK_KIND_LABEL: Record<QuickKind, string> = {
 };
 
 // --- Inputs --------------------------------------------------------------------
-// Structural, not `@baton/providers`' own types: core sits below providers and
+// Structural, not `@kovan/providers`' own types: core sits below providers and
 // must not import them. `PullDetail` and `JiraIssue` both satisfy these.
 
 interface QuickComment {
@@ -320,7 +320,7 @@ export function splitVerdict(review: string): { text: string; verdict?: ReviewVe
 
 /** What goes to GitHub: the review, plainly marked as a model's. */
 export function reviewSubmissionBody(text: string, model: string, via = 'nv-review'): string {
-  return `${text.trim()}\n\n---\n_Written by ${model} via ${via}, posted from Baton._`;
+  return `${text.trim()}\n\n---\n_Written by ${model} via ${via}, posted from Kovan._`;
 }
 
 // --- Out of date --------------------------------------------------------------------

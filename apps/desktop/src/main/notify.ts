@@ -10,7 +10,7 @@
 
 import { Notification, shell } from 'electron';
 import * as path from 'node:path';
-import { githubAnswered, type PullSummary } from '@baton/core';
+import { githubAnswered, type PullSummary } from '@kovan/core';
 import type { DesktopHost } from './host';
 import type { Snapshot } from './poller';
 
@@ -93,7 +93,7 @@ export class Activity {
       this.show({ title: `${pull.repo} #${pull.number}`, body: pull.title, subtitle: 'Blocked on you', url: pull.url });
       return;
     }
-    this.show({ title: 'Baton', body: `${fresh.length} pull requests are now blocked on you` });
+    this.show({ title: 'Kovan', body: `${fresh.length} pull requests are now blocked on you` });
   }
 }
 

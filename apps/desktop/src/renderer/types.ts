@@ -1,11 +1,11 @@
 import type {
   ActivityEvent, GitHubBudget, QuickCommand, JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport
-} from '@baton/core';
-import type { PullDetail, ReviewComment, ReviewThread, Reviewer } from '@baton/providers';
-import type { AgentRun, RunFile, Runner, RunKind } from '@baton/agent';
+} from '@kovan/core';
+import type { PullDetail, ReviewComment, ReviewThread, Reviewer } from '@kovan/providers';
+import type { AgentRun, RunFile, Runner, RunKind } from '@kovan/agent';
 import type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus, RunTarget
-} from '@baton/git';
+} from '@kovan/git';
 import type {
   Entry, FileBody, FileStamp, Root, Workspace, WorkspaceRepo, WriteResult
 } from '../main/workspace';
@@ -26,10 +26,10 @@ export type {
 /** A repo's status plus the de-duplicated count the badge shows. */
 export type WorkspaceStatus = RepoStatus & { changes: number };
 
-export type { ThemeChoice } from '@baton/core';
-import type { Problem } from '@baton/core';
+export type { ThemeChoice } from '@kovan/core';
+import type { Problem } from '@kovan/core';
 export type { Problem };
-import type { SpeechProviderId } from '@baton/core';
+import type { SpeechProviderId } from '@kovan/core';
 export type { RunnerLimits } from '../main/agentLimits';
 import type { RunnerLimits } from '../main/agentLimits';
 
@@ -59,7 +59,7 @@ export interface SessionInfo {
   status?: 'working' | 'input' | 'done';
   statusAt?: number;
   statusSource?: 'claude' | 'codex' | 'opencode';
-  /** Lives in the terminal host, so it outlives Baton (item 114). */
+  /** Lives in the terminal host, so it outlives Kovan (item 114). */
   hosted?: boolean;
 }
 
@@ -102,7 +102,7 @@ export interface Subject {
   sentry?: { issue: SentryIssue; frames: SentryFrame[] };
 }
 
-export interface BatonApi {
+export interface KovanApi {
   snapshot(): Promise<Snapshot>;
   refresh(): Promise<Snapshot>;
   refreshProvider(id: PolledProvider): Promise<Snapshot>;
@@ -117,7 +117,7 @@ export interface BatonApi {
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
 
   pullDetail(repo: string, number: number): Promise<PullDetail>;
-  /** People (most requested through Baton first) and teams who can review on this repo. */
+  /** People (most requested through Kovan first) and teams who can review on this repo. */
   reviewerCandidates(repo: string): Promise<{ people: { login: string; count: number }[]; teams: { slug: string; name: string }[] }>;
   requestReviewers(repo: string, number: number, people: string[], teams: string[]): Promise<void>;
   ticketDetail(key: string): Promise<JiraIssue>;
@@ -245,7 +245,7 @@ export interface BatonApi {
   onActivityToast(listener: (events: ActivityEvent[]) => void): () => void;
   /** A notification was clicked: open this subject ('' = the inbox). */
   onActivityOpen(listener: (subject: string) => void): () => void;
-  /** Writes what threw to `~/Library/Logs/Baton/baton.log` (item 83). */
+  /** Writes what threw to `~/Library/Logs/Kovan/kovan.log` (item 83). */
   logError(report: RendererErrorReport): Promise<void>;
   /** Shows the log file selected in Finder. */
   revealLog(): Promise<void>;
@@ -286,7 +286,7 @@ export interface BatonApi {
 
 declare global {
   interface Window {
-    baton: BatonApi;
+    kovan: KovanApi;
   }
 }
 

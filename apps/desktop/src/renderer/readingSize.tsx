@@ -25,11 +25,11 @@ interface Scale {
   event: string;
 }
 
-const READING: Scale = { key: 'baton.reading-size', variable: '--reading-zoom', event: 'baton:reading-size' };
-const SIDEBAR: Scale = { key: 'baton.sidebar-size', variable: '--sidebar-zoom', event: 'baton:sidebar-size' };
+const READING: Scale = { key: 'kovan.reading-size', variable: '--reading-zoom', event: 'kovan:reading-size' };
+const SIDEBAR: Scale = { key: 'kovan.sidebar-size', variable: '--sidebar-zoom', event: 'kovan:sidebar-size' };
 /** Item 103: the terminal tab strip, a session's header and the status bar —
  *  the small print around the work, too small to read on a large screen. */
-const CHROME: Scale = { key: 'baton.chrome-size', variable: '--chrome-zoom', event: 'baton:chrome-size' };
+const CHROME: Scale = { key: 'kovan.chrome-size', variable: '--chrome-zoom', event: 'kovan:chrome-size' };
 
 function read(scale: Scale): number {
   try {

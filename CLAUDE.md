@@ -1,4 +1,4 @@
-# Baton
+# Kovan
 
 Read `DESIGN.md` before adding or changing a feature. It covers the visual
 rules, the component and button weights, the behaviour rules (nothing

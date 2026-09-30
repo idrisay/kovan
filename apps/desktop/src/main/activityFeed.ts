@@ -9,7 +9,7 @@
  *
  * Delivery is the caller's: a toast when the window is in front, a macOS
  * notification when it isn't. The first poll after launch is compared with
- * what was saved at the last quit, so what happened while Baton was closed
+ * what was saved at the last quit, so what happened while Kovan was closed
  * lands in the inbox unread — but quietly, with no toast or notification for
  * each of them.
  */
@@ -18,7 +18,7 @@ import * as path from 'node:path';
 import {
   ACTIVITY_KINDS, addActivity, diffActivity, githubAnswered,
   type ActivityEvent, type ActivityKind, type ActivityPoll, type ActivitySeen
-} from '@baton/core';
+} from '@kovan/core';
 import type { DesktopHost } from './host';
 import type { Snapshot } from './poller';
 

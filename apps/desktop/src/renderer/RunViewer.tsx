@@ -5,7 +5,7 @@ import { Prose } from './Prose';
 import { highlightLines } from './languages';
 import type { AgentRun, RunFile, RunKind } from './types';
 
-// A value import from `@baton/agent` (unlike a type-only one) would pull its
+// A value import from `@kovan/agent` (unlike a type-only one) would pull its
 // Node-only `shell.ts`/`runner.ts` into the renderer bundle along with it —
 // `RUN_KIND_LABEL` lives in the same package, so it is copied rather than
 // imported. Keep this in sync with `packages/agent/src/runs.ts`.
@@ -17,7 +17,7 @@ const RUN_KIND_LABEL: Record<RunKind, string> = {
 };
 
 const IMAGE_NAME = /\.(png|jpe?g|gif|webp)$/i;
-/** `$BATON_STATUS`: the agent's current step, shown as a caption — not a file to list. */
+/** `$KOVAN_STATUS`: the agent's current step, shown as a caption — not a file to list. */
 const STATUS_FILE = 'status.txt';
 
 /** "12 s ago" for the newest screenshot while a run is live. */
@@ -82,7 +82,7 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
   const [status, setStatus] = useState('');
 
   const load = useCallback(async (cancelled: () => boolean) => {
-    const found = await window.baton.runFiles(run.directory);
+    const found = await window.kovan.runFiles(run.directory);
     if (cancelled()) return;
     setFiles(found);
     const changed = found.filter((file) => fetched.current[file.path] !== file.modifiedAt);
@@ -91,8 +91,8 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
         const absolute = `${run.directory}/${file.path}`;
         try {
           return IMAGE_NAME.test(file.name)
-            ? [file.path, await window.baton.runImage(absolute)]
-            : [file.path, snippet(await window.baton.runText(absolute))];
+            ? [file.path, await window.kovan.runImage(absolute)]
+            : [file.path, snippet(await window.kovan.runText(absolute))];
         } catch {
           return [file.path, ''];
         }
@@ -104,7 +104,7 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
     setPreviews((current) => ({ ...current, ...Object.fromEntries(pairs) }));
     const statusFile = found.find((f) => f.path === STATUS_FILE);
     if (statusFile) {
-      const line = await window.baton.runText(`${run.directory}/${STATUS_FILE}`).catch(() => '');
+      const line = await window.kovan.runText(`${run.directory}/${STATUS_FILE}`).catch(() => '');
       if (!cancelled()) setStatus(line.trim().split('\n').pop()?.slice(0, 200) ?? '');
     }
     // New screenshots flash for a moment, so the eye finds them — not on
@@ -122,14 +122,14 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
     void load(() => cancelled);
     // Live: the folder is watched while this is open, so a screenshot shows
     // up here the moment the agent saves it.
-    void window.baton.runWatch(run.directory, true).catch(() => undefined);
-    const off = window.baton.onRunChanged((directory) => {
+    void window.kovan.runWatch(run.directory, true).catch(() => undefined);
+    const off = window.kovan.onRunChanged((directory) => {
       if (directory === run.directory) void load(() => cancelled);
     });
     return () => {
       cancelled = true;
       off();
-      void window.baton.runWatch(run.directory, false).catch(() => undefined);
+      void window.kovan.runWatch(run.directory, false).catch(() => undefined);
     };
   }, [run.directory, load]);
 
@@ -138,8 +138,8 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
   useEffect(() => {
     const check = (list: { running: boolean; runDirectory?: string }[]) =>
       setLive(list.some((s) => s.running && s.runDirectory === run.directory));
-    void window.baton.sessions().then(check);
-    return window.baton.onSessions(check);
+    void window.kovan.sessions().then(check);
+    return window.kovan.onSessions(check);
   }, [run.directory]);
 
   // "12 s ago" keeps counting while it's live.
@@ -159,7 +159,7 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
     setLoading(true);
     setReadError(undefined);
     setText(undefined);
-    window.baton
+    window.kovan
       .runText(`${run.directory}/${selected.path}`)
       .then((body) => {
         if (!cancelled) setText(body);
@@ -232,7 +232,7 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
   // Finder with the file selected, not the file opened in Preview — "in
   // Finder" is what the button says.
   const reveal = (relative?: string) =>
-    void window.baton.runReveal(relative ? `${run.directory}/${relative}` : run.directory);
+    void window.kovan.runReveal(relative ? `${run.directory}/${relative}` : run.directory);
   const openInFinder = (file: RunFile) => reveal(file.path);
   /** The folder holding the screenshots — `shots/` as a rule, the run itself otherwise. */
   const shotsFolder = images.length > 0 && images.every((f) => f.path.includes('/'))
@@ -263,7 +263,7 @@ export function RunViewer({ run, onClose }: { run: AgentRun; onClose: () => void
               title={`The page in ${newest ? 'the screenshot shown' : 'the report'}, on ${run.site} — in your default browser`}
               // The page of the screenshot on screen, not the site's front
               // door, which redirects to the dashboard (item 109).
-              onClick={() => void window.baton.runSiteOpen(run.directory, (lightbox ?? newest)?.path.split('/').pop())}
+              onClick={() => void window.kovan.runSiteOpen(run.directory, (lightbox ?? newest)?.path.split('/').pop())}
             >
               Open this page on {run.environment || 'the site'}
             </button>

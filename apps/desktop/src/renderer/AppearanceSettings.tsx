@@ -1,4 +1,4 @@
-import { ACCENTS, THEMES, type ThemeId } from '@baton/core';
+import { ACCENTS, THEMES, type ThemeId } from '@kovan/core';
 import { setAppearance, useAppearance, usePaintedTheme } from './appearance';
 
 /**
@@ -80,7 +80,7 @@ export function AppearanceSettings() {
           <p className="settings-note">
             {mode === 'system'
               ? 'Follows macOS Light and Dark — set macOS to Auto and this follows sunrise and sunset.'
-              : 'Switches at these times, but only while Baton isn’t the window in front, or when you come back to it — never while you’re reading.'}
+              : 'Switches at these times, but only while Kovan isn’t the window in front, or when you come back to it — never while you’re reading.'}
           </p>
           <label>
             <span>{mode === 'system' ? 'When macOS is light' : 'Day'}</span>

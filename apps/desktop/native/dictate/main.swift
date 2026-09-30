@@ -1,6 +1,6 @@
-// baton-dictate — on-device dictation for Baton (improvements item 88).
+// kovan-dictate — on-device dictation for Kovan (improvements item 88).
 //
-// Baton is Electron, and Chromium's own speech recognition doesn't work there,
+// Kovan is Electron, and Chromium's own speech recognition doesn't work there,
 // so the microphone and Apple's recogniser live in this small helper. It's the
 // same approach VoiceSmith's live preview uses (LiveTranscriber +
 // AudioRecorder): an AVAudioEngine tap feeding an
@@ -14,16 +14,16 @@
 //   {"type":"final","text":"Hello world."} once, after "stop"
 //   {"type":"error","code":"…","message":"…"}  then exit 1
 // and one command per line on stdin: "stop" (finish, send final, exit) or
-// "cancel" (exit now, send nothing). EOF counts as cancel, so a Baton that
+// "cancel" (exit now, send nothing). EOF counts as cancel, so a Kovan that
 // dies never leaves the microphone on.
 //
-//   baton-dictate [--locale en-US] [--file audio.wav]
-//   baton-dictate --record out.wav   (item 97) record only, for a speech
+//   kovan-dictate [--locale en-US] [--file audio.wav]
+//   kovan-dictate --record out.wav   (item 97) record only, for a speech
 //                                    provider other than Apple's: 16 kHz mono
 //                                    16-bit WAV, the same level meter, then
 //                                    {"type":"recorded","path":…,"seconds":…}
 //                                    after "stop". No Speech permission needed.
-//   baton-dictate --status     permissions and languages, never prompts
+//   kovan-dictate --status     permissions and languages, never prompts
 
 import AVFoundation
 import Foundation
@@ -203,9 +203,9 @@ func authorize(_ then: @escaping () -> Void) {
         case .notDetermined:
             SFSpeechRecognizer.requestAuthorization { status in
                 if status == .authorized { next() }
-                else { fail("speech-denied", "Speech recognition isn't allowed for Baton.") }
+                else { fail("speech-denied", "Speech recognition isn't allowed for Kovan.") }
             }
-        default: fail("speech-denied", "Speech recognition isn't allowed for Baton.")
+        default: fail("speech-denied", "Speech recognition isn't allowed for Kovan.")
         }
     }
     if file != nil { speech(then); return }
@@ -216,9 +216,9 @@ func authorize(_ then: @escaping () -> Void) {
     case .authorized: next(then)
     case .notDetermined:
         AVCaptureDevice.requestAccess(for: .audio) { granted in
-            if granted { next(then) } else { fail("mic-denied", "Baton isn't allowed to use the microphone.") }
+            if granted { next(then) } else { fail("mic-denied", "Kovan isn't allowed to use the microphone.") }
         }
-    default: fail("mic-denied", "Baton isn't allowed to use the microphone.")
+    default: fail("mic-denied", "Kovan isn't allowed to use the microphone.")
     }
 }
 
@@ -273,7 +273,7 @@ final class Recorder: @unchecked Sendable {
         self.url = url
         output = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
         guard let converter = AVAudioConverter(from: input, to: output) else {
-            throw NSError(domain: "baton-dictate", code: 1, userInfo: [NSLocalizedDescriptionKey: "can't convert \(input)"])
+            throw NSError(domain: "kovan-dictate", code: 1, userInfo: [NSLocalizedDescriptionKey: "can't convert \(input)"])
         }
         self.converter = converter
         file = try AVAudioFile(forWriting: url, settings: [
@@ -411,7 +411,7 @@ let stdinThread = Thread {
         default: continue
         }
     }
-    exit(0) // EOF: Baton went away. Don't leave the microphone on.
+    exit(0) // EOF: Kovan went away. Don't leave the microphone on.
 }
 stdinThread.start()
 

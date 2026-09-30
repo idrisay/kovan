@@ -61,7 +61,7 @@ export function Prose({ text }: { text: string }) {
         const anchor = (event.target as HTMLElement).closest('a');
         if (anchor?.href) {
           event.preventDefault();
-          void window.baton.openExternal(anchor.href);
+          void window.kovan.openExternal(anchor.href);
         }
       }}
     />

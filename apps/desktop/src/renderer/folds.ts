@@ -15,7 +15,7 @@ function readList(storageKey: string): string[] {
  * one long review shouldn't hide the next one you haven't read yet. Kept as a
  * list of the folded keys, newest last and capped, so it can't grow forever.
  */
-export function useFold(key: string, storageKey = 'baton.folded-cards'): [boolean, () => void] {
+export function useFold(key: string, storageKey = 'kovan.folded-cards'): [boolean, () => void] {
   const [folded, setFolded] = useState(() => readList(storageKey).includes(key));
   useEffect(() => setFolded(readList(storageKey).includes(key)), [key, storageKey]);
   const toggle = useCallback(() => {

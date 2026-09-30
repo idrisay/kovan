@@ -24,7 +24,7 @@ import {
   type PriceRule,
   type UsageRecord,
   type UsageTotals
-} from '@baton/core';
+} from '@kovan/core';
 import { findSubject, type Selection } from './sessionSubject';
 import type { Snapshot } from './types';
 
@@ -48,9 +48,9 @@ function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   if (!started) {
     started = true;
-    void window.baton.usage().then((records) => publish({ records }));
-    window.baton.onUsage((records) => publish({ records }));
-    void window.baton.settings().then((settings) => publish({ prices: validPrices(settings['usage.prices']) }));
+    void window.kovan.usage().then((records) => publish({ records }));
+    window.kovan.onUsage((records) => publish({ records }));
+    void window.kovan.settings().then((settings) => publish({ prices: validPrices(settings['usage.prices']) }));
   }
   return () => listeners.delete(listener);
 }
@@ -69,7 +69,7 @@ export function validPrices(value: unknown): PriceRule[] {
 }
 
 export function savePrices(prices: PriceRule[] | undefined): void {
-  void window.baton.setSetting('usage.prices', prices ?? null);
+  void window.kovan.setSetting('usage.prices', prices ?? null);
   publish({ prices: prices ?? DEFAULT_PRICES });
 }
 
@@ -309,7 +309,7 @@ export function UsageOverview({
 
           {inRange.length === 0 ? (
             <p className="quiet">
-              Nothing recorded in this range. Usage is read from Claude Code and Codex while they run in a Baton terminal.
+              Nothing recorded in this range. Usage is read from Claude Code and Codex while they run in a Kovan terminal.
             </p>
           ) : (
             <>

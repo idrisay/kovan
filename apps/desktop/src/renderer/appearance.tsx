@@ -2,10 +2,10 @@ import { useSyncExternalStore } from 'react';
 import {
   DEFAULT_SETTINGS, isAccentId, isThemeId, resolveTheme, themeInfo,
   type AccentId, type Density, type TerminalColors, type ThemeChoice, type ThemeId
-} from '@baton/core';
+} from '@kovan/core';
 
 /**
- * Everything about how Baton looks (item 96), as one store: App.tsx starts it,
+ * Everything about how Kovan looks (item 96), as one store: App.tsx starts it,
  * Settings edits it, the terminals read it. What it paints is a handful of
  * attributes on `<html>` — `data-theme` (the tone, light or dark),
  * `data-palette`, `data-accent`, `data-status`, `data-shapes`,
@@ -108,7 +108,7 @@ function paint() {
   // Native chrome (scrollbars, a native <select>): 'system' has to stay
   // 'system', or Electron would pin prefers-color-scheme and "System" could
   // never see macOS switch again.
-  void window.baton.setNativeTheme(current.theme === 'system' ? 'system' : info.tone);
+  void window.kovan.setNativeTheme(current.theme === 'system' ? 'system' : info.tone);
 
   painted = id;
   emit();
@@ -116,7 +116,7 @@ function paint() {
 
 async function refreshSystemAccent() {
   if (current.accent !== 'macos') return;
-  const next = await window.baton.systemAccent().catch(() => undefined);
+  const next = await window.kovan.systemAccent().catch(() => undefined);
   if (next && next !== systemAccent) {
     systemAccent = next;
     paint();
@@ -128,14 +128,14 @@ let started = false;
 /**
  * Loads the saved appearance and keeps it painted: live when "System" is the
  * choice and macOS switches, and on the schedule — but a scheduled switch
- * waits until Baton is not the window in front, or until it comes back to
+ * waits until Kovan is not the window in front, or until it comes back to
  * the front, so the screen never changes under someone reading a diff.
  */
 export function startAppearance(): void {
   if (started) return;
   started = true;
   paint();
-  void window.baton.settings().then((settings) => {
+  void window.kovan.settings().then((settings) => {
     const next = { ...current } as Record<string, unknown>;
     for (const [field, key] of Object.entries(KEYS)) {
       if (settings[key] !== undefined) next[field] = settings[key];
@@ -183,7 +183,7 @@ export function setAppearance<K extends keyof Appearance>(field: K, value: Appea
   current = { ...current, [field]: value };
   paint();
   if (field === 'accent') void refreshSystemAccent();
-  void window.baton.setSetting(KEYS[field], value);
+  void window.kovan.setSetting(KEYS[field], value);
 }
 
 export function subscribeAppearance(listener: () => void): () => void {

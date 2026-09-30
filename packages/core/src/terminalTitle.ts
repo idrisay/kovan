@@ -3,7 +3,7 @@
  * a terminal tab. Claude Code sets one describing its current task
  * ("✳ Investigate ACME-2409"), with a spinner glyph in front while it works.
  * Shells set one too, on every prompt ("idrisay@mac: ~/code/web", or the
- * command being run), and those say less than the name Baton already gave
+ * command being run), and those say less than the name Kovan already gave
  * the session, so they are dropped rather than shown.
  */
 

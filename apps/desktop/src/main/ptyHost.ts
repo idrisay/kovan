@@ -1,22 +1,22 @@
 /**
  * The terminal host (item 114): a small background process that owns every
- * session's pty, so quitting Baton, an update or a crash no longer ends the
- * agents running in them. Baton connects to it over a Unix socket, the way
+ * session's pty, so quitting Kovan, an update or a crash no longer ends the
+ * agents running in them. Kovan connects to it over a Unix socket, the way
  * tmux's client talks to its server, and picks its sessions up again when it
  * starts.
  *
  * Runs as Electron's own binary in Node mode (ELECTRON_RUN_AS_NODE), started
- * detached by `ptyClient.ts`. Imports nothing from Baton — only node and
+ * detached by `ptyClient.ts`. Imports nothing from Kovan — only node and
  * node-pty — so it is its own small file, unpacked from the app archive.
  *
- * It keeps what a restarted Baton needs to redraw each session: its details
- * as Baton last described them (opaque here), the tail of its output, and
- * whether it is still running. It exits by itself once no Baton is
+ * It keeps what a restarted Kovan needs to redraw each session: its details
+ * as Kovan last described them (opaque here), the tail of its output, and
+ * whether it is still running. It exits by itself once no Kovan is
  * connected and nothing is running in it; a restart of the Mac ends it, as
  * it ends any terminal.
  *
  * The messages are one JSON object per line. They only ever grow new
- * optional fields: an older host must keep working with a newer Baton, since
+ * optional fields: an older host must keep working with a newer Kovan, since
  * a host started before an update serves its sessions until they end.
  */
 

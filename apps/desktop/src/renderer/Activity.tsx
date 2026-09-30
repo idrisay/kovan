@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { activityLabel, formatAge, type ActivityKind } from '@baton/core';
+import { activityLabel, formatAge, type ActivityKind } from '@kovan/core';
 import type { ActivityEvent } from './types';
 
 const TONE: Record<ActivityKind, string> = {
@@ -34,12 +34,12 @@ export function useActivity(): {
   useEffect(() => {
     let live = true;
     // The only call that reads it: main hands the pending subject out once.
-    void window.baton.activity().then((state) => {
+    void window.kovan.activity().then((state) => {
       if (!live) return;
       setInbox(state.inbox);
       if (state.open !== undefined) setLaunchOpen(state.open);
     });
-    const off = window.baton.onActivity((next) => setInbox(next));
+    const off = window.kovan.onActivity((next) => setInbox(next));
     return () => {
       live = false;
       off();
@@ -48,7 +48,7 @@ export function useActivity(): {
   const markRead = useCallback((ids: string[] | 'all') => {
     // Shown read at once; main's answer confirms it.
     setInbox((current) => current.map((e) => (ids === 'all' || ids.includes(e.id) ? { ...e, read: true } : e)));
-    void window.baton.activityRead(ids).then(setInbox);
+    void window.kovan.activityRead(ids).then(setInbox);
   }, []);
   return { inbox, unread: inbox.filter((e) => !e.read).length, markRead, launchOpen };
 }
@@ -154,7 +154,7 @@ export function ActivityToasts({ onOpen, onShowAll }: {
   const hovered = useRef(false);
 
   useEffect(
-    () => window.baton.onActivityToast((events) =>
+    () => window.kovan.onActivityToast((events) =>
       // Main sends them newest first, the inbox's own order.
       setStack((current) => {
         const all = [...events, ...current.toasts];
@@ -249,7 +249,7 @@ export const ACTIVITY_SETTINGS: { setting: string; label: string; note: string }
 export function ActivitySettings() {
   const [on, setOn] = useState<Record<string, boolean>>({});
   useEffect(() => {
-    void window.baton.settings().then((settings) =>
+    void window.kovan.settings().then((settings) =>
       setOn(Object.fromEntries(ACTIVITY_SETTINGS.map(({ setting }) => [setting, settings[setting] !== false])))
     );
   }, []);
@@ -257,7 +257,7 @@ export function ActivitySettings() {
     <>
       <h3>Activity</h3>
       <p className="settings-note">
-        What goes in the Activity inbox. While Baton is in front, each shows as a toast for a few seconds;
+        What goes in the Activity inbox. While Kovan is in front, each shows as a toast for a few seconds;
         otherwise as a macOS notification, if notifications are on above. Turned off, it isn't recorded at all.
       </p>
       {ACTIVITY_SETTINGS.map(({ setting, label, note }) => (
@@ -268,7 +268,7 @@ export function ActivitySettings() {
             onChange={(e) => {
               const value = e.target.checked;
               setOn((current) => ({ ...current, [setting]: value }));
-              void window.baton.setSetting(setting, value);
+              void window.kovan.setSetting(setting, value);
             }}
           />
           <span>{label}</span>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useMenuDismiss } from './menuDismiss';
-import { DEFAULT_PULL_SORT, describeGitHubBudget, formatAge, isBlocked, moveBy, moveItem, PULL_SORTS, sortPulls, withSelected, type PullSort } from '@baton/core';
+import { DEFAULT_PULL_SORT, describeGitHubBudget, formatAge, isBlocked, moveBy, moveItem, PULL_SORTS, sortPulls, withSelected, type PullSort } from '@kovan/core';
 import type {
   JiraIssue, PolledProvider, PullSummary, RunKind, RunTarget, SentryFrame, SentryIssue,
   SessionInfo, Snapshot
@@ -107,7 +107,7 @@ const REFRESHABLE: { id: PolledProvider; label: string }[] = [
 /** How many more merged pull requests one press of the footer asks for. */
 const MERGED_STEP = 10;
 
-const COLLAPSED_KEY = 'baton.collapsed-groups';
+const COLLAPSED_KEY = 'kovan.collapsed-groups';
 
 /**
  * Which sections start folded.
@@ -208,7 +208,7 @@ function TicketFilterMenu({
   const [projectStatuses, setProjectStatuses] = useState<string[]>();
   useEffect(() => {
     if (!open || projectStatuses) return;
-    void window.baton.ticketStatuses().then((list) => setProjectStatuses(list.map((s) => s.name)));
+    void window.kovan.ticketStatuses().then((list) => setProjectStatuses(list.map((s) => s.name)));
   }, [open, projectStatuses]);
   const statusCount = useMemo(() => {
     const counts = new Map<string, number>();
@@ -353,7 +353,7 @@ function TicketSortMenu({
 }
 
 /** The pull requests view's own sort icon — a menu now, not the dead button
- *  it used to be. `sortPulls`/`PULL_SORTS` already existed in `@baton/core`
+ *  it used to be. `sortPulls`/`PULL_SORTS` already existed in `@kovan/core`
  *  for the poller's own default ordering; nothing in the UI ever called them. */
 function PullSortMenu({
   value, onChange
@@ -678,7 +678,7 @@ export function App() {
   const [queueHidden, setQueueHidden] = useState(false);
   useEffect(() => setQueueHidden(false), [view]);
   // The workspace view is mounted on its first visit and kept from then on;
-  // see `keep-alive` below. Not before: opening Baton must not scan folders.
+  // see `keep-alive` below. Not before: opening Kovan must not scan folders.
   const [workspaceSeen, setWorkspaceSeen] = useState(false);
   useEffect(() => { if (view === 'workspace') setWorkspaceSeen(true); }, [view]);
 
@@ -758,7 +758,7 @@ export function App() {
   const [fontSize] = useTerminalFontSize();
   const idleCount = idleAgents(useRunningAgents()).length;
   const [agentsPane, setAgentsPane] = useState<AgentsPaneId>('agents');
-  useEffect(() => window.baton.onShowAgents(() => {
+  useEffect(() => window.kovan.onShowAgents(() => {
     setView('agents');
     setAgentsPane('agents');
   }), []);
@@ -851,15 +851,15 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    void window.baton.snapshot().then(accept);
-    void window.baton.sessions().then((list) => { setSessions(list); setSessionsReady(true); });
-    void window.baton.runTargets().then(setTargets);
-    const offSnapshot = window.baton.onSnapshot(accept);
-    const offSessions = window.baton.onSessions(setSessions);
+    void window.kovan.snapshot().then(accept);
+    void window.kovan.sessions().then((list) => { setSessions(list); setSessionsReady(true); });
+    void window.kovan.runTargets().then(setTargets);
+    const offSnapshot = window.kovan.onSnapshot(accept);
+    const offSessions = window.kovan.onSessions(setSessions);
     return () => { offSnapshot(); offSessions(); };
   }, [accept]);
 
-  const refresh = useCallback(() => void window.baton.refresh(), []);
+  const refresh = useCallback(() => void window.kovan.refresh(), []);
 
   // --- Rail order (item 89) -------------------------------------------------
   // Drag an icon up or down, or ⌥↑ / ⌥↓ on a focused one; the same clay line
@@ -926,15 +926,15 @@ export function App() {
     setActivityId(event.id);
     const match = findSubject(event.subject, snapshot);
     if (match) setSelected(match);
-    // Merged and aged out, or resolved: not in any list Baton holds any more.
-    else void window.baton.openExternal(event.url);
+    // Merged and aged out, or resolved: not in any list Kovan holds any more.
+    else void window.kovan.openExternal(event.url);
   }, [activity, snapshot]);
 
   // A clicked macOS notification, now or from before this window existed.
   useEffect(() => {
     if (activity.launchOpen !== undefined) setActivityRequest(activity.launchOpen);
   }, [activity.launchOpen]);
-  useEffect(() => window.baton.onActivityOpen((subject) => setActivityRequest(subject)), []);
+  useEffect(() => window.kovan.onActivityOpen((subject) => setActivityRequest(subject)), []);
   useEffect(() => {
     if (activityRequest === undefined) return;
     setView('activity');
@@ -961,7 +961,7 @@ export function App() {
 
   /** Opening a terminal anywhere lands you in the session that just started. */
   const openTerminal = useCallback((cwd?: string) => {
-    void window.baton.openTerminal(cwd).then((s) => {
+    void window.kovan.openTerminal(cwd).then((s) => {
       setActiveSession(s.id);
       setView('sessions');
     });
@@ -1011,7 +1011,7 @@ export function App() {
   /** Renaming only ever touches the label — never `subject`, which is what
    *  the row's own click-through to a pull request or ticket goes by. */
   const renameSession = useCallback((id: string, title: string) => {
-    void window.baton.sessionRename(id, title);
+    void window.kovan.sessionRename(id, title);
   }, []);
 
   /** A session row's identifier, clicked: the pull request or ticket it was
@@ -1094,7 +1094,7 @@ export function App() {
   const pullFilterCount = PULL_FACETS.reduce((n, f) => n + pullFilters[f.key].size, 0);
 
   const loadMoreMerged = useCallback(() => {
-    void window.baton.loadMoreMerged(snapshot.merged.length + MERGED_STEP).then(accept);
+    void window.kovan.loadMoreMerged(snapshot.merged.length + MERGED_STEP).then(accept);
   }, [snapshot.merged.length, accept]);
 
   const ticketFacets = useMemo(() => ticketFacetValues(snapshot.tickets), [snapshot.tickets]);
@@ -1140,7 +1140,7 @@ export function App() {
     // No view change: a run is always started from the pull request or
     // ticket it is about, and that pane docks the new session's terminal
     // itself the moment `sessions` includes it — see `PullPane`/`TicketPane`.
-    void window.baton.sessions().then(setSessions);
+    void window.kovan.sessions().then(setSessions);
   };
 
   // "Nothing connected" only once a refresh has actually finished and found
@@ -1168,7 +1168,7 @@ export function App() {
             <ForwardIcon />
           </button>
         </nav>
-        <span className="wordmark">Baton</span>
+        <span className="wordmark">Kovan</span>
         {snapshot.viewer && <span className="viewer">{snapshot.viewer}</span>}
         <span className="spacer" />
         <QuickCommands
@@ -1179,7 +1179,7 @@ export function App() {
           <RefreshMenu
             snapshot={snapshot}
             onRefreshAll={refresh}
-            onRefreshProvider={(id) => void window.baton.refreshProvider(id)}
+            onRefreshProvider={(id) => void window.kovan.refreshProvider(id)}
           />
         )}
       </header>
@@ -1669,7 +1669,7 @@ function SessionCloseButton({ session }: { session: SessionInfo }) {
         onClick={(e) => {
           e.stopPropagation();
           if (!session.running) {
-            void window.baton.sessionClose(session.id);
+            void window.kovan.sessionClose(session.id);
             return;
           }
           setAsking((v) => !v);
@@ -1692,7 +1692,7 @@ function SessionCloseButton({ session }: { session: SessionInfo }) {
               ? 'Close this terminal? Anything still running in it stops.'
               : <>Stop <strong>{session.runnerName}</strong> and close this session? The agent stops where it is.</>}
           </p>
-          <button type="button" className="menu-warn" onClick={() => { setAsking(false); void window.baton.sessionClose(session.id); }}>
+          <button type="button" className="menu-warn" onClick={() => { setAsking(false); void window.kovan.sessionClose(session.id); }}>
             {shell ? 'Close terminal' : 'Stop and close'}
           </button>
           {/* Focus lands on Cancel: Enter straight after the click must not stop an agent. */}
@@ -1752,7 +1752,7 @@ function AgentsView({
  * in localStorage too, since the sessions outlive the window: reopened, it
  * finds the same terminals in the same places, as VS Code does.
  */
-const PANE_KEY = 'baton.session-panes';
+const PANE_KEY = 'kovan.session-panes';
 type PaneState = { tree?: PaneTree; focusedLeafId?: string };
 let savedPane: PaneState | undefined;
 
@@ -1774,7 +1774,7 @@ function savePane(pane: PaneState): void {
   } catch { /* the layout still holds for this window */ }
 }
 
-const ORDER_KEY = 'baton.session-order';
+const ORDER_KEY = 'kovan.session-order';
 
 function loadSessionOrder(): string[] {
   try {
@@ -2123,7 +2123,7 @@ function Empty({ onConnect }: { onConnect: () => void }) {
     <div className="empty">
       <h1>Nothing connected yet</h1>
       <p>
-        Baton watches your pull requests and tickets, tells you what is blocked on you — even
+        Kovan watches your pull requests and tickets, tells you what is blocked on you — even
         when your editor is closed — and hands the blocked thing to a coding agent.
       </p>
       <button className="primary" onClick={onConnect}>Connect a service</button>

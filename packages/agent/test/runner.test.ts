@@ -44,7 +44,7 @@ describe('the security rule', () => {
     expect(line).not.toContain('rm -rf');
     expect(line).not.toContain('`id`');
     // It arrives by file substitution instead.
-    expect(line).toMatch(/"\$\(< '.*baton-prompts.*'\)"/);
+    expect(line).toMatch(/"\$\(< '.*kovan-prompts.*'\)"/);
   });
 
   it('round-trips a hostile prompt through a real shell unchanged', async () => {

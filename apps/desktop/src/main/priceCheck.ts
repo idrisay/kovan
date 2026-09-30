@@ -6,7 +6,7 @@
 import {
   parsePriceCheck, priceCheckPrompt,
   type PriceCheckRunner, type PriceProposal, type PriceRule
-} from '@baton/core';
+} from '@kovan/core';
 import { WebAsk } from './webAsk';
 
 export type PriceCheckResult = { proposals: PriceProposal[] } | { error: string };

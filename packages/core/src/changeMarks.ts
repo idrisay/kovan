@@ -2,7 +2,7 @@
  * The editor's change bars: which lines of the working file are new, changed,
  * or sit where something was removed — VS Code's "quick diff" gutter.
  *
- * Structural types rather than `@baton/git`'s, so this stays in the barrel the
+ * Structural types rather than `@kovan/git`'s, so this stays in the barrel the
  * renderer loads without pulling git's node imports in.
  */
 

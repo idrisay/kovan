@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Terminal as Xterm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { shellPath } from '@baton/core';
+import { shellPath } from '@kovan/core';
 import '@xterm/xterm/css/xterm.css';
 import { getAppearance, subscribeAppearance } from './appearance';
 
@@ -113,24 +113,24 @@ export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; font
           return;
         }
         fit.fit();
-        void window.baton.sessionResize(sessionId, term.cols, term.rows);
+        void window.kovan.sessionResize(sessionId, term.cols, term.rows);
       } catch {
         // Fitting a detached or zero-size element throws; the observer below
         // will call again once it has a size.
       }
     };
 
-    void window.baton.sessionBuffer(sessionId).then((buffer) => {
+    void window.kovan.sessionBuffer(sessionId).then((buffer) => {
       if (disposed) return;
       if (buffer) term.write(buffer);
       sync();
       term.focus();
     });
 
-    const offOutput = window.baton.onSessionOutput((id, data) => {
+    const offOutput = window.kovan.onSessionOutput((id, data) => {
       if (id === sessionId) term.write(data);
     });
-    const typed = term.onData((data) => void window.baton.sessionWrite(sessionId, data));
+    const typed = term.onData((data) => void window.kovan.sessionWrite(sessionId, data));
 
     // xterm draws on a canvas, not with CSS, so a theme or accent change has
     // to be handed to it — otherwise a terminal keeps the theme it opened in.
@@ -153,7 +153,7 @@ export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; font
       term.focus();
       return true;
     };
-    const filesOf = (list?: FileList | null) => Array.from(list ?? []).map((f) => window.baton.pathForFile(f));
+    const filesOf = (list?: FileList | null) => Array.from(list ?? []).map((f) => window.kovan.pathForFile(f));
     const onDragOver = (event: DragEvent) => {
       if (!event.dataTransfer?.types.includes('Files')) return;
       event.preventDefault();
@@ -177,7 +177,7 @@ export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; font
       if (!hasImage || data.getData('text/plain')) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      void window.baton.clipboardImagePath().then((file) => { if (file) pastePaths([file]); });
+      void window.kovan.clipboardImagePath().then((file) => { if (file) pastePaths([file]); });
     };
     element.addEventListener('dragover', onDragOver);
     element.addEventListener('drop', onDrop);
@@ -207,7 +207,7 @@ export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; font
     try {
       const proposed = current.fit.proposeDimensions();
       current.fit.fit();
-      if (proposed) void window.baton.sessionResize(sessionId, proposed.cols, proposed.rows);
+      if (proposed) void window.kovan.sessionResize(sessionId, proposed.cols, proposed.rows);
     } catch {
       // Same detached/zero-size case `sync` above already tolerates.
     }

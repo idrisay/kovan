@@ -6,8 +6,8 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
-import { trackProblems, type Problem, type ProviderId } from '@baton/core';
-import { EventEmitter } from '@baton/host';
+import { trackProblems, type Problem, type ProviderId } from '@kovan/core';
+import { EventEmitter } from '@kovan/host';
 
 export class ProblemLog {
   private log: Problem[] = [];

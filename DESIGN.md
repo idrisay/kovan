@@ -1,6 +1,6 @@
-# Baton design patterns
+# Kovan design patterns
 
-How Baton looks, behaves and is built. Follow this when adding a feature or
+How Kovan looks, behaves and is built. Follow this when adding a feature or
 changing one. If a change needs to break a rule here, change the rule here in
 the same commit and say why.
 
@@ -58,7 +58,7 @@ Cool Graphite, Ember Low Light, High Contrast, Paper Soft. Each is a *tone*
 (light or dark → `data-theme`, so every light rule still applies) plus a
 *palette* (`data-palette`) that only swaps tokens. The choice is one theme,
 Match macOS (a day and a night theme), or a schedule — which switches only
-while Baton is not in front, or when it comes back, never under a reader.
+while Kovan is not in front, or when it comes back, never under a reader.
 On top of any theme: `data-accent` (curated; ones near a status colour are
 marked, macOS arrives as an inline `--clay`), `data-status='safe'`,
 `data-shapes` (a glyph per status dot, on by default and always in High
@@ -86,7 +86,7 @@ Reuse these before writing new CSS. A new component goes in this list.
 |---|---|---|
 | `.primary` | Starts an agent that **writes** (changes code, opens a PR) | Unblock in an agent, Work on this |
 | `.primary.outline` | Starts an agent that only **reads and reports** | Check it shipped, Review |
-| `.quick` (dashed blue) | Not an agent: a quick model turning text Baton already has into shorter text | Summarize, nv-review |
+| `.quick` (dashed blue) | Not an agent: a quick model turning text Kovan already has into shorter text | Summarize, nv-review |
 | `.ghost` | Everything else: secondary actions, Settings actions | Add a row |
 | `.detail-place` | Where the item lives elsewhere, in a detail header's link row beside the related chips | GitHub / Jira / Sentry (with its mark), Terminal |
 | `.link` | Inline, low-weight action inside text or a table row | Remove, Reset, Cancel, Save as default |
@@ -95,7 +95,7 @@ Reuse these before writing new CSS. A new component goes in this list.
 
 Put at most one `.primary` in a row. Separate groups of different weights with
 the existing vertical rule, not with space alone. A detail header's action bar
-holds only what Baton does — agent runs, then quick model reads; opening the
+holds only what Kovan does — agent runs, then quick model reads; opening the
 item on its service, or a terminal for it, goes in the link row above
 (`RelatedLinks` `places`, item 110), which keeps the bar on one line.
 
@@ -152,7 +152,7 @@ item on its service, or a terminal for it, goes in the link row above
   report at the top of its pull request and ticket (verdict badge, Copy, open
   with screenshots, folded when long). A run's result is never only in History.
 - **Linked pull requests** (`TicketPulls`): one line each under a ticket's
-  title, state first; a click opens the pull request in Baton, not on GitHub.
+  title, state first; a click opens the pull request in Kovan, not on GitHub.
 - **Result cards** (`QuickCard`): model, age, **Copy** (the Markdown source),
   Refresh and × stay on one line; the model name gives way first.
   Clicking the title (`CardTitle`) folds the card to its head; folds are
@@ -205,14 +205,14 @@ item on its service, or a terminal for it, goes in the link row above
   rewritten files are fetched as they land — never the whole folder again.
   While its agent's session is running the viewer says **Live** (dot plus
   word) and leads with **Now**: the newest screenshot large, "taken 12 s ago",
-  and the one-line step the agent writes to `$BATON_STATUS` (`status.txt`,
+  and the one-line step the agent writes to `$KOVAN_STATUS` (`status.txt`,
   never listed as a file). New thumbnails get a brief ring in the live green,
   not clay. A running agent's **watch** link (a PR's or ticket's Sessions) opens
   it; the viewer is rendered in the same place whether or not the list still
   shows the session, so the run ending never remounts it.
 - **Open in browser** (item 90): the run viewer offers the run's own site —
   read by main from `run.json`, http(s) only, never a URL from the page — and
-  the run sheet's environment picker offers the URL in its field. Baton never
+  the run sheet's environment picker offers the URL in its field. Kovan never
   embeds a web page (see `notes/browser-preview-report.md` for why).
 - **Group actions** (Revert all) sit in the group's own header as an icon,
   not on a line of their own.
@@ -265,11 +265,11 @@ item on its service, or a terminal for it, goes in the link row above
   that deserves a mic gets `DictateButton` (the run sheet's prompt has one),
   with `htmlFor` on its label so the button isn't what the label activates.
   The recogniser is Apple's, on-device where the language allows, in the
-  `baton-dictate` Swift helper (Chromium's speech API doesn't work in
-  Electron); it exits on stdin EOF, so the mic can't outlive Baton.
+  `kovan-dictate` Swift helper (Chromium's speech API doesn't work in
+  Electron); it exits on stdin EOF, so the mic can't outlive Kovan.
   Settings › Dictation picks the speech model (item 97, VoiceSmith's list):
   Apple Speech (default, live), whisper.cpp (local `whisper-cli`, models
-  from Baton's and VoiceSmith's folders, or a whisper-server URL), OpenAI,
+  from Kovan's and VoiceSmith's folders, or a whisper-server URL), OpenAI,
   Groq, Deepgram, AssemblyAI. For all but Apple the helper runs with
   `--record` (16 kHz mono WAV, mic permission only), `main/transcribe.ts`
   sends it once you finish — the pill says "Transcribing with …" — and the
@@ -307,10 +307,10 @@ Terminal colours are read from the painted tokens (`terminalTheme()` in
 `Terminal.tsx`) and re-applied live on any appearance change; Boosted lifts
 them toward full contrast.
 
-**Sessions outlive Baton (item 114).** Every pty lives in the terminal host
+**Sessions outlive Kovan (item 114).** Every pty lives in the terminal host
 (`main/ptyHost.ts`, built as `ptyHost.mjs` and unpacked from the archive). It
 is the app binary in Node mode, started detached, one per build, and it talks
-to Baton over a Unix socket in `$TMPDIR` (`main/ptyClient.ts`). On start,
+to Kovan over a Unix socket in `$TMPDIR` (`main/ptyClient.ts`). On start,
 `Sessions.restore()` picks up every host of this profile. On quit,
 `detachAll()` leaves them running; only `close()` ends a session. The host
 keeps each session's `SessionInfo` (sent on every change), the tail of its
@@ -321,14 +321,14 @@ as before, and quitting asks first again for those. A smoke run exits
 through `app.exit`, which skips `will-quit`, so `index.ts` calls `disposeAll()`
 first.
 
-**Agent status (item 112).** Agents Baton starts report Working / Input /
-Done themselves (`main/agentStatus.ts`), and Baton never guesses it from
+**Agent status (item 112).** Agents Kovan starts report Working / Input /
+Done themselves (`main/agentStatus.ts`), and Kovan never guesses it from
 output:
 - Claude: hooks in the `--settings` it already gets.
 - Codex: `notify`, chained to your own; its bell mid-turn means Input.
 - OpenCode: a plugin through `OPENCODE_CONFIG_CONTENT`.
 
-Each writes one word to `userData/status/<BATON_SESSION_ID>`, and Baton
+Each writes one word to `userData/status/<KOVAN_SESSION_ID>`, and Kovan
 watches that folder. The badge is `.session-state` (not `.agent-state`, which
 is Agents › Running's). Done hides once the session has been on screen
 (`useSeenStatus`); Input stays until answered.
@@ -356,7 +356,7 @@ actions, below) and draw it two ways by density:
   wraps whole, and then `DetailHead` (title plus a pill-and-details line).
 - Compact: `DetailHead compact`, two lines and no toolbar.
 
-Chips always open the item in Baton, and in the service when it isn't loaded.
+Chips always open the item in Kovan, and in the service when it isn't loaded.
 A new header item goes into `HeadParts`, not into one pane.
 
 **Connection problems (item 120).** There is no error strip.
@@ -409,11 +409,11 @@ visible focus state.
    anything relative has the absolute time in its tooltip.
 6. **Remember the last choice** (runner, model, environment, dock position,
    sizes), per thing, not globally, when the thing differs.
-7. **Baton is a normal Dock app** with a menu bar glyph as well. Opening
+7. **Kovan is a normal Dock app** with a menu bar glyph as well. Opening
    it, clicking its Dock icon or Cmd+Tabbing to it shows the window; closing
    the window keeps it running. Quitting leaves the sessions running in the
    terminal host (item 114); it asks first only for sessions that run inside
-   Baton because no host could start.
+   Kovan because no host could start.
 8. **Everything in the main process keeps working with no window open.**
    Poller, sessions, quick jobs and notifications live in `src/main`. The
    renderer only asks and listens.
@@ -434,18 +434,32 @@ visible focus state.
 
 A new IPC channel touches four places: the handler in `main/index.ts`, the
 bridge in `preload/index.ts`, the type in `renderer/types.ts`, and the
-renderer call. Name it `baton:<noun>-<verb>`.
+renderer call. Name it `kovan:<noun>-<verb>`.
 
 ### The log
 
 Everything `host.log` writes, anything that throws in main, the window's
 process going away, and every error in the window (render errors with their
 component stack, uncaught errors, unhandled rejections) goes to
-`~/Library/Logs/Baton/baton.log` (`main/logFile.ts`), rolled to `baton.1.log`
-at 1 MB. A smoke run with `BATON_USER_DATA` logs under that folder instead.
+`~/Library/Logs/Kovan/kovan.log` (`main/logFile.ts`), rolled to `kovan.1.log`
+at 1 MB. A smoke run with `KOVAN_USER_DATA` logs under that folder instead.
 When something breaks, read the log before guessing. Take the headline flag
 with `primaryFlag(pull)`, never `pullFlags(pull)[0]!`: a pull request can
 have no flags at all.
+
+### The old name (item 121)
+
+The app was called Baton until 2026-09-30. `main/renamed.ts` carries that
+state over on the first launch. It copies `Application Support/Baton` into
+`Kovan` (caches skipped, the old folder left as it was), then re-encrypts
+`secrets.json` from the "Baton Safe Storage" Keychain key to Kovan's own key.
+`renderer/renamedKeys.ts` moves `baton.*` localStorage keys to `kovan.*`.
+Keep them until nobody runs a Baton build any more.
+
+The icon changed with the name (item 122): a K of seven hive cells, the stem
+off-white, the working arm clay, the waiting arm grey. It and the menu bar
+glyph are drawn by `resources/alternatives/build-k-cells.py`; change the
+script, never the PNGs.
 
 ### GitHub's budget
 
@@ -482,7 +496,7 @@ answer (`githubAnswered` in core): its empty lists aren't "nothing open".
 - **localStorage**: per-window visual preferences (sizes, dock, sidebar width,
   last picker choice). Wrap every read and write in `try`. The app must work
   without it.
-- **Settings store** (`window.baton.setSetting`): anything main needs, or
+- **Settings store** (`window.kovan.setSetting`): anything main needs, or
   anything that must survive a profile reset (prices, environments, models).
 - **Keychain**: secrets. Nothing else.
 

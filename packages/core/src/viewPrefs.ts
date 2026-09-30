@@ -1,5 +1,5 @@
 /**
- * Filters and sorts that survive closing Baton (improvements item 93): the
+ * Filters and sorts that survive closing Kovan (improvements item 93): the
  * pull requests' and tickets' filter selections and sort order. Stored per
  * window in localStorage; these turn them into JSON and back, trusting
  * nothing that comes back.

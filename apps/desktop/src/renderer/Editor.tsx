@@ -18,7 +18,7 @@ import {
   EditorView, GutterMarker, gutter, highlightActiveLine, highlightActiveLineGutter,
   highlightSpecialChars, keymap, lineNumbers, rectangularSelection
 } from '@codemirror/view';
-import type { ChangeMark, ChangeMarkKind } from '@baton/core';
+import type { ChangeMark, ChangeMarkKind } from '@kovan/core';
 import {
   bracketMatching, foldGutter, indentOnInput, syntaxHighlighting
 } from '@codemirror/language';
@@ -221,7 +221,7 @@ function CodeEditor({
       const current = view.current;
       if (!current) return;
       const text = current.state.doc.toString();
-      const result = await window.baton.workspaceWrite(
+      const result = await window.kovan.workspaceWrite(
         path,
         text,
         force ? undefined : stamp.current
@@ -341,7 +341,7 @@ function CodeEditor({
   useEffect(() => {
     if (revision === firstRevision.current) return undefined;
     let cancelled = false;
-    void window.baton.workspaceRead(path).then((fresh) => {
+    void window.kovan.workspaceRead(path).then((fresh) => {
       const current = view.current;
       if (cancelled || fresh.kind !== 'text' || !current) return;
       if (fresh.text === saved.current) {
@@ -369,7 +369,7 @@ function CodeEditor({
   }, [revision, path]);
 
   const reload = async () => {
-    const fresh = await window.baton.workspaceRead(path);
+    const fresh = await window.kovan.workspaceRead(path);
     const current = view.current;
     if (fresh.kind !== 'text' || !current) return;
     current.dispatch({
@@ -401,7 +401,7 @@ function CodeEditor({
             onClick={() => {
               const current = view.current;
               if (!current) return;
-              void window.baton
+              void window.kovan
                 .workspaceWrite(path, current.state.doc.toString())
                 .then((result) => {
                   if (result.ok) {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Installs the built Baton.app into /Applications.
+ * Installs the built Kovan.app into /Applications.
  *
  * Replaces any existing copy, but quits the running one first: swapping the
  * bundle under a live process leaves it running from a deleted inode, so it
@@ -14,17 +14,17 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const built = path.join(root, 'apps/desktop/release/mac-arm64/Baton.app');
-const target = '/Applications/Baton.app';
+const built = path.join(root, 'apps/desktop/release/mac-arm64/Kovan.app');
+const target = '/Applications/Kovan.app';
 
 if (!fs.existsSync(built)) {
-  console.error(`No build at ${built}\nRun: npm run dist --workspace @baton/desktop`);
+  console.error(`No build at ${built}\nRun: npm run dist --workspace @kovan/desktop`);
   process.exit(1);
 }
 
 // Any copy, not just /Applications': one launched from the build folder holds
 // the single-instance lock just the same, and would stop the new one starting.
-const APP = 'Baton\\.app/Contents/MacOS/Baton$';
+const APP = 'Kovan\\.app/Contents/MacOS/Kovan$';
 
 function running() {
   try {
@@ -37,7 +37,7 @@ function running() {
 
 /**
  * Asks the running copy to quit, then checks that it did. It may not: with
- * terminal sessions running, Baton asks "Quit Baton and stop N running
+ * terminal sessions running, Kovan asks "Quit Kovan and stop N running
  * sessions?" and stays if you say Cancel. This used to print "stopped" as soon
  * as the signal was sent, then replace the bundle under the live app — the
  * very thing the note above warns about. It is never force-killed: that would
@@ -52,19 +52,19 @@ function quitRunning() {
   }
   if (running()) {
     console.error(
-      'Baton is still running — probably asking whether to stop its running sessions.\n' +
+      'Kovan is still running — probably asking whether to stop its running sessions.\n' +
       'Nothing was installed. Quit it yourself (answer that dialog, or ⌘Q), then run this again.'
     );
     process.exit(1);
   }
-  console.log('stopped the running Baton');
+  console.log('stopped the running Kovan');
 }
 
 quitRunning();
 
 if (fs.existsSync(target)) {
   fs.rmSync(target, { recursive: true, force: true });
-  console.log('removed the previous /Applications/Baton.app');
+  console.log('removed the previous /Applications/Kovan.app');
 }
 
 fs.cpSync(built, target, { recursive: true, verbatimSymlinks: true });
@@ -97,7 +97,7 @@ function sign() {
 }
 
 if (!sign()) {
-  console.error('Not launching an unsigned Baton. Check with:');
+  console.error('Not launching an unsigned Kovan. Check with:');
   console.error(`  codesign --verify --verbose ${target}`);
   process.exit(1);
 }
@@ -111,16 +111,16 @@ if (!process.argv.includes('--no-launch')) {
   while (!path && Date.now() < deadline) {
     execFileSync('sleep', ['0.5']);
     try {
-      path = execFileSync('pgrep', ['-fl', 'Baton.app/Contents/MacOS/Baton$'], { encoding: 'utf8' }).trim();
+      path = execFileSync('pgrep', ['-fl', 'Kovan.app/Contents/MacOS/Kovan$'], { encoding: 'utf8' }).trim();
     } catch {
       path = '';
     }
   }
-  if (path.includes(`${target}/Contents/MacOS/Baton`)) {
-    console.log('launched — Baton is in the Dock and Cmd+Tab');
+  if (path.includes(`${target}/Contents/MacOS/Kovan`)) {
+    console.log('launched — Kovan is in the Dock and Cmd+Tab');
   } else if (path) {
-    console.warn(`A different copy of Baton is running:\n  ${path}\nQuit it, then open ${target}.`);
+    console.warn(`A different copy of Kovan is running:\n  ${path}\nQuit it, then open ${target}.`);
   } else {
-    console.warn(`Baton didn't start. Open ${target} yourself, or check ~/Library/Logs/Baton/baton.log.`);
+    console.warn(`Kovan didn't start. Open ${target} yourself, or check ~/Library/Logs/Kovan/kovan.log.`);
   }
 }

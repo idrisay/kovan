@@ -7,7 +7,7 @@
  * interrogates the real DOM, optionally captures the window, prints one JSON
  * object and exits.
  *
- * Modes, via `BATON_SMOKE`:
+ * Modes, via `KOVAN_SMOKE`:
  *   `1`      wiring only — main, preload and renderer are talking.
  *   `seeded` the same, plus a fixture snapshot, so row and state rendering is
  *            exercised without the network.
@@ -17,7 +17,7 @@
  *            drives the explorer against a real clone: expands the tree, opens
  *            a source file, opens a diff, and reads back what rendered.
  *
- * `BATON_SHOT=<path>` also writes a PNG of the window.
+ * `KOVAN_SHOT=<path>` also writes a PNG of the window.
  */
 
 import { app, clipboard, type BrowserWindow } from 'electron';
@@ -30,8 +30,8 @@ import type { Poller, Snapshot } from './poller';
 import { Sessions } from './sessions';
 import { PtyHosts } from './ptyClient';
 import { AgentStatus } from './agentStatus';
-import { reviewBasis, trackProblems } from '@baton/core';
-import { RunStore, type Runner } from '@baton/agent';
+import { reviewBasis, trackProblems } from '@kovan/core';
+import { RunStore, type Runner } from '@kovan/agent';
 
 export type SmokeMode = '1' | 'seeded' | 'live' | 'pty' | 'workspace';
 
@@ -302,7 +302,7 @@ const TICKET_HIGHEST = {
 
 /**
  * The same ticket `getIssue` would return, attachments already resolved.
- * Served instead of the network only when `BATON_USER_DATA` is also set —
+ * Served instead of the network only when `KOVAN_USER_DATA` is also set —
  * the same guard `detailFixture` uses — so it can never reach a real profile.
  */
 /** A small diff with one real defect in it, for the Kimi K3 review shot. */
@@ -325,7 +325,7 @@ export function ticketFixture(_key: string) {
   // The quick-model shot needs a thread long enough for "Condense" to appear
   // (more than the latest ten). Only under that flag, so every other shot of
   // the ticket pane keeps the one comment it was taken with.
-  if (process.env['BATON_SHOT_QUICK']) {
+  if (process.env['KOVAN_SHOT_QUICK']) {
     return { ...TICKET, comments: [...LONG_THREAD, ...TICKET.comments] };
   }
   return TICKET;
@@ -356,7 +356,7 @@ const LONG_THREAD = [
 /**
  * A pull request detail rich enough to judge the layout by: a long body with a
  * table and a code block, checks, threads and a file list. Served instead of
- * the network only when BATON_USER_DATA is also set, so it can never reach a
+ * the network only when KOVAN_USER_DATA is also set, so it can never reach a
  * real profile.
  */
 export function detailFixture(repo: string, number: number) {
@@ -491,7 +491,7 @@ export async function smokePty(
   sessions.onOutput(({ id, data }) => {
     if (id === session.id) seen += data;
   });
-  setTimeout(() => sessions.write(session.id, 'echo BATON_PTY_OK-$((6*7))\r'), 600);
+  setTimeout(() => sessions.write(session.id, 'echo KOVAN_PTY_OK-$((6*7))\r'), 600);
   await new Promise((r) => setTimeout(r, 4000));
 
   // A second session, this time through the `line` path itself — the one
@@ -503,7 +503,7 @@ export async function smokePty(
     cwd: app.getPath('home'),
     title: 'smoke-line',
     runnerName: 'Shell',
-    line: 'echo BATON_LINE_OK-$((3*4))'
+    line: 'echo KOVAN_LINE_OK-$((3*4))'
   });
   let seenFromLine = '';
   sessions.onOutput(({ id, data }) => {
@@ -532,8 +532,8 @@ export async function smokePty(
   const prompt = await agents.buildPrompt('unblock', { pull: FIXTURE });
   return {
     ptyOpened: Boolean(session.id),
-    sawEcho: seen.includes('BATON_PTY_OK-42'),
-    lineWasRun: seenFromLine.includes('BATON_LINE_OK-12'),
+    sawEcho: seen.includes('KOVAN_PTY_OK-42'),
+    lineWasRun: seenFromLine.includes('KOVAN_LINE_OK-12'),
     bellSetsAttention: rang === true,
     replyClearsAttention: afterReply === false,
     renameSticks: renamed?.title === 'renamed by smoke',
@@ -543,7 +543,7 @@ export async function smokePty(
     runnersFound: runners.length,
     runnerNames: runners.map((r) => r.name).slice(0, 8),
     targets: (await agents.targets()).map((x) => x.label).slice(0, 4),
-    promptOk: prompt.includes('BATON_REPORT')
+    promptOk: prompt.includes('KOVAN_REPORT')
   };
 }
 
@@ -568,7 +568,7 @@ const read = (win: BrowserWindow, expression: string) =>
 
 /**
  * Clicks a quick-model button and waits for the card — a real `opencode run`
- * against the fixture, so it is opt-in (BATON_SHOT_QUICK) and allowed to be
+ * against the fixture, so it is opt-in (KOVAN_SHOT_QUICK) and allowed to be
  * slow. Captures the running state and the finished card.
  */
 async function shootQuick(
@@ -609,7 +609,7 @@ export async function smokeUi(
     // anyone is listening and is simply dropped, leaving the app on its empty
     // state with no rail to drive.
     await until(win, `document.querySelector('#root')?.children.length > 0`);
-    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
     await until(win, `document.querySelector('.rail')`);
   }
 
@@ -624,15 +624,15 @@ export async function smokeUi(
   await until(win, `document.querySelector('.rail') || document.querySelector('.empty')`);
   await new Promise((r) => setTimeout(r, 350));
 
-  // BATON_THEME forces the appearance so both themes can be captured without
+  // KOVAN_THEME forces the appearance so both themes can be captured without
   // changing the machine's System Settings.
-  if (process.env['BATON_THEME']) {
+  if (process.env['KOVAN_THEME']) {
     const { nativeTheme } = await import('electron');
-    nativeTheme.themeSource = process.env['BATON_THEME'] as 'dark' | 'light';
+    nativeTheme.themeSource = process.env['KOVAN_THEME'] as 'dark' | 'light';
     await new Promise((r) => setTimeout(r, 400));
   }
 
-  const shot = process.env['BATON_SHOT'];
+  const shot = process.env['KOVAN_SHOT'];
   if (shot) {
     await writeFile(shot, (await win.webContents.capturePage()).toPNG());
     console.log(`shot: ${shot}`);
@@ -640,120 +640,120 @@ export async function smokeUi(
 
   // Items 83–85 on their own: a pull request with nothing to report (the one
   // that blanked the window), the repository on every row, and the
-  // "unresolved" chip's wording. `BATON_SMOKE_ITEM83=<shot prefix>`.
+  // "unresolved" chip's wording. `KOVAN_SMOKE_ITEM83=<shot prefix>`.
   // Item 119: mentions and assignments in Activity.
-  if (process.env['BATON_SMOKE_ITEM119'] && mode === 'seeded') {
-    return { item119: await driveItem119(win, process.env['BATON_SMOKE_ITEM119']) };
+  if (process.env['KOVAN_SMOKE_ITEM119'] && mode === 'seeded') {
+    return { item119: await driveItem119(win, process.env['KOVAN_SMOKE_ITEM119']) };
   }
 
   // Item 120: connection problems in the status bar.
-  if (process.env['BATON_SMOKE_ITEM120'] && mode === 'seeded') {
-    return { item120: await driveItem120(win, process.env['BATON_SMOKE_ITEM120']) };
+  if (process.env['KOVAN_SMOKE_ITEM120'] && mode === 'seeded') {
+    return { item120: await driveItem120(win, process.env['KOVAN_SMOKE_ITEM120']) };
   }
 
   // Item 118: the detail header, per density.
-  if (process.env['BATON_SMOKE_ITEM118'] && mode === 'seeded') {
-    return { item118: await driveItem118(win, process.env['BATON_SMOKE_ITEM118']) };
+  if (process.env['KOVAN_SMOKE_ITEM118'] && mode === 'seeded') {
+    return { item118: await driveItem118(win, process.env['KOVAN_SMOKE_ITEM118']) };
   }
 
   // Items 116, 117: Back / Forward, and the folded run sheet.
-  if (process.env['BATON_SMOKE_ITEM116'] && mode === 'seeded') {
-    return { item116: await driveItem116(win, process.env['BATON_SMOKE_ITEM116']) };
+  if (process.env['KOVAN_SMOKE_ITEM116'] && mode === 'seeded') {
+    return { item116: await driveItem116(win, process.env['KOVAN_SMOKE_ITEM116']) };
   }
 
   // Items 112, 114, 115: status badges, the hover card, the terminal host.
-  if (process.env['BATON_SMOKE_ITEM112'] && mode === 'seeded' && sessions) {
-    return { item112: await driveItem112(win, sessions, process.env['BATON_SMOKE_ITEM112']) };
+  if (process.env['KOVAN_SMOKE_ITEM112'] && mode === 'seeded' && sessions) {
+    return { item112: await driveItem112(win, sessions, process.env['KOVAN_SMOKE_ITEM112']) };
   }
 
-  // Item 110, the header's link row: `BATON_SMOKE_ITEM110=<shot prefix>`.
-  if (process.env['BATON_SMOKE_ITEM110'] && mode === 'seeded') {
-    return { item110: await driveItem110(win, process.env['BATON_SMOKE_ITEM110']) };
+  // Item 110, the header's link row: `KOVAN_SMOKE_ITEM110=<shot prefix>`.
+  if (process.env['KOVAN_SMOKE_ITEM110'] && mode === 'seeded') {
+    return { item110: await driveItem110(win, process.env['KOVAN_SMOKE_ITEM110']) };
   }
 
-  // Item 108, plan limits in the run sheet: `BATON_SMOKE_ITEM108=<shot prefix>`.
-  if (process.env['BATON_SMOKE_ITEM108'] && mode === 'seeded') {
-    return { item108: await driveItem108(win, process.env['BATON_SMOKE_ITEM108']) };
+  // Item 108, plan limits in the run sheet: `KOVAN_SMOKE_ITEM108=<shot prefix>`.
+  if (process.env['KOVAN_SMOKE_ITEM108'] && mode === 'seeded') {
+    return { item108: await driveItem108(win, process.env['KOVAN_SMOKE_ITEM108']) };
   }
 
-  // Item 101, the startup list: `BATON_SMOKE_ITEM101=<shot prefix>` (mode 1).
-  if (process.env['BATON_SMOKE_ITEM101'] && mode === '1') {
-    return { item101: await driveItem101(win, process.env['BATON_SMOKE_ITEM101']) };
+  // Item 101, the startup list: `KOVAN_SMOKE_ITEM101=<shot prefix>` (mode 1).
+  if (process.env['KOVAN_SMOKE_ITEM101'] && mode === '1') {
+    return { item101: await driveItem101(win, process.env['KOVAN_SMOKE_ITEM101']) };
   }
 
-  // Item 104, closing a running session: `BATON_SMOKE_ITEM104=<shot prefix>`.
-  if (process.env['BATON_SMOKE_ITEM104'] && mode === 'seeded' && sessions) {
-    return { item104: await driveItem104(win, sessions, process.env['BATON_SMOKE_ITEM104']) };
+  // Item 104, closing a running session: `KOVAN_SMOKE_ITEM104=<shot prefix>`.
+  if (process.env['KOVAN_SMOKE_ITEM104'] && mode === 'seeded' && sessions) {
+    return { item104: await driveItem104(win, sessions, process.env['KOVAN_SMOKE_ITEM104']) };
   }
 
-  // Item 99, Settings as one searchable list: `BATON_SMOKE_ITEM99=<shot prefix>`.
-  if (process.env['BATON_SMOKE_ITEM99'] && mode === 'seeded') {
-    return { item99: await driveItem99(win, process.env['BATON_SMOKE_ITEM99']) };
+  // Item 99, Settings as one searchable list: `KOVAN_SMOKE_ITEM99=<shot prefix>`.
+  if (process.env['KOVAN_SMOKE_ITEM99'] && mode === 'seeded') {
+    return { item99: await driveItem99(win, process.env['KOVAN_SMOKE_ITEM99']) };
   }
 
-  // Item 100, ⌘P: `BATON_SMOKE_ITEM100=<shot prefix>` with BATON_WS_FOLDER.
-  if (process.env['BATON_SMOKE_ITEM100'] && mode === 'seeded') {
-    return { item100: await driveItem100(win, process.env['BATON_SMOKE_ITEM100']) };
+  // Item 100, ⌘P: `KOVAN_SMOKE_ITEM100=<shot prefix>` with KOVAN_WS_FOLDER.
+  if (process.env['KOVAN_SMOKE_ITEM100'] && mode === 'seeded') {
+    return { item100: await driveItem100(win, process.env['KOVAN_SMOKE_ITEM100']) };
   }
 
-  // Item 98, the run viewer over a docked terminal: `BATON_SMOKE_ITEM98=<shot prefix>`.
-  if (process.env['BATON_SMOKE_ITEM98'] && mode === 'seeded' && sessions) {
-    return { item98: await driveItem98(win, sessions, process.env['BATON_SMOKE_ITEM98']) };
+  // Item 98, the run viewer over a docked terminal: `KOVAN_SMOKE_ITEM98=<shot prefix>`.
+  if (process.env['KOVAN_SMOKE_ITEM98'] && mode === 'seeded' && sessions) {
+    return { item98: await driveItem98(win, sessions, process.env['KOVAN_SMOKE_ITEM98']) };
   }
 
-  // Item 97, speech providers: `BATON_SMOKE_ITEM97=<shot prefix>`.
-  if (process.env['BATON_SMOKE_ITEM97'] && mode === 'seeded') {
-    return { item97: await driveItem97(win, process.env['BATON_SMOKE_ITEM97']) };
+  // Item 97, speech providers: `KOVAN_SMOKE_ITEM97=<shot prefix>`.
+  if (process.env['KOVAN_SMOKE_ITEM97'] && mode === 'seeded') {
+    return { item97: await driveItem97(win, process.env['KOVAN_SMOKE_ITEM97']) };
   }
 
-  // Item 96, the themes: `BATON_SMOKE_ITEM96=<shot prefix>`.
-  if (process.env['BATON_SMOKE_ITEM96'] && mode === 'seeded' && sessions) {
-    return { item96: await driveItem96(win, sessions, process.env['BATON_SMOKE_ITEM96']) };
+  // Item 96, the themes: `KOVAN_SMOKE_ITEM96=<shot prefix>`.
+  if (process.env['KOVAN_SMOKE_ITEM96'] && mode === 'seeded' && sessions) {
+    return { item96: await driveItem96(win, sessions, process.env['KOVAN_SMOKE_ITEM96']) };
   }
 
-  // Items 93 and 94 together: `BATON_SMOKE_ITEM93=<shot prefix>`.
-  if (process.env['BATON_SMOKE_ITEM93'] && mode === 'seeded') {
-    return { item93: await driveItems93and94(win, process.env['BATON_SMOKE_ITEM93']) };
+  // Items 93 and 94 together: `KOVAN_SMOKE_ITEM93=<shot prefix>`.
+  if (process.env['KOVAN_SMOKE_ITEM93'] && mode === 'seeded') {
+    return { item93: await driveItems93and94(win, process.env['KOVAN_SMOKE_ITEM93']) };
   }
 
-  // Item 92 (fixes 3 and 4) on its own: `BATON_SMOKE_ITEM92=1`.
-  if (process.env['BATON_SMOKE_ITEM92'] && mode === 'seeded') {
+  // Item 92 (fixes 3 and 4) on its own: `KOVAN_SMOKE_ITEM92=1`.
+  if (process.env['KOVAN_SMOKE_ITEM92'] && mode === 'seeded') {
     return { item92: await driveItem92(win) };
   }
 
-  // Item 91 on its own: `BATON_SMOKE_ITEM91=<shot prefix>`.
-  if (process.env['BATON_SMOKE_ITEM91'] && mode === 'seeded') {
-    return { item91: await driveItem91(win, process.env['BATON_SMOKE_ITEM91']) };
+  // Item 91 on its own: `KOVAN_SMOKE_ITEM91=<shot prefix>`.
+  if (process.env['KOVAN_SMOKE_ITEM91'] && mode === 'seeded') {
+    return { item91: await driveItem91(win, process.env['KOVAN_SMOKE_ITEM91']) };
   }
 
-  // Item 90 (C + D) on its own: `BATON_SMOKE_ITEM90=<shot prefix>`.
-  if (process.env['BATON_SMOKE_ITEM90'] && mode === 'seeded' && sessions) {
-    return { item90: await driveItem90(win, sessions, process.env['BATON_SMOKE_ITEM90']) };
+  // Item 90 (C + D) on its own: `KOVAN_SMOKE_ITEM90=<shot prefix>`.
+  if (process.env['KOVAN_SMOKE_ITEM90'] && mode === 'seeded' && sessions) {
+    return { item90: await driveItem90(win, sessions, process.env['KOVAN_SMOKE_ITEM90']) };
   }
 
-  // Item 89 on its own: `BATON_SMOKE_ITEM89=<shot prefix>`.
-  if (process.env['BATON_SMOKE_ITEM89'] && mode === 'seeded') {
-    return { item89: await driveItem89(win, process.env['BATON_SMOKE_ITEM89']) };
+  // Item 89 on its own: `KOVAN_SMOKE_ITEM89=<shot prefix>`.
+  if (process.env['KOVAN_SMOKE_ITEM89'] && mode === 'seeded') {
+    return { item89: await driveItem89(win, process.env['KOVAN_SMOKE_ITEM89']) };
   }
 
-  // Item 88 on its own: `BATON_SMOKE_ITEM88=<shot prefix>` with
-  // BATON_DICTATE_FAKE=1 — real key events, scripted words.
-  if (process.env['BATON_SMOKE_ITEM88'] && mode === 'seeded') {
-    return { item88: await driveItem88(win, process.env['BATON_SMOKE_ITEM88']) };
+  // Item 88 on its own: `KOVAN_SMOKE_ITEM88=<shot prefix>` with
+  // KOVAN_DICTATE_FAKE=1 — real key events, scripted words.
+  if (process.env['KOVAN_SMOKE_ITEM88'] && mode === 'seeded') {
+    return { item88: await driveItem88(win, process.env['KOVAN_SMOKE_ITEM88']) };
   }
 
-  // Item 86 on its own: `BATON_SMOKE_ITEM86=<shot prefix>`. Snapshots go
+  // Item 86 on its own: `KOVAN_SMOKE_ITEM86=<shot prefix>`. Snapshots go
   // through the real ActivityFeed in main, not straight to the window.
-  if (process.env['BATON_SMOKE_ITEM86'] && mode === 'seeded' && feed) {
-    return { item86: await driveItem86(win, feed, process.env['BATON_SMOKE_ITEM86']) };
+  if (process.env['KOVAN_SMOKE_ITEM86'] && mode === 'seeded' && feed) {
+    return { item86: await driveItem86(win, feed, process.env['KOVAN_SMOKE_ITEM86']) };
   }
-  if (process.env['BATON_SMOKE_ITEM83'] && mode === 'seeded') {
-    return { item83: await driveItem83(win, process.env['BATON_SMOKE_ITEM83']) };
+  if (process.env['KOVAN_SMOKE_ITEM83'] && mode === 'seeded') {
+    return { item83: await driveItem83(win, process.env['KOVAN_SMOKE_ITEM83']) };
   }
 
   // --- Items 49–52, 55: sidebar size, ⌘F, rail collapse, sheet close ------
-  if (process.env['BATON_SHOT_ITEMS_49']) {
-    const prefix = process.env['BATON_SHOT_ITEMS_49'];
+  if (process.env['KOVAN_SHOT_ITEMS_49']) {
+    const prefix = process.env['KOVAN_SHOT_ITEMS_49'];
     const snap = async (name: string) => {
       await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
       console.log(`shot: ${prefix}-${name}.png`);
@@ -768,12 +768,12 @@ export async function smokeUi(
 
     // ⌘+ after clicking in the sidebar sizes the sidebar, not the terminal.
     await read(win, `document.querySelector('.queue-list').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`);
-    const terminalBefore = await read(win, `localStorage.getItem('baton.terminal-font-size')`);
+    const terminalBefore = await read(win, `localStorage.getItem('kovan.terminal-font-size')`);
     await key('=');
     await key('=');
     report['sidebarZoom'] = await read(win, `getComputedStyle(document.querySelector('.queue-head')).zoom`);
     report['queueWidthUnchanged'] = await read(win, `document.querySelector('.queue').getBoundingClientRect().width`);
-    report['terminalUntouched'] = terminalBefore === (await read(win, `localStorage.getItem('baton.terminal-font-size')`));
+    report['terminalUntouched'] = terminalBefore === (await read(win, `localStorage.getItem('kovan.terminal-font-size')`));
     await snap('sidebar-120');
     await key('-');
     await key('-');
@@ -811,8 +811,8 @@ export async function smokeUi(
   }
 
   // --- Items 46, 47, 57: reviewer picker, quick model tag, model dropdown ---
-  if (process.env['BATON_SHOT_ITEMS_46']) {
-    const prefix = process.env['BATON_SHOT_ITEMS_46'];
+  if (process.env['KOVAN_SHOT_ITEMS_46']) {
+    const prefix = process.env['KOVAN_SHOT_ITEMS_46'];
     const snap = async (name: string) => {
       await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
       console.log(`shot: ${prefix}-${name}.png`);
@@ -831,7 +831,7 @@ export async function smokeUi(
     await read(win, `document.querySelector('.reviewer-option')?.click()`);
     await until(win, `document.querySelector('.reviewer-asked')`, 5_000);
     report['asked'] = await read(win, `document.querySelector('.reviewer-asked')?.textContent`);
-    report['history'] = (await read(win, `window.baton.settings()`) as Record<string, unknown>)['reviewers.history'];
+    report['history'] = (await read(win, `window.kovan.settings()`) as Record<string, unknown>)['reviewers.history'];
 
     // 47: the tags name their models; the picker lists opencode's.
     report['tags'] = await read(win, `Array.from(document.querySelectorAll('.quick-model')).map(b => b.textContent)`);
@@ -850,7 +850,7 @@ export async function smokeUi(
     await read(win, `document.querySelector('.quick-model-list button')?.click()`);
     await new Promise((r) => setTimeout(r, 300));
     report['tagAfterPick'] = await read(win, `document.querySelector('.quick-model')?.textContent`);
-    report['savedQuickModels'] = (await read(win, `window.baton.settings()`) as Record<string, unknown>)['quick.models'];
+    report['savedQuickModels'] = (await read(win, `window.kovan.settings()`) as Record<string, unknown>)['quick.models'];
 
     // 57: the run sheet's dropdown and its ↻.
     await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
@@ -864,8 +864,8 @@ export async function smokeUi(
     await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
 
     // 58: more than one folder. Two scratch folders stand in for two clones.
-    const folders = process.env['BATON_SMOKE_FOLDERS']?.split(',') ?? [];
-    await read(win, `window.baton.setSetting('repos.folders', ${JSON.stringify(folders)})`);
+    const folders = process.env['KOVAN_SMOKE_FOLDERS']?.split(',') ?? [];
+    await read(win, `window.kovan.setSetting('repos.folders', ${JSON.stringify(folders)})`);
     await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
     await until(win, `document.querySelector('.folder-button:not(:disabled)')`, 10_000);
     await until(win, `!document.querySelector('.folder-button-text')?.textContent.startsWith('Choose')`, 5_000);
@@ -883,7 +883,7 @@ export async function smokeUi(
     console.log('items46:', JSON.stringify(report));
   }
 
-  if (process.env['BATON_SHOT_TICKET_PULLS']) {
+  if (process.env['KOVAN_SHOT_TICKET_PULLS']) {
     const report: Record<string, unknown> = {};
     await read(win, `document.querySelector('.rail-item[aria-label="Tickets"]')?.click()`);
     await until(win, `Array.from(document.querySelectorAll('.queue .row')).some(r => r.innerText.includes('ACME-2393'))`, 10_000);
@@ -893,16 +893,16 @@ export async function smokeUi(
     report['inHeader'] = await read(win, `Boolean(document.querySelector('.detail-head .linked-pulls'))`);
     report['chipsGone'] = await read(win, `!document.querySelector('.detail-head .detail-related')`);
     await new Promise((r) => setTimeout(r, 200));
-    await writeFile(process.env['BATON_SHOT_TICKET_PULLS'], (await win.webContents.capturePage()).toPNG());
-    console.log(`shot: ${process.env['BATON_SHOT_TICKET_PULLS']}`);
+    await writeFile(process.env['KOVAN_SHOT_TICKET_PULLS'], (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${process.env['KOVAN_SHOT_TICKET_PULLS']}`);
     await read(win, `document.querySelectorAll('.linked-pull')[1].click()`);
     await until(win, `document.querySelector('.rail-item.active')?.getAttribute('aria-label') === 'Pull requests'`, 5_000);
     report['opened'] = await read(win, `[document.querySelector('.rail-item.active')?.getAttribute('aria-label'), document.querySelector('.detail-pill-repo')?.textContent]`);
     console.log('ticketPulls:', JSON.stringify(report));
   }
 
-  if (process.env['BATON_SHOT_AGENT_REPORT']) {
-    const prefix = process.env['BATON_SHOT_AGENT_REPORT'];
+  if (process.env['KOVAN_SHOT_AGENT_REPORT']) {
+    const prefix = process.env['KOVAN_SHOT_AGENT_REPORT'];
     const report: Record<string, unknown> = {};
     const store = new RunStore(RunStore.rootFor(app.getPath('userData')));
     const run = await store.begin({ subject: 'ACME-2393', pull: 'acme/web#118', kind: 'verify', prompt: 'Check it shipped.' });
@@ -918,7 +918,7 @@ export async function smokeUi(
     await until(win, card, 10_000);
     report['ticketCard'] = await read(win, `${card}.querySelector('.quick-card-head').innerText.split('\\n').join(' | ')`);
     report['folded'] = await read(win, `Boolean(${card}.querySelector('.agent-report-body.folded'))`);
-    if (process.env['BATON_SHOT_LIGHTBOX']) {
+    if (process.env['KOVAN_SHOT_LIGHTBOX']) {
       report['lightbox'] = await driveLightbox(win, path.join(run.directory, 'shots'));
     }
     await new Promise((r) => setTimeout(r, 200));
@@ -934,8 +934,8 @@ export async function smokeUi(
     console.log('agentReport:', JSON.stringify(report));
   }
 
-  if (process.env['BATON_SHOT_ITEMS_60']) {
-    const prefix = process.env['BATON_SHOT_ITEMS_60'];
+  if (process.env['KOVAN_SHOT_ITEMS_60']) {
+    const prefix = process.env['KOVAN_SHOT_ITEMS_60'];
     const report: Record<string, unknown> = {};
     await read(win, `document.querySelector('.rows .row')?.click()`);
     await until(win, `document.querySelector('.detail-pill-repo')`, 10_000);
@@ -986,8 +986,8 @@ export async function smokeUi(
     console.log('items60:', JSON.stringify(report));
   }
 
-  if (process.env['BATON_SHOT_ITEMS_63']) {
-    const prefix = process.env['BATON_SHOT_ITEMS_63'];
+  if (process.env['KOVAN_SHOT_ITEMS_63']) {
+    const prefix = process.env['KOVAN_SHOT_ITEMS_63'];
     const snap = async (name: string) => {
       await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
       console.log(`shot: ${prefix}-${name}.png`);
@@ -1020,9 +1020,9 @@ export async function smokeUi(
     await read(win, `document.querySelector('.quick-model-list button')?.click()`);
     await pause(400);
     report['reviewTagAfterPick'] = await read(win, `document.querySelectorAll('.quick-model')[1]?.textContent`);
-    report['reviewSettings'] = await read(win, `window.baton.settings().then(s => [s['review.runner'], (s['quick.models'] || {})['pull-review']])`);
+    report['reviewSettings'] = await read(win, `window.kovan.settings().then(s => [s['review.runner'], (s['quick.models'] || {})['pull-review']])`);
     // Back to nv-review, as the user had it.
-    await read(win, `window.baton.quickModelSet('pull-review', 'moonshotai/kimi-k3 (nv-review)')`);
+    await read(win, `window.kovan.quickModelSet('pull-review', 'moonshotai/kimi-k3 (nv-review)')`);
 
     // 63: every workflow status in the tickets filter.
     await railTo('Tickets');
@@ -1035,14 +1035,14 @@ export async function smokeUi(
     await read(win, `document.body.click()`);
 
     // 68, 69, 65, 70 in Sessions: two terminals, a program title, a split that survives a tab switch.
-    const cwd = process.env['BATON_SMOKE_FOLDERS']?.split(',')[0] ?? process.cwd();
-    const a = await read(win, `window.baton.openTerminal(${JSON.stringify(cwd)}).then(s => s.id)`) as string;
-    const b = await read(win, `window.baton.openTerminal(${JSON.stringify(cwd)}).then(s => s.id)`) as string;
+    const cwd = process.env['KOVAN_SMOKE_FOLDERS']?.split(',')[0] ?? process.cwd();
+    const a = await read(win, `window.kovan.openTerminal(${JSON.stringify(cwd)}).then(s => s.id)`) as string;
+    const b = await read(win, `window.kovan.openTerminal(${JSON.stringify(cwd)}).then(s => s.id)`) as string;
     await pause(1500);
-    await read(win, `window.baton.sessionWrite(${JSON.stringify(a)}, "printf '\\\\033]0;\\\\342\\\\234\\\\263 Investigate ACME-2409\\\\007'\\r")`);
-    await until(win, `window.baton.sessions().then(l => l.some(s => s.task))`, 8_000).catch(() => undefined);
-    report['task'] = await read(win, `window.baton.sessions().then(l => l.map(s => [s.title, s.task, s.subject]))`);
-    await read(win, `localStorage.setItem('baton.session-panes', JSON.stringify({ focusedLeafId: 'l1', tree: {
+    await read(win, `window.kovan.sessionWrite(${JSON.stringify(a)}, "printf '\\\\033]0;\\\\342\\\\234\\\\263 Investigate ACME-2409\\\\007'\\r")`);
+    await until(win, `window.kovan.sessions().then(l => l.some(s => s.task))`, 8_000).catch(() => undefined);
+    report['task'] = await read(win, `window.kovan.sessions().then(l => l.map(s => [s.title, s.task, s.subject]))`);
+    await read(win, `localStorage.setItem('kovan.session-panes', JSON.stringify({ focusedLeafId: 'l1', tree: {
       type: 'split', id: 's1', orientation: 'row', children: [
         { node: { type: 'leaf', id: 'l1', sessions: [${JSON.stringify(a)}], active: ${JSON.stringify(a)} }, size: 0.5 },
         { node: { type: 'leaf', id: 'l2', sessions: [${JSON.stringify(b)}], active: ${JSON.stringify(b)} }, size: 0.5 }
@@ -1058,7 +1058,7 @@ export async function smokeUi(
     report['rowTitles'] = await read(win, `Array.from(document.querySelectorAll('.queue .row-title')).map(n => n.textContent)`);
 
     // 70: a running quick job next to finished ones.
-    await read(win, `window.baton.quickRun('pull-summary', 'acme/web#205')`);
+    await read(win, `window.kovan.quickRun('pull-summary', 'acme/web#205')`);
     await until(win, `document.querySelector('.row.quick-job.running')`, 10_000).catch(() => undefined);
     report['jobStates'] = await read(win, `Array.from(document.querySelectorAll('.row.quick-job')).map(r => r.className + ' | ' + r.querySelector('.quick-job-state')?.textContent)`);
 
@@ -1085,7 +1085,7 @@ export async function smokeUi(
     }
     await pause(300);
     report['orderAfterDrag'] = await rowIds();
-    report['orderSaved'] = await read(win, `JSON.parse(localStorage.getItem('baton.session-order') || '[]')`);
+    report['orderSaved'] = await read(win, `JSON.parse(localStorage.getItem('kovan.session-order') || '[]')`);
     await read(win, `document.querySelector('[data-session-row]').focus()`);
     win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down', modifiers: ['alt'] });
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Down', modifiers: ['alt'] });
@@ -1111,19 +1111,19 @@ export async function smokeUi(
     await snap('sessions');
     await read(win, `Array.from(document.querySelectorAll('.session-close-confirm button')).find(b => b.textContent === 'Cancel')?.click()`);
     await pause(200);
-    report['sessionsAfterCancel'] = await read(win, `window.baton.sessions().then(l => l.length)`);
-    await read(win, `window.baton.quickCancel('pull-summary', 'acme/web#205')`);
+    report['sessionsAfterCancel'] = await read(win, `window.kovan.sessions().then(l => l.length)`);
+    await read(win, `window.kovan.quickCancel('pull-summary', 'acme/web#205')`);
     // Leave the app as the rest of the run expects it.
-    await read(win, `window.baton.sessionClose(${JSON.stringify(a)})`);
-    await read(win, `window.baton.sessionClose(${JSON.stringify(b)})`);
-    await read(win, `localStorage.removeItem('baton.session-panes')`);
+    await read(win, `window.kovan.sessionClose(${JSON.stringify(a)})`);
+    await read(win, `window.kovan.sessionClose(${JSON.stringify(b)})`);
+    await read(win, `localStorage.removeItem('kovan.session-panes')`);
     await railTo('Pull requests');
     await pause(500);
     console.log('items63:', JSON.stringify(report));
   }
 
-  if (process.env['BATON_SHOT_ITEM_59']) {
-    const prefix = process.env['BATON_SHOT_ITEM_59'];
+  if (process.env['KOVAN_SHOT_ITEM_59']) {
+    const prefix = process.env['KOVAN_SHOT_ITEM_59'];
     const snap = async (name: string) => {
       await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
       console.log(`shot: ${prefix}-${name}.png`);
@@ -1145,25 +1145,25 @@ export async function smokeUi(
     await read(win, `document.querySelector('.rows .row')?.click()`);
     await until(win, toggle, 10_000);
     report['backExpanded'] = await read(win, `${toggle}.getAttribute('aria-expanded')`);
-    report['stored'] = await read(win, `localStorage.getItem('baton.collapsed-descriptions')`);
+    report['stored'] = await read(win, `localStorage.getItem('kovan.collapsed-descriptions')`);
     console.log('item59:', JSON.stringify(report));
   }
 
-  if (process.env['BATON_SHOT_PULL_FILTER']) {
+  if (process.env['KOVAN_SHOT_PULL_FILTER']) {
     await read(win, `document.querySelector('[aria-label="Filter pull requests"]')?.click()`);
     await until(win, `document.querySelector('.filter-menu')`, 5_000);
     await new Promise((r) => setTimeout(r, 150));
     await writeFile(
-      process.env['BATON_SHOT_PULL_FILTER'],
+      process.env['KOVAN_SHOT_PULL_FILTER'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_PULL_FILTER']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_PULL_FILTER']}`);
     await read(win, `document.body.click()`);
     await new Promise((r) => setTimeout(r, 100));
   }
 
   // --- Sorting pull requests — the icon used to do nothing at all -----------
-  if (process.env['BATON_SHOT_PULL_SORT']) {
+  if (process.env['KOVAN_SHOT_PULL_SORT']) {
     // `read` only marshals JSON-able values across the bridge, so this reads
     // text content into a plain array rather than a live NodeList.
     const draftOrder = () =>
@@ -1184,10 +1184,10 @@ export async function smokeUi(
     await until(win, `document.querySelector('.menu-host .menu')`, 5_000);
     await new Promise((r) => setTimeout(r, 150));
     await writeFile(
-      process.env['BATON_SHOT_PULL_SORT'],
+      process.env['KOVAN_SHOT_PULL_SORT'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_PULL_SORT']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_PULL_SORT']}`);
 
     await read(
       win,
@@ -1201,12 +1201,12 @@ export async function smokeUi(
       JSON.stringify({ beforeOrder, afterOrder, reversed: JSON.stringify(beforeOrder) !== JSON.stringify(afterOrder) })
     );
 
-    if (process.env['BATON_SHOT_PULL_SORTED']) {
+    if (process.env['KOVAN_SHOT_PULL_SORTED']) {
       await writeFile(
-        process.env['BATON_SHOT_PULL_SORTED'],
+        process.env['KOVAN_SHOT_PULL_SORTED'],
         (await win.webContents.capturePage()).toPNG()
       );
-      console.log(`shot: ${process.env['BATON_SHOT_PULL_SORTED']}`);
+      console.log(`shot: ${process.env['KOVAN_SHOT_PULL_SORTED']}`);
     }
   }
 
@@ -1215,7 +1215,7 @@ export async function smokeUi(
   // "Unblock in an agent" (writes code) and "Check it shipped" (only judges)
   // — the two used to be visually identical. `idrisay`'s own #118 in Open is
   // exactly that case.
-  if (process.env['BATON_SHOT_RUN_BUTTONS']) {
+  if (process.env['KOVAN_SHOT_RUN_BUTTONS']) {
     await read(
       win,
       `Array.from(document.querySelectorAll('.rows .row .row-num'))
@@ -1224,14 +1224,14 @@ export async function smokeUi(
     await until(win, `document.querySelector('.detail-actions .primary.outline')`, 5_000);
     await new Promise((r) => setTimeout(r, 150));
     await writeFile(
-      process.env['BATON_SHOT_RUN_BUTTONS'],
+      process.env['KOVAN_SHOT_RUN_BUTTONS'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_RUN_BUTTONS']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_RUN_BUTTONS']}`);
 
     // Item 28: the same buttons in light mode, where the outline one used to
     // inherit the solid button's near-white label and come out empty.
-    await read(win, `window.baton.setSetting('appearance.theme', 'light')`);
+    await read(win, `window.kovan.setSetting('appearance.theme', 'light')`);
     await read(win, `document.documentElement.dataset.theme = 'light'`);
     await new Promise((r) => setTimeout(r, 250));
     const outlineInLight = await read(
@@ -1245,17 +1245,17 @@ export async function smokeUi(
       })()`
     );
     await writeFile(
-      `${process.env['BATON_SHOT_RUN_BUTTONS']}`.replace(/\.png$/, '-light.png'),
+      `${process.env['KOVAN_SHOT_RUN_BUTTONS']}`.replace(/\.png$/, '-light.png'),
       (await win.webContents.capturePage()).toPNG()
     );
     console.log('runButtonsLight:', JSON.stringify(outlineInLight));
-    await read(win, `window.baton.setSetting('appearance.theme', 'dark')`);
+    await read(win, `window.kovan.setSetting('appearance.theme', 'dark')`);
     await read(win, `document.documentElement.dataset.theme = 'dark'`);
     await new Promise((r) => setTimeout(r, 200));
   }
 
   // --- The run sheet's model field, and remembering the last one picked -----
-  if (process.env['BATON_SHOT_RUN_MODEL']) {
+  if (process.env['KOVAN_SHOT_RUN_MODEL']) {
     await read(win, `document.querySelector('.rows .row')?.click()`);
     await until(win, `document.querySelector('.detail-actions .primary')`, 5_000);
     await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
@@ -1275,10 +1275,10 @@ export async function smokeUi(
     const before = await modelField();
 
     await writeFile(
-      process.env['BATON_SHOT_RUN_MODEL'],
+      process.env['KOVAN_SHOT_RUN_MODEL'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_RUN_MODEL']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_RUN_MODEL']}`);
 
     // Pick a model and cancel — a run sheet closed without running must not
     // remember anything, only one actually started does.
@@ -1295,7 +1295,7 @@ export async function smokeUi(
     await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
     await new Promise((r) => setTimeout(r, 100));
     const forgottenAfterCancel = (
-      await read(win, `window.baton.settings()`) as { 'runner.lastModel'?: Record<string, string> }
+      await read(win, `window.kovan.settings()`) as { 'runner.lastModel'?: Record<string, string> }
     )['runner.lastModel']?.['claude'];
 
     console.log(
@@ -1319,7 +1319,7 @@ export async function smokeUi(
     await until(win, `document.querySelector('.detail-terminal')`, 10_000);
     await new Promise((r) => setTimeout(r, 300));
     const rememberedAfterRun = (
-      await read(win, `window.baton.settings()`) as { 'runner.lastModel'?: Record<string, string> }
+      await read(win, `window.kovan.settings()`) as { 'runner.lastModel'?: Record<string, string> }
     )['runner.lastModel']?.['claude'];
 
     // Reopening the sheet for the same agent should come back prefilled.
@@ -1336,12 +1336,12 @@ export async function smokeUi(
   }
 
   // --- The bottom status bar -------------------------------------------------
-  if (process.env['BATON_SHOT_STATUSBAR']) {
+  if (process.env['KOVAN_SHOT_STATUSBAR']) {
     await writeFile(
-      process.env['BATON_SHOT_STATUSBAR'],
+      process.env['KOVAN_SHOT_STATUSBAR'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_STATUSBAR']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_STATUSBAR']}`);
 
     const text = () => read(win, `document.querySelector('.statusbar')?.textContent ?? ''`);
     const before = await text();
@@ -1370,7 +1370,7 @@ export async function smokeUi(
   // underneath never saw a token in this profile, so clicking a provider's
   // own refresh exercises the button and the IPC round trip without needing
   // a real GitHub/Jira connection.
-  if (process.env['BATON_SHOT_REFRESH_MENU']) {
+  if (process.env['KOVAN_SHOT_REFRESH_MENU']) {
     await read(win, `document.querySelector('[aria-label="Refresh"]')?.click()`);
     await until(win, `document.querySelector('.stamp-menu')`, 5_000);
     await new Promise((r) => setTimeout(r, 150));
@@ -1383,10 +1383,10 @@ export async function smokeUi(
     )) as { label: string; age: string }[];
     console.log('refreshMenuRows:', JSON.stringify(rows));
     await writeFile(
-      process.env['BATON_SHOT_REFRESH_MENU'],
+      process.env['KOVAN_SHOT_REFRESH_MENU'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_REFRESH_MENU']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_REFRESH_MENU']}`);
 
     const buttonExists = await read(
       win, `Boolean(document.querySelector('[aria-label="Refresh Pull requests"]'))`
@@ -1401,7 +1401,7 @@ export async function smokeUi(
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  if (process.env['BATON_SHOT_PR_INLINE_TERMINAL']) {
+  if (process.env['KOVAN_SHOT_PR_INLINE_TERMINAL']) {
     await read(win, `document.querySelector('.rows .row')?.click()`);
     await until(win, `document.querySelector('.detail-actions .primary')`, 5_000);
     await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
@@ -1416,17 +1416,17 @@ export async function smokeUi(
     );
     console.log('stayedOnPulls:', stayedOnPulls);
     await writeFile(
-      process.env['BATON_SHOT_PR_INLINE_TERMINAL'],
+      process.env['KOVAN_SHOT_PR_INLINE_TERMINAL'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_PR_INLINE_TERMINAL']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_PR_INLINE_TERMINAL']}`);
   }
 
   // --- The quick terminal: scoped to looking at one ticket/PR, not a run ----
   // Opened from the "Terminal" button rather than a run sheet, and closed the
   // moment you navigate to a different pull request — unlike an agent run's
   // session, which is meant to outlive the pane it was started from.
-  if (process.env['BATON_SHOT_QUICK_TERMINAL']) {
+  if (process.env['KOVAN_SHOT_QUICK_TERMINAL']) {
     // Counts how many times the resize IPC actually fires. `Terminal.tsx`
     // used to call it on every ResizeObserver firing, whether or not the
     // char grid changed — and a stray nested `.term` div (Detail.tsx wrapped
@@ -1439,8 +1439,8 @@ export async function smokeUi(
       win,
       `(() => {
         window.__resizeCalls = 0;
-        const original = window.baton.sessionResize.bind(window.baton);
-        window.baton.sessionResize = (...args) => { window.__resizeCalls += 1; return original(...args); };
+        const original = window.kovan.sessionResize.bind(window.kovan);
+        window.kovan.sessionResize = (...args) => { window.__resizeCalls += 1; return original(...args); };
       })()`
     );
 
@@ -1457,24 +1457,24 @@ export async function smokeUi(
     await until(win, `document.querySelector('.detail-terminal')`, 10_000);
     await new Promise((r) => setTimeout(r, 1_500));
     await writeFile(
-      process.env['BATON_SHOT_QUICK_TERMINAL'],
+      process.env['KOVAN_SHOT_QUICK_TERMINAL'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_QUICK_TERMINAL']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_QUICK_TERMINAL']}`);
     console.log('resizeCallsAfterSettling:', await read(win, `window.__resizeCalls`));
 
     // A quick terminal is filed under its ticket/PR the same way a run's
     // session is: navigating to a different one and back should find the
     // *same* session still there, not gone — that's the whole point of
     // docking it by subject rather than by "whatever is currently open".
-    const sessionsBefore = await read(win, `window.baton.sessions()`) as { id: string }[];
+    const sessionsBefore = await read(win, `window.kovan.sessions()`) as { id: string }[];
     await read(win, `document.querySelectorAll('.rows .row')[1]?.click()`);
     await new Promise((r) => setTimeout(r, 300));
     const hiddenOnOtherPull = !(await read(win, `document.querySelector('.detail-terminal')`));
     await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
     await new Promise((r) => setTimeout(r, 300));
     const reappeared = await read(win, `Boolean(document.querySelector('.detail-terminal'))`);
-    const sessionsAfter = await read(win, `window.baton.sessions()`) as { id: string }[];
+    const sessionsAfter = await read(win, `window.kovan.sessions()`) as { id: string }[];
     console.log(
       'quickTerminalPersists:',
       JSON.stringify({
@@ -1495,13 +1495,13 @@ export async function smokeUi(
       attached = true;
     } catch { /* already attached elsewhere in this run */ }
     if (attached) {
-      await win.webContents.debugger.sendCommand('Input.insertText', { text: 'echo BATON_TYPED_OK' });
+      await win.webContents.debugger.sendCommand('Input.insertText', { text: 'echo KOVAN_TYPED_OK' });
       win.webContents.debugger.detach();
     }
     await new Promise((r) => setTimeout(r, 600));
     const typedVisible = await read(
       win,
-      `document.querySelector('.term')?.textContent?.includes('BATON_TYPED_OK') ?? false`
+      `document.querySelector('.term')?.textContent?.includes('KOVAN_TYPED_OK') ?? false`
     );
     console.log('quickTerminalKeystrokeVisible:', JSON.stringify({ attached, typedVisible }));
   }
@@ -1512,8 +1512,8 @@ export async function smokeUi(
   // splitter is — real mouse events through the debugger protocol, because a
   // handler that only reacts to `pointermove` needs actual pointer capture,
   // which a dispatched DOM event cannot grant itself.
-  if (process.env['BATON_SHOT_TERMINAL_DOCK']) {
-    const prefix = process.env['BATON_SHOT_TERMINAL_DOCK'];
+  if (process.env['KOVAN_SHOT_TERMINAL_DOCK']) {
+    const prefix = process.env['KOVAN_SHOT_TERMINAL_DOCK'];
     await read(win, `document.querySelector('.rows .row')?.click()`);
     await until(win, `document.querySelector('.detail-actions .primary')`, 5_000);
     await read(win, `document.querySelector('.detail-actions .primary')?.click()`);
@@ -1628,8 +1628,8 @@ export async function smokeUi(
       JSON.stringify({
         dockedBottom, dockedRight, dockedTop, dockedLeft,
         widthBeforeDrag: dockedRight?.rect.width, widthAfterDrag, widthAfterBigDrag,
-        storedDock: await read(win, `localStorage.getItem('baton.terminal-dock')`),
-        storedWidth: await read(win, `localStorage.getItem('baton.terminal-width')`)
+        storedDock: await read(win, `localStorage.getItem('kovan.terminal-dock')`),
+        storedWidth: await read(win, `localStorage.getItem('kovan.terminal-width')`)
       })
     );
   }
@@ -1639,8 +1639,8 @@ export async function smokeUi(
   // its name is a way back to the ticket (22), its name is on the pane at all
   // (24), the font size is settable from the UI (25), renaming sticks (27),
   // and closing it leaves an instruction rather than a dead terminal (26).
-  if (process.env['BATON_SHOT_SESSIONS']) {
-    const prefix = process.env['BATON_SHOT_SESSIONS'];
+  if (process.env['KOVAN_SHOT_SESSIONS']) {
+    const prefix = process.env['KOVAN_SHOT_SESSIONS'];
     const shot = async (name: string) => {
       await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
       console.log(`shot: ${prefix}-${name}.png`);
@@ -1651,8 +1651,8 @@ export async function smokeUi(
     // fixture pull request, so the identifier in each name has something real
     // to resolve back to — one of each kind the row can jump to.
     const cwd = JSON.stringify(process.cwd());
-    await read(win, `window.baton.openTerminal(${cwd}, 'acme/web#42', 'review · acme/web#42')`);
-    await read(win, `window.baton.openTerminal(${cwd}, 'ACME-2393', 'implement · ACME-2393')`);
+    await read(win, `window.kovan.openTerminal(${cwd}, 'acme/web#42', 'review · acme/web#42')`);
+    await read(win, `window.kovan.openTerminal(${cwd}, 'ACME-2393', 'implement · ACME-2393')`);
     await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
     await until(win, `document.querySelector('.term-pane .term')`, 10_000);
     await new Promise((r) => setTimeout(r, 800));
@@ -1686,7 +1686,7 @@ export async function smokeUi(
       before: fontBefore,
       after: await read(win, `getComputedStyle(document.querySelector('.xterm-rows')).fontSize`),
       shown: await read(win, `document.querySelector('.settings .font-size-value')?.textContent`),
-      stored: await read(win, `localStorage.getItem('baton.terminal-font-size')`)
+      stored: await read(win, `localStorage.getItem('kovan.terminal-font-size')`)
     };
     await shot('font');
     await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
@@ -1698,7 +1698,7 @@ export async function smokeUi(
     // font moved, and the page zoom did not.
     await read(
       win,
-      `(() => { window.__steps = []; window.baton.onFontSizeStep(step => window.__steps.push(step)); })()`
+      `(() => { window.__steps = []; window.kovan.onFontSizeStep(step => window.__steps.push(step)); })()`
     );
     // `sendInputEvent`, not the debugger protocol: CDP injects straight into
     // the renderer and never passes the browser-side input pipeline, which is
@@ -1710,7 +1710,7 @@ export async function smokeUi(
     await new Promise((r) => setTimeout(r, 500));
     const shortcut = {
       rendered: await read(win, `getComputedStyle(document.querySelector('.xterm-rows')).fontSize`),
-      stored: await read(win, `localStorage.getItem('baton.terminal-font-size')`),
+      stored: await read(win, `localStorage.getItem('kovan.terminal-font-size')`),
       pageZoom: win.webContents.getZoomLevel(),
       stepsSeenByRenderer: await read(win, `window.__steps`)
     };
@@ -1721,18 +1721,18 @@ export async function smokeUi(
     // the injected line carries no backslash for two layers of escaping to
     // argue over — one round of that already produced a raw carriage return
     // inside a string literal.
-    const openSessions = (await read(win, `window.baton.sessions()`)) as
+    const openSessions = (await read(win, `window.kovan.sessions()`)) as
       { id: string; subject?: string }[];
     const ticketSession = openSessions.find((s) => s.subject === 'ACME-2393');
     await read(
       win,
-      `window.baton.sessionWrite(${JSON.stringify(ticketSession?.id ?? '')}, 'tput bel' + String.fromCharCode(13))`
+      `window.kovan.sessionWrite(${JSON.stringify(ticketSession?.id ?? '')}, 'tput bel' + String.fromCharCode(13))`
     );
     await new Promise((r) => setTimeout(r, 2000));
     const bell = {
       inMain: await read(
         win,
-        `window.baton.sessions().then(l => l.map(s => ({ subject: s.subject, attention: s.attention })))`
+        `window.kovan.sessions().then(l => l.map(s => ({ subject: s.subject, attention: s.attention })))`
       ),
       rows: await read(
         win,
@@ -1840,16 +1840,16 @@ export async function smokeUi(
   // drag onto an existing pane's centre to merge as a tab, then a resize and
   // a detach. Each step is checked against the actual tree it produced, not
   // just a screenshot.
-  if (process.env['BATON_SHOT_SPLIT']) {
-    const prefix = process.env['BATON_SHOT_SPLIT'];
+  if (process.env['KOVAN_SHOT_SPLIT']) {
+    const prefix = process.env['KOVAN_SHOT_SPLIT'];
     const shot = async (name: string) => {
       await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
       console.log(`shot: ${prefix}-${name}.png`);
     };
     const cwd = JSON.stringify(process.cwd());
-    await read(win, `window.baton.openTerminal(${cwd}, 'ACME-2393', 'implement · ACME-2393')`);
-    await read(win, `window.baton.openTerminal(${cwd}, 'acme/web#42', 'review · acme/web#42')`);
-    await read(win, `window.baton.openTerminal(${cwd}, 'ACME-1000', 'unblock · ACME-1000')`);
+    await read(win, `window.kovan.openTerminal(${cwd}, 'ACME-2393', 'implement · ACME-2393')`);
+    await read(win, `window.kovan.openTerminal(${cwd}, 'acme/web#42', 'review · acme/web#42')`);
+    await read(win, `window.kovan.openTerminal(${cwd}, 'ACME-1000', 'unblock · ACME-1000')`);
     await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
     await until(win, `document.querySelectorAll('.queue-list .row').length >= 3`, 5_000);
     await new Promise((r) => setTimeout(r, 500));
@@ -1995,7 +1995,7 @@ export async function smokeUi(
 
   const result: Record<string, unknown> = {
     rendererMounted: await read(win, `document.querySelector('#root')?.children.length > 0`),
-    preloadApi: await read(win, `typeof window.baton?.refresh`),
+    preloadApi: await read(win, `typeof window.kovan?.refresh`),
     wordmark: await read(win, `document.querySelector('.wordmark')?.textContent ?? ''`),
     emptyState: await read(win, `document.querySelector('.empty h1')?.textContent ?? ''`),
     rail: await read(
@@ -2198,20 +2198,20 @@ export async function smokeUi(
     await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
     await new Promise((r) => setTimeout(r, 120));
 
-    if (process.env['BATON_SHOT_MERGED']) {
+    if (process.env['KOVAN_SHOT_MERGED']) {
       await writeFile(
-        process.env['BATON_SHOT_MERGED'],
+        process.env['KOVAN_SHOT_MERGED'],
         (await win.webContents.capturePage()).toPNG()
       );
-      console.log(`shot: ${process.env['BATON_SHOT_MERGED']}`);
+      console.log(`shot: ${process.env['KOVAN_SHOT_MERGED']}`);
     }
 
-    if (process.env['BATON_SHOT_SECTIONS']) {
+    if (process.env['KOVAN_SHOT_SECTIONS']) {
       await writeFile(
-        process.env['BATON_SHOT_SECTIONS'],
+        process.env['KOVAN_SHOT_SECTIONS'],
         (await win.webContents.capturePage()).toPNG()
       );
-      console.log(`shot: ${process.env['BATON_SHOT_SECTIONS']}`);
+      console.log(`shot: ${process.env['KOVAN_SHOT_SECTIONS']}`);
     }
 
     // Leave it folded again so the detail steps below start from a known list.
@@ -2285,38 +2285,38 @@ export async function smokeUi(
 
   result['layoutWide'] = await layout();
 
-  if (process.env['BATON_SHOT_DETAIL_LIGHT']) {
-    await read(win, `window.baton.setSetting('appearance.theme', 'light')`);
+  if (process.env['KOVAN_SHOT_DETAIL_LIGHT']) {
+    await read(win, `window.kovan.setSetting('appearance.theme', 'light')`);
     await read(win, `document.documentElement.dataset.theme = 'light'`);
     await new Promise((r) => setTimeout(r, 200));
     await read(win, `document.querySelector('.detail-scroll').scrollTo(0, 1400)`);
     await new Promise((r) => setTimeout(r, 150));
     await writeFile(
-      process.env['BATON_SHOT_DETAIL_LIGHT'],
+      process.env['KOVAN_SHOT_DETAIL_LIGHT'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_DETAIL_LIGHT']}`);
-    await read(win, `window.baton.setSetting('appearance.theme', 'dark')`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_DETAIL_LIGHT']}`);
+    await read(win, `window.kovan.setSetting('appearance.theme', 'dark')`);
     await read(win, `document.documentElement.dataset.theme = 'dark'`);
     await new Promise((r) => setTimeout(r, 150));
   }
 
-  if (process.env['BATON_SHOT_DETAIL']) {
+  if (process.env['KOVAN_SHOT_DETAIL']) {
     await writeFile(
-      process.env['BATON_SHOT_DETAIL'],
+      process.env['KOVAN_SHOT_DETAIL'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_DETAIL']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_DETAIL']}`);
 
     // Scrolled to the conversation, to see the collapse-by-default state:
     // only the last card (thread or comment) open, everything above it shut.
     await read(win, `document.querySelector('.detail-scroll').scrollTo(0, 1400)`);
     await new Promise((r) => setTimeout(r, 150));
     await writeFile(
-      `${process.env['BATON_SHOT_DETAIL']}`.replace(/\.png$/, '-timeline.png'),
+      `${process.env['KOVAN_SHOT_DETAIL']}`.replace(/\.png$/, '-timeline.png'),
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_DETAIL']}-timeline.png`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_DETAIL']}-timeline.png`);
 
     const timelineState = await read(
       win,
@@ -2336,21 +2336,21 @@ export async function smokeUi(
     );
     console.log('firstCardExpandsOnClick:', afterClick);
     await writeFile(
-      `${process.env['BATON_SHOT_DETAIL']}`.replace(/\.png$/, '-expanded.png'),
+      `${process.env['KOVAN_SHOT_DETAIL']}`.replace(/\.png$/, '-expanded.png'),
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_DETAIL']}-expanded.png`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_DETAIL']}-expanded.png`);
   }
 
-  if (process.env['BATON_SHOT_QUICK']) {
+  if (process.env['KOVAN_SHOT_QUICK']) {
     await read(win, `document.querySelector('.detail-scroll').scrollTo(0, 0)`);
-    result['quickPull'] = await shootQuick(win, process.env['BATON_SHOT_QUICK'].replace(/\.png$/, '-pull.png'), 'Summarize');
+    result['quickPull'] = await shootQuick(win, process.env['KOVAN_SHOT_QUICK'].replace(/\.png$/, '-pull.png'), 'Summarize');
   }
 
   // Opt-in on its own: a real Kimi K3 review takes minutes, so this polls
   // every ten seconds rather than holding one long wait open.
-  if (process.env['BATON_SHOT_KIMI']) {
-    const file = process.env['BATON_SHOT_KIMI'];
+  if (process.env['KOVAN_SHOT_KIMI']) {
+    const file = process.env['KOVAN_SHOT_KIMI'];
     await read(win, `document.querySelector('.detail-scroll').scrollTo(0, 0)`);
     await read(win, `Array.from(document.querySelectorAll('.detail-actions button.quick-run')).find(b => b.textContent.includes('nv-review'))?.click()`);
     await new Promise((r) => setTimeout(r, 1500));
@@ -2384,8 +2384,8 @@ export async function smokeUi(
   // Seeds a finished review for whichever PR is open (usage.json is seeded by
   // the caller before launch), then walks: verdict card → confirm → posted
   // (the smoke's own submit never reaches GitHub) → Sessions' Token usage.
-  if (process.env['BATON_SHOT_USAGE']) {
-    const prefix = process.env['BATON_SHOT_USAGE'];
+  if (process.env['KOVAN_SHOT_USAGE']) {
+    const prefix = process.env['KOVAN_SHOT_USAGE'];
     const shot = async (name: string) => {
       win.webContents.invalidate();
       await new Promise((r) => setTimeout(r, 400));
@@ -2394,7 +2394,7 @@ export async function smokeUi(
     };
     // A live poll (the fixture profile's Sentry 401) can replace the fixture
     // snapshot mid-run; put it back before driving the pane.
-    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
     await read(win, `document.querySelector('[aria-label="Pull requests"]')?.click()`);
     await until(win, `document.querySelector('.queue .row')`, 5_000);
     if (!(await read(win, `Boolean(document.querySelector('.detail-pill-repo'))`))) {
@@ -2454,8 +2454,8 @@ export async function smokeUi(
   }
 
   // --- Items 42–44: environments, test accounts, reading text size ----------
-  if (process.env['BATON_SHOT_ENVS']) {
-    const prefix = process.env['BATON_SHOT_ENVS'];
+  if (process.env['KOVAN_SHOT_ENVS']) {
+    const prefix = process.env['KOVAN_SHOT_ENVS'];
     const shot = async (name: string) => {
       win.webContents.invalidate();
       await new Promise((r) => setTimeout(r, 400));
@@ -2463,24 +2463,24 @@ export async function smokeUi(
       console.log(`shot: ${prefix}-${name}.png`);
     };
     win.show();
-    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
     // The single environment this replaces, as an existing profile has it.
     // `setSecret` re-polls, and a poll with no real credentials replaces the
     // fixture with "Nothing connected" — keep putting it back.
-    const keepEnvFixture = setInterval(() => win.webContents.send('baton:snapshot', fixtureSnapshot(10)), 1_000);
+    const keepEnvFixture = setInterval(() => win.webContents.send('kovan:snapshot', fixtureSnapshot(10)), 1_000);
     // An earlier step may already have seeded the list; start again from the old shape.
-    await read(win, `window.baton.setSetting('verify.environments', [])`);
-    await read(win, `window.baton.setSetting('verify.environment', 'Dev')`);
-    await read(win, `window.baton.setSetting('verify.site', 'https://dev.example.invalid')`);
-    await read(win, `window.baton.setSetting('verify.username', 'legacy@example.invalid')`);
-    await read(win, `window.baton.setSecret('verify.password', 'legacy-pw')`);
-    const migrated = await read(win, `window.baton.testEnvironments()`) as {
+    await read(win, `window.kovan.setSetting('verify.environments', [])`);
+    await read(win, `window.kovan.setSetting('verify.environment', 'Dev')`);
+    await read(win, `window.kovan.setSetting('verify.site', 'https://dev.example.invalid')`);
+    await read(win, `window.kovan.setSetting('verify.username', 'legacy@example.invalid')`);
+    await read(win, `window.kovan.setSecret('verify.password', 'legacy-pw')`);
+    const migrated = await read(win, `window.kovan.testEnvironments()`) as {
       environments: { id: string; name: string; site: string }[];
       accounts: { id: string; environmentId: string; username: string }[];
       savedPasswords: string[];
     };
     const legacy = migrated.accounts[0];
-    await read(win, `window.baton.testEnvironmentsSave(${JSON.stringify({
+    await read(win, `window.kovan.testEnvironmentsSave(${JSON.stringify({
       environments: migrated.environments,
       defaultEnvironment: 'dev',
       accounts: [
@@ -2492,7 +2492,7 @@ export async function smokeUi(
       passwords: { 'testAccount.acct-student.password': 'x', 'testAccount.acct-teacher.password': 'y' }
     })})`);
 
-    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
     await until(win, `document.querySelector('.rail [aria-label="Settings"]')`, 10_000);
     await read(win, `document.querySelector('.rail [aria-label="Settings"]')?.click()`);
     await until(win, `document.querySelector('.settings-list')`, 5_000);
@@ -2549,7 +2549,7 @@ export async function smokeUi(
     const typedSite = {
       inPrompt: await read(win, `document.querySelector('.prompt-label textarea').value.includes('The site is http://localhost:5173')`),
       saveOffered: await read(win, `Array.from(document.querySelectorAll('.run-test-env .link')).some(b => b.textContent.includes('Save as default'))`),
-      stillSaved: await read(win, `window.baton.testEnvironments().then(s => s.environments.find(e => e.id === 'local').site)`)
+      stillSaved: await read(win, `window.kovan.testEnvironments().then(s => s.environments.find(e => e.id === 'local').site)`)
     };
     await shot('verify-typed-site');
     await read(win, `Array.from(document.querySelectorAll('.sheet-head button')).find(b => b.textContent.trim() === 'Cancel')?.click()`);
@@ -2572,8 +2572,8 @@ export async function smokeUi(
   }
 
   // --- Items 37–41: a simpler Sessions tab, a leaner rail, a fitted terminal --
-  if (process.env['BATON_SHOT_LAYOUT']) {
-    const prefix = process.env['BATON_SHOT_LAYOUT'];
+  if (process.env['KOVAN_SHOT_LAYOUT']) {
+    const prefix = process.env['KOVAN_SHOT_LAYOUT'];
     const shot = async (name: string) => {
       win.webContents.invalidate();
       await new Promise((r) => setTimeout(r, 400));
@@ -2581,16 +2581,16 @@ export async function smokeUi(
       console.log(`shot: ${prefix}-${name}.png`);
     };
     win.show();
-    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
     await new Promise((r) => setTimeout(r, 300));
     const cwd = JSON.stringify(process.cwd());
-    await read(win, `window.baton.openTerminal(${cwd}, 'acme/web#42', 'review · acme/web#42')`);
-    await read(win, `window.baton.openTerminal(${cwd}, 'ACME-2393', 'implement · ACME-2393')`);
+    await read(win, `window.kovan.openTerminal(${cwd}, 'acme/web#42', 'review · acme/web#42')`);
+    await read(win, `window.kovan.openTerminal(${cwd}, 'ACME-2393', 'implement · ACME-2393')`);
     await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
     await until(win, `document.querySelector('.term-pane .term .xterm-rows')`, 10_000);
     // Fill the screen so the bottom row has something on it to be cut off.
-    const sessionId = await read(win, `window.baton.sessions().then(s => s[s.length - 1].id)`) as string;
-    await read(win, `window.baton.sessionWrite(${JSON.stringify(sessionId)}, 'for i in $(seq 1 200); do echo line $i; done; echo LAST-LINE-VISIBLE\\r')`);
+    const sessionId = await read(win, `window.kovan.sessions().then(s => s[s.length - 1].id)`) as string;
+    await read(win, `window.kovan.sessionWrite(${JSON.stringify(sessionId)}, 'for i in $(seq 1 200); do echo line $i; done; echo LAST-LINE-VISIBLE\\r')`);
     await new Promise((r) => setTimeout(r, 1500));
     await shot('sessions');
 
@@ -2633,8 +2633,8 @@ export async function smokeUi(
   // --- Item 35: Sessions tab — open links, terminal names, quick-job controls --
   // Real mouse events, not element.click(): the open-link bug lived in the
   // row's pointer capture, which a synthetic click never goes through.
-  if (process.env['BATON_SHOT_SESSIONS']) {
-    const prefix = process.env['BATON_SHOT_SESSIONS'];
+  if (process.env['KOVAN_SHOT_SESSIONS']) {
+    const prefix = process.env['KOVAN_SHOT_SESSIONS'];
     const shot = async (name: string) => {
       win.webContents.invalidate();
       await new Promise((r) => setTimeout(r, 400));
@@ -2656,17 +2656,17 @@ export async function smokeUi(
     };
     win.show();
     win.focus();
-    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
     await new Promise((r) => setTimeout(r, 300));
 
     // Three ways a terminal gets opened: from a PR's own Terminal button
     // (named), from the + menu on a folder with a branch, and on a folder
     // that is not a clone at all.
-    await read(win, `window.baton.openTerminal(${JSON.stringify(process.cwd())}, 'acme/web#42', 'Terminal — acme/web#42')`);
-    await read(win, `window.baton.openTerminal(${JSON.stringify(process.cwd())})`);
-    await read(win, `window.baton.openTerminal(${JSON.stringify(app.getPath('userData'))})`);
+    await read(win, `window.kovan.openTerminal(${JSON.stringify(process.cwd())}, 'acme/web#42', 'Terminal — acme/web#42')`);
+    await read(win, `window.kovan.openTerminal(${JSON.stringify(process.cwd())})`);
+    await read(win, `window.kovan.openTerminal(${JSON.stringify(app.getPath('userData'))})`);
     // A quick job to cancel and close.
-    await read(win, `window.baton.quickRun('pull-summary', 'acme/web#118')`);
+    await read(win, `window.kovan.quickRun('pull-summary', 'acme/web#118')`);
     await read(win, `document.querySelector('[aria-label="Sessions"]')?.click()`);
     await until(win, `document.querySelectorAll('.queue .row').length >= 4`, 10_000);
     await new Promise((r) => setTimeout(r, 800));
@@ -2703,17 +2703,17 @@ export async function smokeUi(
   }
 
   // --- Item 36: Running agents ---------------------------------------------
-  // A fake `claude` (BATON_FAKE_AGENT: a node script that ignores SIGINT and
-  // starts a web server) in a Baton terminal: listed with its port, turns
+  // A fake `claude` (KOVAN_FAKE_AGENT: a node script that ignores SIGINT and
+  // starts a web server) in a Kovan terminal: listed with its port, turns
   // idle, and Stop takes both it and the server down through the escalation.
   // Only ever the fake's own row is clicked — every other agent on the Mac is
   // real.
-  if (process.env['BATON_SHOT_AGENTS'] && process.env['BATON_FAKE_AGENT']) {
-    const prefix = process.env['BATON_SHOT_AGENTS'];
-    const fake = process.env['BATON_FAKE_AGENT'];
+  if (process.env['KOVAN_SHOT_AGENTS'] && process.env['KOVAN_FAKE_AGENT']) {
+    const prefix = process.env['KOVAN_SHOT_AGENTS'];
+    const fake = process.env['KOVAN_FAKE_AGENT'];
     const shot = async (name: string) => {
       // A live poll with no real credentials replaces the fixture mid-run.
-      win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+      win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
       win.webContents.invalidate();
       await new Promise((r) => setTimeout(r, 400));
       await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
@@ -2734,12 +2734,12 @@ export async function smokeUi(
     };
     win.show();
     win.focus();
-    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
-    await read(win, `window.baton.setSetting('agents.idleMinutes', 1)`);
-    const keepFixture = setInterval(() => win.webContents.send('baton:snapshot', fixtureSnapshot(10)), 2_000);
+    win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+    await read(win, `window.kovan.setSetting('agents.idleMinutes', 1)`);
+    const keepFixture = setInterval(() => win.webContents.send('kovan:snapshot', fixtureSnapshot(10)), 2_000);
 
-    const session = await read(win, `window.baton.openTerminal(${JSON.stringify(process.cwd())}, undefined, 'Fake agent · smoke')`) as { id: string };
-    await read(win, `window.baton.sessionWrite(${JSON.stringify(session.id)}, ${JSON.stringify(`node ${fake}`)} + String.fromCharCode(13))`);
+    const session = await read(win, `window.kovan.openTerminal(${JSON.stringify(process.cwd())}, undefined, 'Fake agent · smoke')`) as { id: string };
+    await read(win, `window.kovan.sessionWrite(${JSON.stringify(session.id)}, ${JSON.stringify(`node ${fake}`)} + String.fromCharCode(13))`);
     await read(win, `document.querySelector('[aria-label="Agents and usage"]')?.click()`);
     await until(win, `document.querySelectorAll('.queue .row').length >= 2`, 10_000);
     const agentsRow = `Array.from(document.querySelectorAll('.queue .row')).find(r => r.innerText.includes('Running agents'))`;
@@ -2781,21 +2781,21 @@ export async function smokeUi(
     }
     await new Promise((r) => setTimeout(r, 500));
     result['afterStop'] = await read(win, `Array.from(document.querySelectorAll('.agents-group')).map(g => g.innerText.replace(/\\n/g, ' | '))`);
-    result['sessionStillOpen'] = await read(win, `window.baton.sessions().then(l => l.filter(s => s.id === ${JSON.stringify(session.id)}).map(s => s.running))`);
+    result['sessionStillOpen'] = await read(win, `window.kovan.sessions().then(l => l.filter(s => s.id === ${JSON.stringify(session.id)}).map(s => s.running))`);
     await shot('stopped');
     console.log('agents36:', JSON.stringify({
       agentsListed: result['agentsListed'], idleRow: result['idleRow'], railIdlePip: result['railIdlePip'],
       confirm: result['confirm'], afterStop: result['afterStop'], sessionStillOpen: result['sessionStillOpen']
     }, null, 2));
     clearInterval(keepFixture);
-    await read(win, `window.baton.setSetting('agents.idleMinutes', 60)`);
+    await read(win, `window.kovan.setSetting('agents.idleMinutes', 60)`);
     // The rest of the seeded run expects the state it set up, not this one.
     process.exit(0);
   }
 
   // --- Item 32: ticket <-> pull request cross-links -------------------------
-  if (process.env['BATON_SHOT_RELATED']) {
-    const prefix = process.env['BATON_SHOT_RELATED'];
+  if (process.env['KOVAN_SHOT_RELATED']) {
+    const prefix = process.env['KOVAN_SHOT_RELATED'];
     const shot = async (name: string) => {
       await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
       console.log(`shot: ${prefix}-${name}.png`);
@@ -2861,12 +2861,12 @@ export async function smokeUi(
   await new Promise((r) => setTimeout(r, 250));
   result['layoutUltra'] = await layout();
 
-  if (process.env['BATON_SHOT_ULTRA']) {
+  if (process.env['KOVAN_SHOT_ULTRA']) {
     await writeFile(
-      process.env['BATON_SHOT_ULTRA'],
+      process.env['KOVAN_SHOT_ULTRA'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_ULTRA']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_ULTRA']}`);
   }
   await win.webContents.setZoomFactor(1);
   await new Promise((r) => setTimeout(r, 200));
@@ -2877,12 +2877,12 @@ export async function smokeUi(
   await new Promise((r) => setTimeout(r, 200));
   result['layoutNarrow'] = await layout();
 
-  if (process.env['BATON_SHOT_NARROW']) {
+  if (process.env['KOVAN_SHOT_NARROW']) {
     await writeFile(
-      process.env['BATON_SHOT_NARROW'],
+      process.env['KOVAN_SHOT_NARROW'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_NARROW']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_NARROW']}`);
   }
   await read(win, `document.documentElement.style.removeProperty('--queue-w')`);
 
@@ -2909,25 +2909,25 @@ export async function smokeUi(
     layout: await layout()
   };
 
-  if (process.env['BATON_SHOT_TICKET']) {
+  if (process.env['KOVAN_SHOT_TICKET']) {
     // Same reason every other shot in this file waits: capturePage() can grab
     // a frame from just before the click's re-render finishes compositing.
     await new Promise((r) => setTimeout(r, 200));
     await writeFile(
-      process.env['BATON_SHOT_TICKET'],
+      process.env['KOVAN_SHOT_TICKET'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_TICKET']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_TICKET']}`);
   }
 
-  if (process.env['BATON_SHOT_QUICK']) {
-    result['quickTicket'] = await shootQuick(win, process.env['BATON_SHOT_QUICK'].replace(/\.png$/, '-ticket.png'));
+  if (process.env['KOVAN_SHOT_QUICK']) {
+    result['quickTicket'] = await shootQuick(win, process.env['KOVAN_SHOT_QUICK'].replace(/\.png$/, '-ticket.png'));
   }
 
   // Both jobs just run, as the Sessions tab lists them, and one opened with
   // what it read unfolded.
-  if (process.env['BATON_SHOT_QUICK']) {
-    const base = process.env['BATON_SHOT_QUICK'];
+  if (process.env['KOVAN_SHOT_QUICK']) {
+    const base = process.env['KOVAN_SHOT_QUICK'];
     await read(win, `document.querySelector('.rail-item[aria-label="Sessions"]')?.click()`);
     await until(win, `document.querySelectorAll('.queue-list .row').length >= 2`, 10_000);
     const pullRow = `Array.from(document.querySelectorAll('.queue-list button.row')).find(b => b.textContent.includes('Summarize'))`;
@@ -2966,13 +2966,13 @@ export async function smokeUi(
     )
   };
 
-  if (process.env['BATON_SHOT_SENTRY']) {
+  if (process.env['KOVAN_SHOT_SENTRY']) {
     await new Promise((r) => setTimeout(r, 200));
-    await writeFile(process.env['BATON_SHOT_SENTRY'], (await win.webContents.capturePage()).toPNG());
-    console.log(`shot: ${process.env['BATON_SHOT_SENTRY']}`);
+    await writeFile(process.env['KOVAN_SHOT_SENTRY'], (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${process.env['KOVAN_SHOT_SENTRY']}`);
   }
 
-  if (process.env['BATON_SHOT_SENTRY_TICKET']) {
+  if (process.env['KOVAN_SHOT_SENTRY_TICKET']) {
     await read(
       win,
       `Array.from(document.querySelectorAll('.detail-actions button'))
@@ -2982,10 +2982,10 @@ export async function smokeUi(
     await new Promise((r) => setTimeout(r, 200));
     result['sentryTicket'] = await read(win, `document.querySelector('.quiet.small')?.textContent ?? ''`);
     await writeFile(
-      process.env['BATON_SHOT_SENTRY_TICKET'],
+      process.env['KOVAN_SHOT_SENTRY_TICKET'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_SENTRY_TICKET']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_SENTRY_TICKET']}`);
   }
 
   // Item 18: saving Settings with a required field left blank must not fail
@@ -3038,13 +3038,13 @@ export async function smokeUi(
     )
   };
 
-  if (process.env['BATON_SHOT_SETTINGS_SAVE']) {
+  if (process.env['KOVAN_SHOT_SETTINGS_SAVE']) {
     await new Promise((r) => setTimeout(r, 200));
     await writeFile(
-      process.env['BATON_SHOT_SETTINGS_SAVE'],
+      process.env['KOVAN_SHOT_SETTINGS_SAVE'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_SETTINGS_SAVE']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_SETTINGS_SAVE']}`);
   }
 
   await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
@@ -3056,7 +3056,7 @@ export async function smokeUi(
   await read(win, `document.querySelector('.row')?.click()`);
   await until(win, `document.querySelector('.detail-head h2')`, 10_000);
 
-  if (process.env['BATON_SHOT_INLINE_TERMINAL']) {
+  if (process.env['KOVAN_SHOT_INLINE_TERMINAL']) {
     await read(
       win,
       `Array.from(document.querySelectorAll('.detail-actions .primary'))
@@ -3074,13 +3074,13 @@ export async function smokeUi(
       `document.querySelector('.rail-item[aria-label="Tickets"]')?.classList.contains('active')`
     );
     await writeFile(
-      process.env['BATON_SHOT_INLINE_TERMINAL'],
+      process.env['KOVAN_SHOT_INLINE_TERMINAL'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_INLINE_TERMINAL']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_INLINE_TERMINAL']}`);
   }
 
-  if (process.env['BATON_SHOT_RUN_VIEWER']) {
+  if (process.env['KOVAN_SHOT_RUN_VIEWER']) {
     await until(
       win,
       `Array.from(document.querySelectorAll('.runs .link')).some(b => b.textContent.trim() === 'view')`,
@@ -3107,22 +3107,22 @@ export async function smokeUi(
       })
     );
     await writeFile(
-      process.env['BATON_SHOT_RUN_VIEWER'],
+      process.env['KOVAN_SHOT_RUN_VIEWER'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_RUN_VIEWER']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_RUN_VIEWER']}`);
 
-    if (process.env['BATON_SHOT_RUN_VIEWER_SHOTS']) {
+    if (process.env['KOVAN_SHOT_RUN_VIEWER_SHOTS']) {
       // Opening a document takes over the view; "back" has to return to
       // exactly the gallery that was there before.
       await read(win, `document.querySelector('.run-doc')?.click()`);
       await until(win, `document.querySelector('.run-viewer-doc')`, 5_000);
       await new Promise((r) => setTimeout(r, 200));
       await writeFile(
-        process.env['BATON_SHOT_RUN_VIEWER_SHOTS'],
+        process.env['KOVAN_SHOT_RUN_VIEWER_SHOTS'],
         (await win.webContents.capturePage()).toPNG()
       );
-      console.log(`shot: ${process.env['BATON_SHOT_RUN_VIEWER_SHOTS']}`);
+      console.log(`shot: ${process.env['KOVAN_SHOT_RUN_VIEWER_SHOTS']}`);
 
       await read(win, `document.querySelector('.run-viewer-back')?.click()`);
       await new Promise((r) => setTimeout(r, 150));
@@ -3136,10 +3136,10 @@ export async function smokeUi(
     // produces (nothing here calls a real agent that takes screenshots) —
     // proven instead by placing one real PNG straight into the run's own
     // shots/ folder, the exact way `RunStore.env()` tells a run to.
-    if (process.env['BATON_SHOT_RUN_VIEWER_LIGHTBOX']) {
+    if (process.env['KOVAN_SHOT_RUN_VIEWER_LIGHTBOX']) {
       await read(win, `document.querySelector('.run-viewer .ghost')?.click()`);
       await new Promise((r) => setTimeout(r, 100));
-      const runs = (await read(win, `window.baton.runHistory('ACME-2393')`)) as { directory: string }[];
+      const runs = (await read(win, `window.kovan.runHistory('ACME-2393')`)) as { directory: string }[];
       const directory = runs[0]?.directory;
       if (directory) {
         const shotsDir = path.join(directory, 'shots');
@@ -3162,10 +3162,10 @@ export async function smokeUi(
         await until(win, `document.querySelector('.lightbox-backdrop img')`, 5_000);
         await new Promise((r) => setTimeout(r, 150));
         await writeFile(
-          process.env['BATON_SHOT_RUN_VIEWER_LIGHTBOX'],
+          process.env['KOVAN_SHOT_RUN_VIEWER_LIGHTBOX'],
           (await win.webContents.capturePage()).toPNG()
         );
-        console.log(`shot: ${process.env['BATON_SHOT_RUN_VIEWER_LIGHTBOX']}`);
+        console.log(`shot: ${process.env['KOVAN_SHOT_RUN_VIEWER_LIGHTBOX']}`);
         console.log(
           'runViewerLightbox:',
           JSON.stringify({
@@ -3184,32 +3184,32 @@ export async function smokeUi(
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  if (process.env['BATON_SHOT_TICKET_FILTER']) {
+  if (process.env['KOVAN_SHOT_TICKET_FILTER']) {
     await read(win, `document.querySelector('[aria-label="Filter tickets"]')?.click()`);
     await until(win, `document.querySelector('.filter-menu')`, 5_000);
     await new Promise((r) => setTimeout(r, 150));
     await writeFile(
-      process.env['BATON_SHOT_TICKET_FILTER'],
+      process.env['KOVAN_SHOT_TICKET_FILTER'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_TICKET_FILTER']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_TICKET_FILTER']}`);
     // Close it before whatever runs next, so an unrelated shot doesn't
     // inherit an open menu it never asked for.
     await read(win, `document.body.click()`);
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  if (process.env['BATON_SHOT_TICKET_SORT']) {
+  if (process.env['KOVAN_SHOT_TICKET_SORT']) {
     await read(win, `document.querySelector('[aria-label="Sort tickets"]')?.click()`);
     await until(win, `document.querySelector('.menu-host .menu')`, 5_000);
     await new Promise((r) => setTimeout(r, 150));
     await writeFile(
-      process.env['BATON_SHOT_TICKET_SORT'],
+      process.env['KOVAN_SHOT_TICKET_SORT'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_TICKET_SORT']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_TICKET_SORT']}`);
 
-    if (process.env['BATON_SHOT_TICKET_SORTED']) {
+    if (process.env['KOVAN_SHOT_TICKET_SORTED']) {
       await read(
         win,
         `Array.from(document.querySelectorAll('.menu-host .menu button'))
@@ -3217,34 +3217,34 @@ export async function smokeUi(
       );
       await new Promise((r) => setTimeout(r, 150));
       await writeFile(
-        process.env['BATON_SHOT_TICKET_SORTED'],
+        process.env['KOVAN_SHOT_TICKET_SORTED'],
         (await win.webContents.capturePage()).toPNG()
       );
-      console.log(`shot: ${process.env['BATON_SHOT_TICKET_SORTED']}`);
+      console.log(`shot: ${process.env['KOVAN_SHOT_TICKET_SORTED']}`);
     }
   }
 
-  if (process.env['BATON_SHOT_NEW_SESSION']) {
+  if (process.env['KOVAN_SHOT_NEW_SESSION']) {
     await read(win, `document.querySelector('.rail-item[aria-label="Sessions"]')?.click()`);
     await until(win, `document.querySelector('[aria-label="New session"]')`, 5_000);
     await read(win, `document.querySelector('[aria-label="New session"]')?.click()`);
     await until(win, `document.querySelector('.new-session-host .menu')`, 5_000);
     await new Promise((r) => setTimeout(r, 150));
     await writeFile(
-      process.env['BATON_SHOT_NEW_SESSION'],
+      process.env['KOVAN_SHOT_NEW_SESSION'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_NEW_SESSION']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_NEW_SESSION']}`);
 
-    if (process.env['BATON_SHOT_NEW_SESSION_OPENED']) {
+    if (process.env['KOVAN_SHOT_NEW_SESSION_OPENED']) {
       await read(win, `document.querySelector('.new-session-host .menu button[role="menuitem"]')?.click()`);
       await until(win, `document.querySelector('.term-head')`, 10_000);
       await new Promise((r) => setTimeout(r, 250));
       await writeFile(
-        process.env['BATON_SHOT_NEW_SESSION_OPENED'],
+        process.env['KOVAN_SHOT_NEW_SESSION_OPENED'],
         (await win.webContents.capturePage()).toPNG()
       );
-      console.log(`shot: ${process.env['BATON_SHOT_NEW_SESSION_OPENED']}`);
+      console.log(`shot: ${process.env['KOVAN_SHOT_NEW_SESSION_OPENED']}`);
       // Left open for as long as the docked-terminal check leaves its own
       // open, so a warning-count comparison between the two is fair.
       await new Promise((r) => setTimeout(r, 4_000));
@@ -3272,30 +3272,30 @@ export async function smokeUi(
     }
   }
 
-  if (process.env['BATON_SHOT_SETTINGS']) {
+  if (process.env['KOVAN_SHOT_SETTINGS']) {
     await read(win, `document.querySelector('[aria-label="Settings"]')?.click()`);
     await until(win, `document.querySelector('.settings-list')`, 5_000);
     await new Promise((r) => setTimeout(r, 150));
     await writeFile(
-      process.env['BATON_SHOT_SETTINGS'],
+      process.env['KOVAN_SHOT_SETTINGS'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_SETTINGS']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_SETTINGS']}`);
 
-    if (process.env['BATON_SHOT_SETTINGS_ENV']) {
+    if (process.env['KOVAN_SHOT_SETTINGS_ENV']) {
       await read(
         win,
         `document.querySelector('.settings-row[data-section="environments"]:not(.open) .settings-row-head')?.click()`
       );
       await new Promise((r) => setTimeout(r, 150));
       await writeFile(
-        process.env['BATON_SHOT_SETTINGS_ENV'],
+        process.env['KOVAN_SHOT_SETTINGS_ENV'],
         (await win.webContents.capturePage()).toPNG()
       );
-      console.log(`shot: ${process.env['BATON_SHOT_SETTINGS_ENV']}`);
+      console.log(`shot: ${process.env['KOVAN_SHOT_SETTINGS_ENV']}`);
     }
 
-    if (process.env['BATON_SHOT_SETTINGS_LIGHT']) {
+    if (process.env['KOVAN_SHOT_SETTINGS_LIGHT']) {
       await read(
         win,
         `document.querySelector('.settings-row[data-section="appearance"]:not(.open) .settings-row-head')?.click()`
@@ -3308,10 +3308,10 @@ export async function smokeUi(
       );
       await new Promise((r) => setTimeout(r, 250));
       await writeFile(
-        process.env['BATON_SHOT_SETTINGS_LIGHT'],
+        process.env['KOVAN_SHOT_SETTINGS_LIGHT'],
         (await win.webContents.capturePage()).toPNG()
       );
-      console.log(`shot: ${process.env['BATON_SHOT_SETTINGS_LIGHT']}`);
+      console.log(`shot: ${process.env['KOVAN_SHOT_SETTINGS_LIGHT']}`);
     }
   }
 
@@ -3325,7 +3325,7 @@ export async function smokeUi(
  * over IPC, and a fixed delay passes on a warm cache and fails on a cold one —
  * the exact flakiness that once sent me chasing a phantom view-state bug.
  *
- * It edits and saves a real file, so BATON_WS_FOLDER must point at a scratch
+ * It edits and saves a real file, so KOVAN_WS_FOLDER must point at a scratch
  * clone, never at a working repository.
  */
 /**
@@ -3340,7 +3340,7 @@ async function driveEditorFreshness(win: BrowserWindow, repo: string): Promise<R
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const focus = async () => { await read(win, `window.dispatchEvent(new Event('focus'))`); await pause(700); };
   const shot = async (name: string) => {
-    const prefix = process.env['BATON_SHOT_EDITOR'];
+    const prefix = process.env['KOVAN_SHOT_EDITOR'];
     if (!prefix) return;
     // A background window hands back its last painted frame; show it and
     // force a paint so the shot is of what the DOM says now.
@@ -3444,7 +3444,7 @@ async function driveLightbox(win: BrowserWindow, shotsDir: string): Promise<Reco
     thumbTimes: await read(win, `Array.from(document.querySelectorAll('.run-shot-time')).map(t => t.textContent)`),
     finderLink: await read(win, `Boolean(Array.from(document.querySelectorAll('.run-section-head .link')).find(b => b.textContent.includes('Finder')))`)
   };
-  const prefix = process.env['BATON_SHOT_LIGHTBOX'];
+  const prefix = process.env['KOVAN_SHOT_LIGHTBOX'];
   const shot = async (name: string) => {
     if (!prefix) return;
     win.show();
@@ -3487,7 +3487,7 @@ async function driveLightbox(win: BrowserWindow, shotsDir: string): Promise<Reco
   // Reveal is only for run files; anything else is refused. (Not called
   // on a real run file here: that would open Finder on this machine.)
   const outsideRefused = await read(
-    win, `window.baton.runReveal('/etc/hosts').then(() => false, () => true)`
+    win, `window.kovan.runReveal('/etc/hosts').then(() => false, () => true)`
   );
   await read(win, `document.querySelector('.run-viewer .sheet-head .icon-button')?.click()`);
   return { gallery, opened, afterRight, wrapped, afterLeft, atEnd, afterEscape, outsideRefused };
@@ -3518,7 +3518,7 @@ async function driveItem83(win: BrowserWindow, prefix: string): Promise<Record<s
     console.log(`shot: ${prefix}-${name}.png`);
   };
   const base = fixtureSnapshot(10);
-  win.webContents.send('baton:snapshot', { ...base, mine: [...base.mine, QUIET_PULL] });
+  win.webContents.send('kovan:snapshot', { ...base, mine: [...base.mine, QUIET_PULL] });
   await until(win, `Array.from(document.querySelectorAll('.row-num')).some(n => n.textContent === '40')`);
 
   const row = (num: number) => read(win, `(() => {
@@ -3564,7 +3564,7 @@ async function driveItem83(win: BrowserWindow, prefix: string): Promise<Record<s
   })`);
 
   const { readFile: read_, stat } = await import('node:fs/promises');
-  const logFile = path.join(app.getPath('logs'), 'baton.log');
+  const logFile = path.join(app.getPath('logs'), 'kovan.log');
   const log = await read_(logFile, 'utf8').catch(() => '');
   const logSize = await stat(logFile).then((s) => s.size, () => -1);
   return {
@@ -3584,7 +3584,7 @@ async function driveItems93and94(win: BrowserWindow, prefix: string): Promise<Re
   const reload = async () => {
     win.webContents.reload();
     await until(win, `document.querySelector('#root')?.children.length > 0`);
-    win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+    win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
     await until(win, `document.querySelector('.rail-item[data-view]')`, 10_000);
     await pause(400);
   };
@@ -3613,7 +3613,7 @@ async function driveItems93and94(win: BrowserWindow, prefix: string): Promise<Re
   await click('[aria-label="Filter pull requests"]');
   await click('[aria-label="Sort pull requests"]');
   await read(win, `Array.from(document.querySelectorAll('.menu [role=menuitemradio]')).find(b => b.textContent === 'Oldest')?.click()`);
-  const stored = await read(win, `JSON.parse(localStorage.getItem('baton.view-prefs'))`);
+  const stored = await read(win, `JSON.parse(localStorage.getItem('kovan.view-prefs'))`);
 
   // Close and reopen the window: everything but the search text comes back.
   await reload();
@@ -3635,8 +3635,8 @@ async function driveItems93and94(win: BrowserWindow, prefix: string): Promise<Re
   await snap('filters-restored');
 
   // A remembered value nothing has any more still shows, ticked, to untick.
-  await read(win, `(() => { const p = JSON.parse(localStorage.getItem('baton.view-prefs'));
-    p.ticketFilters.assignee = ['Nobody Here']; localStorage.setItem('baton.view-prefs', JSON.stringify(p)); })()`);
+  await read(win, `(() => { const p = JSON.parse(localStorage.getItem('kovan.view-prefs'));
+    p.ticketFilters.assignee = ['Nobody Here']; localStorage.setItem('kovan.view-prefs', JSON.stringify(p)); })()`);
   await reload();
   await rail('Tickets');
   await until(win, `document.querySelector('[aria-label="Filter tickets"]')`, 5_000);
@@ -3657,8 +3657,8 @@ async function driveItems93and94(win: BrowserWindow, prefix: string): Promise<Re
     mkdirSync(dir, { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: dir });
   }
-  await read(win, `window.baton.setSetting('repos.folders', ${JSON.stringify([alpha, beta])})`);
-  await read(win, `window.baton.runTargets(true)`);
+  await read(win, `window.kovan.setSetting('repos.folders', ${JSON.stringify([alpha, beta])})`);
+  await read(win, `window.kovan.runTargets(true)`);
 
   const openSheet = async (key: string) => {
     await rail('Tickets');
@@ -3723,7 +3723,7 @@ async function driveItem92(win: BrowserWindow): Promise<Record<string, unknown>>
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   // 4. The budget in the GitHub item's tooltip.
   const base = fixtureSnapshot(10);
-  win.webContents.send('baton:snapshot', {
+  win.webContents.send('kovan:snapshot', {
     ...base, githubBudget: { remaining: 4768, limit: 5000, resetAt: '2026-09-28T13:55:38Z', cost: 5 }
   });
   await pause(300);
@@ -3838,9 +3838,9 @@ async function driveItem116(win: BrowserWindow, prefix: string): Promise<Record<
   report['afterCmdBracket'] = await where();
 
   // Item 117: the run sheet, with accounts to fold.
-  const state = await read(win, `window.baton.testEnvironments()`) as { environments: { id: string; name: string }[]; accounts: unknown[] };
+  const state = await read(win, `window.kovan.testEnvironments()`) as { environments: { id: string; name: string }[]; accounts: unknown[] };
   const env = state.environments[0]?.id ?? 'local';
-  await read(win, `window.baton.testEnvironmentsSave(${JSON.stringify({
+  await read(win, `window.kovan.testEnvironmentsSave(${JSON.stringify({
     environments: state.environments.length ? state.environments : [{ id: 'local', name: 'Local', site: 'https://app.example.test/en' }],
     defaultEnvironment: env,
     accounts: [
@@ -3879,7 +3879,7 @@ async function driveItem116(win: BrowserWindow, prefix: string): Promise<Record<
  * Item 118: the detail header — option C (toolbar) on comfortable, option D
  * (two lines) on compact — for a ticket, a pull request and a Sentry issue;
  * and on comfortable, that the toolbar stays while the pane scrolls.
- * `BATON_DENSITY=compact` for the compact run.
+ * `KOVAN_DENSITY=compact` for the compact run.
  */
 async function driveItem118(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -3892,12 +3892,12 @@ async function driveItem118(win: BrowserWindow, prefix: string): Promise<Record<
   };
   win.show();
   win.focus();
-  const density = process.env['BATON_DENSITY'] === 'compact' ? 'compact' : 'comfortable';
-  await read(win, `window.baton.setSetting('appearance.density', '${density}')`);
+  const density = process.env['KOVAN_DENSITY'] === 'compact' ? 'compact' : 'comfortable';
+  await read(win, `window.kovan.setSetting('appearance.density', '${density}')`);
   win.webContents.reload();
   await pause(2_500);
   // The reload drops the seeded snapshot: send it again.
-  win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
   await until(win, `document.querySelector('.rows .row')`, 15_000);
   const report: Record<string, unknown> = { density };
   const head = () => read(win, `(() => {
@@ -3959,8 +3959,8 @@ async function driveItem119(win: BrowserWindow, prefix: string): Promise<Record<
     id: 'new-ticket:ACME-1000:2026-09-30', kind: 'new-ticket', at: now - 60_000, subject: 'ACME-1000', label: 'ACME-1000',
     title: 'Tidy up the empty-state copy on the dashboard', who: 'Yisong', url: 'https://example.invalid/browse/ACME-1000', read: false
   };
-  win.webContents.send('baton:activity', [mention, assigned]);
-  win.webContents.send('baton:activity-toast', [mention]);
+  win.webContents.send('kovan:activity', [mention, assigned]);
+  win.webContents.send('kovan:activity-toast', [mention]);
   await pause(600);
   report['toast'] = await read(win, `document.querySelector('.toast')?.innerText ?? null`);
   await snap('toast');
@@ -3968,7 +3968,7 @@ async function driveItem119(win: BrowserWindow, prefix: string): Promise<Record<
   await pause(800);
   report['rows'] = await read(win, `[...document.querySelectorAll('.rows .row')].slice(0, 2).map((r) => r.innerText.replace(/\\n+/g, ' | '))`);
   await snap('activity');
-  report['settingsKinds'] = await read(win, `window.baton.settings().then(() => true)`);
+  report['settingsKinds'] = await read(win, `window.kovan.settings().then(() => true)`);
   return report;
 }
 
@@ -3998,8 +3998,8 @@ async function driveItem120(win: BrowserWindow, prefix: string): Promise<Record<
   log = trackProblems(log, [], ['jira'], now - day + 60_000).log;
   log = trackProblems(log, [{ provider: 'sentry', message: timeout }], [], now - 11 * 60_000).log;
   const last = trackProblems(log, [{ provider: 'sentry', message: timeout }], [], now);
-  win.webContents.send('baton:snapshot', { ...fixtureSnapshot(10), connected: ['github', 'jira', 'sentry'], errors: [{ provider: 'sentry', message: timeout }] });
-  win.webContents.send('baton:problems', { log: last.log, started: [last.log[0]] });
+  win.webContents.send('kovan:snapshot', { ...fixtureSnapshot(10), connected: ['github', 'jira', 'sentry'], errors: [{ provider: 'sentry', message: timeout }] });
+  win.webContents.send('kovan:problems', { log: last.log, started: [last.log[0]] });
   await pause(600);
   report['strip'] = await read(win, `Boolean(document.querySelector('.errors'))`);
   report['chip'] = await read(win, `[...document.querySelectorAll('.statusbar [data-provider]')].map((b) => b.textContent + (b.classList.contains('problem') ? ' (red)' : ''))`);
@@ -4066,7 +4066,7 @@ async function driveItem101(win: BrowserWindow, prefix: string): Promise<Record<
   report['beforeAnything'] = await read(win, `({ empty: Boolean(document.querySelector('.empty')), boot: Boolean(document.querySelector('.boot')) })`);
   const base = { ...fixtureSnapshot(0), at: 0, connected: ['github', 'jira', 'sentry'] as never, refreshing: true };
   const future = Date.now() + 10 * 365 * 24 * 3600 * 1000;
-  const send = (booting: unknown, at = future) => win.webContents.send('baton:snapshot', { ...base, at, booting });
+  const send = (booting: unknown, at = future) => win.webContents.send('kovan:snapshot', { ...base, at, booting });
   const steps = () => read(win, `Array.from(document.querySelectorAll('.boot-step')).map(li => li.className.replace('boot-step ', '') + ': ' + li.textContent)`);
 
   send([{ provider: 'github', state: 'loading' }, { provider: 'jira', state: 'loading' }, { provider: 'sentry', state: 'loading' }]);
@@ -4078,7 +4078,7 @@ async function driveItem101(win: BrowserWindow, prefix: string): Promise<Record<
   await pause(300);
   report['partial'] = await steps();
   await snap('partial');
-  win.webContents.send('baton:snapshot', { ...fixtureSnapshot(10), at: future + 2 });
+  win.webContents.send('kovan:snapshot', { ...fixtureSnapshot(10), at: future + 2 });
   await until(win, `document.querySelector('.rail')`, 5_000).catch(() => undefined);
   report['after'] = await read(win, `({ boot: Boolean(document.querySelector('.boot')), rail: Boolean(document.querySelector('.rail')) })`);
   return report;
@@ -4094,7 +4094,7 @@ async function driveItem101(win: BrowserWindow, prefix: string): Promise<Record<
  * status the way an agent's hook does (one through the real hook script),
  * the badges they get, the hover card on a ticket's session, and then a
  * second client picking the same sessions up from the terminal host — what a
- * restarted Baton does.
+ * restarted Kovan does.
  */
 async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: string): Promise<Record<string, unknown>> {
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -4115,7 +4115,7 @@ async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: stri
   const status = new AgentStatus(userData);
   const claude = await status.forRunner({ id: 'claude', name: 'Claude Code', command: 'claude', leadingArgs: [], acceptsPrompt: true, promptFile: false } as unknown as Runner);
   report['claudeHooks'] = Object.keys((claude.claudeSettings?.['hooks'] ?? {}) as object);
-  const hook = path.join(userData, 'bin', 'baton-agent-status.sh');
+  const hook = path.join(userData, 'bin', 'kovan-agent-status.sh');
 
   const done = await sessions.open({
     cwd: userData, title: `implement · ${snapshot.ticket ?? 'ACME-1'}`, subject: snapshot.ticket, kind: 'implement', runnerName: 'Claude Code',
@@ -4131,7 +4131,7 @@ async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: stri
   });
   // An idle "waiting for your input" after a turn must not turn Done into Input.
   await pause(2_500);
-  await sessions.open({ cwd: userData, title: 'plain terminal', runnerName: 'Shell', line: `echo '{"notification_type":"idle_prompt"}' | BATON_SESSION_ID=${done.id} '${hook}' input claude` });
+  await sessions.open({ cwd: userData, title: 'plain terminal', runnerName: 'Shell', line: `echo '{"notification_type":"idle_prompt"}' | KOVAN_SESSION_ID=${done.id} '${hook}' input claude` });
   await read(win, `document.querySelector('.rail-item[aria-label="Sessions"]')?.click()`);
   await until(win, `document.querySelectorAll('.row.one-line').length >= 4`, 8_000);
   await pause(3_000);
@@ -4182,7 +4182,7 @@ async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: stri
   report['doneUnseen'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-state')?.textContent ?? '—'))`);
   await snap('done-unseen');
 
-  // Item 114: what a restarted Baton gets back from the terminal host.
+  // Item 114: what a restarted Kovan gets back from the terminal host.
   const again = new Sessions(undefined, { hosts: new PtyHosts(userData) });
   report['restored'] = await again.restore();
   report['restoredSessions'] = again.list().map((s) => ({ title: s.title, running: s.running, hosted: s.hosted, status: s.status, subject: s.subject }));
@@ -4244,7 +4244,7 @@ async function driveItem104(win: BrowserWindow, sessions: Sessions, prefix: stri
   await read(win, `document.querySelector('.session-close-confirm button:not(.menu-warn)')?.click()`);
   await pause(200);
   // A larger sidebar, as someone with a big screen would set it.
-  await read(win, `localStorage.setItem('baton.sidebar-size', '130'); document.documentElement.style.setProperty('--sidebar-zoom', '1.3')`);
+  await read(win, `localStorage.setItem('kovan.sidebar-size', '130'); document.documentElement.style.setProperty('--sidebar-zoom', '1.3')`);
   await pause(300);
   await tryClose('at130');
   await read(win, `document.querySelector('.session-close-confirm .menu-warn')?.click()`);
@@ -4378,7 +4378,7 @@ async function driveItem98(win: BrowserWindow, sessions: Sessions, prefix: strin
     cwd: app.getPath('userData'), title: 'unblock · acme/web#42', runnerName: 'smoke', line: 'sleep 300',
     kind: 'unblock', subject: 'acme/web#42', pull: 'acme/web#42', runDirectory: run.directory
   });
-  await read(win, `localStorage.setItem('baton.terminal-dock', 'right')`);
+  await read(win, `localStorage.setItem('kovan.terminal-dock', 'right')`);
   win.focus();
   await read(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).find(e => e.textContent === '42')?.closest('button')?.click()`);
   await until(win, `Array.from(document.querySelectorAll('.runs button.link')).some(b => b.textContent.trim() === 'watch')`, 10_000);
@@ -4455,7 +4455,7 @@ async function driveItem97(win: BrowserWindow, prefix: string): Promise<Record<s
 
   await choose('openai');
   await pause(300);
-  await read(win, `(() => { const f = document.querySelector('.speech-row input[type=password]'); f.focus(); document.execCommand('insertText', false, 'sk-bogus-baton-smoke'); })()`);
+  await read(win, `(() => { const f = document.querySelector('.speech-row input[type=password]'); f.focus(); document.execCommand('insertText', false, 'sk-bogus-kovan-smoke'); })()`);
   await read(win, `Array.from(document.querySelectorAll('.speech-row button')).find(b => b.textContent === 'Save')?.click()`);
   await until(win, `document.querySelector('.speech-row input[type=password]')?.placeholder.includes('saved')`, 5_000).catch(() => undefined);
   report['keySaved'] = await read(win, `document.querySelector('.speech-row input[type=password]')?.placeholder`);
@@ -4468,7 +4468,7 @@ async function driveItem97(win: BrowserWindow, prefix: string): Promise<Record<s
   await pause(300);
   await scrollTo();
   await snap('apple');
-  report['saved'] = await read(win, `window.baton.settings().then(s => ({ provider: s['dictation.provider'], secretInSettings: JSON.stringify(s).includes('sk-bogus') }))`);
+  report['saved'] = await read(win, `window.kovan.settings().then(s => ({ provider: s['dictation.provider'], secretInSettings: JSON.stringify(s).includes('sk-bogus') }))`);
   return report;
 }
 
@@ -4524,7 +4524,7 @@ async function driveItem96(win: BrowserWindow, sessions: Sessions, prefix: strin
     await snap(`theme-${label.toLowerCase().replace(/ /g, '-')}`);
   }
   report['themes'] = perTheme;
-  report['savedTheme'] = await read(win, `window.baton.settings().then(s => s['appearance.theme'])`);
+  report['savedTheme'] = await read(win, `window.kovan.settings().then(s => s['appearance.theme'])`);
 
   // 2. Options, back on Dark: accent, colour-safe status, shapes off, compact, boosted.
   await openSettings();
@@ -4585,7 +4585,7 @@ async function driveItem96(win: BrowserWindow, sessions: Sessions, prefix: strin
   // Put everything back so the throwaway profile ends where it started.
   for (const [key, value] of [['appearance.theme', 'system'], ['appearance.accent', 'clay'], ['appearance.colorSafeStatus', false],
     ['appearance.statusShapes', true], ['appearance.density', 'comfortable'], ['appearance.terminalColors', 'integrated']] as const) {
-    await read(win, `window.baton.setSetting(${JSON.stringify(key)}, ${JSON.stringify(value)})`);
+    await read(win, `window.kovan.setSetting(${JSON.stringify(key)}, ${JSON.stringify(value)})`);
   }
   return report;
 }
@@ -4639,25 +4639,25 @@ async function driveItem91(win: BrowserWindow, prefix: string): Promise<Record<s
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' });
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
   await until(win, `document.querySelector('.rail-item.active')?.getAttribute('aria-label') === 'Sessions'`, 5_000);
-  await until(win, `window.baton.sessions().then(l => l.some(s => s.title === 'optimize'))`, 5_000);
-  const optimize = await read(win, `window.baton.sessions().then(l => l.find(s => s.title === 'optimize'))`) as { id: string; cwd: string; commandId?: string };
+  await until(win, `window.kovan.sessions().then(l => l.some(s => s.title === 'optimize'))`, 5_000);
+  const optimize = await read(win, `window.kovan.sessions().then(l => l.find(s => s.title === 'optimize'))`) as { id: string; cwd: string; commandId?: string };
   let output = '';
   for (let i = 0; i < 30 && !output.includes('opti2mized'); i++) {
     await pause(300);
-    output = (await read(win, `window.baton.sessionBuffer(${JSON.stringify(optimize.id)})`) as string) ?? '';
+    output = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(optimize.id)})`) as string) ?? '';
   }
   const ranOptimize = { ran: output.includes('opti2mized'), cwd: optimize.cwd, tagged: Boolean(optimize.commandId),
     menuClosed: !(await read(win, `Boolean(document.querySelector('.qc-menu'))`)) };
 
   // A one-off that finished runs again in the same terminal, not a new one.
   await pause(800);
-  const titles = () => read(win, `window.baton.sessions().then(l => l.filter(s => s.running).map(s => s.title))`) as Promise<string[]>;
+  const titles = () => read(win, `window.kovan.sessions().then(l => l.filter(s => s.running).map(s => s.title))`) as Promise<string[]>;
   const beforeRerun = await titles();
   await click('.qc-run');
   let rerunOut = '';
   for (let i = 0; i < 30 && (rerunOut.match(/opti2mized/g) ?? []).length < 2; i++) {
     await pause(300);
-    rerunOut = (await read(win, `window.baton.sessionBuffer(${JSON.stringify(optimize.id)})`) as string) ?? '';
+    rerunOut = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(optimize.id)})`) as string) ?? '';
   }
   const rerun = { sessionsBefore: beforeRerun, sessionsAfter: await titles(), outputs: (rerunOut.match(/opti2mized/g) ?? []).length };
 
@@ -4666,17 +4666,17 @@ async function driveItem91(win: BrowserWindow, prefix: string): Promise<Record<s
   await click('.qc-toggle');
   await until(win, `document.querySelector('.qc-row')`, 3_000);
   await read(win, `Array.from(document.querySelectorAll('.qc-row-run')).find(b => b.textContent.includes('frontend dev')).click()`);
-  await until(win, `window.baton.sessions().then(l => l.some(s => s.title === 'frontend dev' && s.running))`, 5_000);
+  await until(win, `window.kovan.sessions().then(l => l.some(s => s.title === 'frontend dev' && s.running))`, 5_000);
   await pause(1_500);
   const before = await titles();
   await click('.qc-run');
   await pause(800);
   const after = await titles();
-  const dev = await read(win, `window.baton.sessions().then(l => l.find(s => s.title === 'frontend dev'))`) as { id: string };
+  const dev = await read(win, `window.kovan.sessions().then(l => l.find(s => s.title === 'frontend dev'))`) as { id: string };
   let devOut = '';
   for (let i = 0; i < 20 && !devOut.includes('serving-42'); i++) {
     await pause(300);
-    devOut = (await read(win, `window.baton.sessionBuffer(${JSON.stringify(dev.id)})`) as string) ?? '';
+    devOut = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(dev.id)})`) as string) ?? '';
   }
   const reuse = { before, after, servingOutput: devOut.includes('serving-42'),
     activeIsDev: await read(win, `document.querySelector('.term')?.getAttribute('data-session-id') === ${JSON.stringify(dev.id)}`),
@@ -4712,16 +4712,16 @@ async function driveItem91(win: BrowserWindow, prefix: string): Promise<Record<s
   await until(win, `document.querySelector('.qc-editor')`, 3_000);
   await type('.qc-editor input', 'old project');
   await type('.qc-editor textarea', 'ls');
-  await type('.qc-folder input', '/nonexistent/baton-smoke');
+  await type('.qc-folder input', '/nonexistent/kovan-smoke');
   await click('.qc-editor button[type="submit"]');
   await until(win, `!document.querySelector('.qc-editor')`, 3_000);
   await read(win, `Array.from(document.querySelectorAll('.qc-row-run')).find(b => b.textContent.includes('old project')).click()`);
   await until(win, `document.querySelector('.qc-error')`, 3_000);
   const missingFolder = await read(win, `document.querySelector('.qc-error')?.textContent`);
-  const stored = await read(win, `window.baton.settings().then(s => (s.quickCommands ?? []).map(c => c.name))`);
+  const stored = await read(win, `window.kovan.settings().then(s => (s.quickCommands ?? []).map(c => c.name))`);
   await click('.qc-search .icon-button');
 
-  for (const id of [optimize.id, dev.id]) await read(win, `window.baton.sessionClose(${JSON.stringify(id)})`);
+  for (const id of [optimize.id, dev.id]) await read(win, `window.kovan.sessionClose(${JSON.stringify(id)})`);
   return { emptyLabel, noName, dragRegion, saved, searched, ranOptimize, rerun, splitAfter, reuse, runningRows, afterDuplicate, confirmText, afterCancel, afterDelete, missingFolder, stored };
 }
 
@@ -4789,12 +4789,12 @@ async function driveItem90(win: BrowserWindow, sessions: Sessions, prefix: strin
   const fromViewer = [...opened];
   // A run whose site isn't http(s) is refused in main, whatever the page asks.
   const bad = await store.begin({ subject: 'acme/web#42', pull: 'acme/web#42', kind: 'verify', prompt: 'x', environment: 'Odd', site: 'file:///etc/hosts' });
-  const refusedBadScheme = await read(win, `window.baton.runSiteOpen(${JSON.stringify(bad.directory)}).then(() => false, () => true)`);
-  const refusedOutside = await read(win, `window.baton.runSiteOpen('/etc').then(() => false, () => true)`);
-  const refusedWatch = await read(win, `window.baton.runWatch('/etc', true).then(() => false, () => true)`);
+  const refusedBadScheme = await read(win, `window.kovan.runSiteOpen(${JSON.stringify(bad.directory)}).then(() => false, () => true)`);
+  const refusedOutside = await read(win, `window.kovan.runSiteOpen('/etc').then(() => false, () => true)`);
+  const refusedWatch = await read(win, `window.kovan.runWatch('/etc', true).then(() => false, () => true)`);
 
   // The agent finishes: Live and Now go, the gallery stays.
-  await read(win, `window.baton.sessionClose(${JSON.stringify(session.id)})`);
+  await read(win, `window.kovan.sessionClose(${JSON.stringify(session.id)})`);
   await until(win, `!document.querySelector('.run-live')`, 10_000);
   // No settling pause: the viewer must not remount (and empty) as the session goes.
   const finished = await read(win, `({ live: Boolean(document.querySelector('.run-live')), now: Boolean(document.querySelector('.run-now')),
@@ -4864,12 +4864,12 @@ async function driveItem89(win: BrowserWindow, prefix: string): Promise<Record<s
   await pause(200);
   const afterKey = await order();
   const keptFocus = await read(win, `document.activeElement?.getAttribute('aria-label')`);
-  const saved = await read(win, `localStorage.getItem('baton.rail-order')`);
+  const saved = await read(win, `localStorage.getItem('kovan.rail-order')`);
 
   // Remembered across a reload of the window.
   win.webContents.reload();
   await until(win, `document.querySelector('#root')?.children.length > 0`);
-  win.webContents.send('baton:snapshot', fixtureSnapshot(10));
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
   await until(win, `document.querySelector('.rail-item[data-view]')`, 10_000);
   await pause(300);
   const afterReload = await order();
@@ -4960,7 +4960,7 @@ async function driveItem88(win: BrowserWindow, prefix: string): Promise<Record<s
 
   // 4. Into a terminal: typed, never run.
   const cwd = app.getPath('userData');
-  const session = await read(win, `window.baton.openTerminal(${JSON.stringify(cwd)}).then(s => s.id)`) as string;
+  const session = await read(win, `window.kovan.openTerminal(${JSON.stringify(cwd)}).then(s => s.id)`) as string;
   // Opened through the bridge, so go and show it the way a person would.
   await read(win, `document.querySelector('.rail-item[aria-label="Sessions"]')?.click()`);
   await until(win, `document.querySelector('.row.one-line')`, 5_000);
@@ -4975,7 +4975,7 @@ async function driveItem88(win: BrowserWindow, prefix: string): Promise<Record<s
   await doubleTap();
   await until(win, `document.querySelector('.dictation-pill.done')`, 5_000);
   await pause(600);
-  const buffer = await read(win, `window.baton.sessionBuffer(${JSON.stringify(session)})`) as string;
+  const buffer = await read(win, `window.kovan.sessionBuffer(${JSON.stringify(session)})`) as string;
   const plain = buffer.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
   const terminal = {
     pill: await read(win, `document.querySelector('.dictation-state')?.textContent`),
@@ -4984,7 +4984,7 @@ async function driveItem88(win: BrowserWindow, prefix: string): Promise<Record<s
     ran: /command not found|no such file/i.test(plain)
   };
   await snap('terminal');
-  await read(win, `window.baton.sessionClose(${JSON.stringify(session)})`);
+  await read(win, `window.kovan.sessionClose(${JSON.stringify(session)})`);
 
   // 5. Nothing focused: the clipboard.
   await until(win, `!document.querySelector('.dictation-pill')`, 3_000);
@@ -5018,8 +5018,8 @@ async function driveItem86(win: BrowserWindow, feed: ActivityFeed, prefix: strin
   };
   // Jira only counts once it's set up; the scratch profile isn't.
   await read(win, `Promise.all([
-    window.baton.setSetting('jira.baseUrl', 'https://example.invalid'),
-    window.baton.setSetting('jira.email', 'me@example.invalid')])`);
+    window.kovan.setSetting('jira.baseUrl', 'https://example.invalid'),
+    window.kovan.setSetting('jira.email', 'me@example.invalid')])`);
 
   const base = fixtureSnapshot(10);
   const withJira = (s: Snapshot): Snapshot => ({ ...s, connected: ['github', 'jira', 'sentry'] });
@@ -5037,7 +5037,7 @@ async function driveItem86(win: BrowserWindow, feed: ActivityFeed, prefix: strin
     tickets: [...base.tickets, { ...TICKET, key: 'ACME-2510', summary: 'Export the class report as CSV' }]
   });
 
-  win.webContents.send('baton:snapshot', after);
+  win.webContents.send('kovan:snapshot', after);
   await feed.report(before, true);
   const afterBaseline = (await feed.inbox()).length;
   await feed.report(after, false);
@@ -5118,11 +5118,11 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
   await read(win, `document.querySelector('.rail-item[aria-label="Workspace"]')?.click()`);
   await until(win, `document.querySelector('.explorer')`);
 
-  // Item 80 on its own: `BATON_SMOKE_EDITOR=<repo>` drives the diff and the
+  // Item 80 on its own: `KOVAN_SMOKE_EDITOR=<repo>` drives the diff and the
   // editor against that disposable repo (it runs git stash in it) and stops.
-  if (process.env['BATON_SMOKE_EDITOR']) {
+  if (process.env['KOVAN_SMOKE_EDITOR']) {
     await until(win, `document.querySelector('.ws-row')`, 30_000);
-    return { editor80: await driveEditorFreshness(win, process.env['BATON_SMOKE_EDITOR']) };
+    return { editor80: await driveEditorFreshness(win, process.env['KOVAN_SMOKE_EDITOR']) };
   }
 
   if (!(await until(win, `document.querySelector('.ws-row')`, 30_000))) {
@@ -5261,9 +5261,9 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
       return gone;
     })()
   };
-  if (process.env['BATON_SHOT_KEPT']) {
-    await writeFile(process.env['BATON_SHOT_KEPT'], (await win.webContents.capturePage()).toPNG());
-    console.log(`shot: ${process.env['BATON_SHOT_KEPT']}`);
+  if (process.env['KOVAN_SHOT_KEPT']) {
+    await writeFile(process.env['KOVAN_SHOT_KEPT'], (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${process.env['KOVAN_SHOT_KEPT']}`);
   }
   await click('.icon-button.boxed');
   await read(
@@ -5274,9 +5274,9 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
   // --- Item 79: reordering the workspace's folders ------------------------
   summary['reorder'] = await driveFolderReorder(win);
 
-  if (process.env['BATON_SHOT_REPOS']) {
-    await writeFile(process.env['BATON_SHOT_REPOS'], (await win.webContents.capturePage()).toPNG());
-    console.log(`shot: ${process.env['BATON_SHOT_REPOS']}`);
+  if (process.env['KOVAN_SHOT_REPOS']) {
+    await writeFile(process.env['KOVAN_SHOT_REPOS'], (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${process.env['KOVAN_SHOT_REPOS']}`);
   }
 
   // --- Changes tab --------------------------------------------------------
@@ -5296,12 +5296,12 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
   };
 
   // Item 17: rolling a change back, one row at a time and "all of them".
-  // Gated on its own explicit opt-in, separate from `BATON_SMOKE=workspace`
+  // Gated on its own explicit opt-in, separate from `KOVAN_SMOKE=workspace`
   // itself — this is the one part of the workspace walk that mutates git
   // state and deletes an untracked file, and `workspace` mode otherwise runs
   // against whatever real folders happen to be configured. Set this only
   // against a disposable repo.
-  if (process.env['BATON_SMOKE_REVERT'] === '1') {
+  if (process.env['KOVAN_SMOKE_REVERT'] === '1') {
     summary['revert'] = await driveRevert(win);
   }
 
@@ -5318,9 +5318,9 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
         highlighted: document.querySelectorAll('.diff [class^="tok-"]').length
       })`
     );
-    if (process.env['BATON_SHOT_DIFF']) {
-      await writeFile(process.env['BATON_SHOT_DIFF'], (await win.webContents.capturePage()).toPNG());
-      console.log(`shot: ${process.env['BATON_SHOT_DIFF']}`);
+    if (process.env['KOVAN_SHOT_DIFF']) {
+      await writeFile(process.env['KOVAN_SHOT_DIFF'], (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${process.env['KOVAN_SHOT_DIFF']}`);
     }
   }
 
@@ -5369,7 +5369,7 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
   const focused = await read(win, `document.activeElement?.className ?? ''`);
 
   const before = await read(win, `document.querySelector('.cm-content')?.textContent ?? ''`);
-  win.webContents.insertText('BATON_SMOKE_EDIT');
+  win.webContents.insertText('KOVAN_SMOKE_EDIT');
   const wentDirty = await until(win, `document.querySelector('.tab-dirty')`, 10_000);
 
   let savedViaKeyboard = false;
@@ -5382,7 +5382,7 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
     savedViaKeyboard = await until(win, `!document.querySelector('.tab-dirty')`, 10_000);
 
     // The assertion that actually matters: the bytes reached the disk.
-    const file = process.env['BATON_EDIT_CHECK'];
+    const file = process.env['KOVAN_EDIT_CHECK'];
     if (file) {
       onDisk = await readFile(file, 'utf8').catch(() => '<unreadable>');
     }
@@ -5393,7 +5393,7 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
     textChanged: (await read(win, `document.querySelector('.cm-content')?.textContent ?? ''`)) !== before,
     wentDirty,
     savedViaKeyboard,
-    editOnDisk: onDisk ? onDisk.includes('BATON_SMOKE_EDIT') : 'not checked',
+    editOnDisk: onDisk ? onDisk.includes('KOVAN_SMOKE_EDIT') : 'not checked',
     conflictShown: await read(win, `Boolean(document.querySelector('.conflict'))`)
   };
 
@@ -5402,7 +5402,7 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
   // not an exotic one, so it is worth a real test rather than a hand-check:
   // change the file behind the editor's back, type, save, and assert the save
   // was refused rather than silently clobbering.
-  const edited = process.env['BATON_EDIT_CHECK'];
+  const edited = process.env['KOVAN_EDIT_CHECK'];
   if (wentDirty && edited) {
     const theirs = `changed by something else at ${Date.now()}\n`;
     await writeFile(edited, theirs, 'utf8');
@@ -5426,12 +5426,12 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
       stillDirty: await read(win, `Boolean(document.querySelector('.tab-dirty'))`)
     };
 
-    if (process.env['BATON_SHOT_CONFLICT']) {
+    if (process.env['KOVAN_SHOT_CONFLICT']) {
       await writeFile(
-        process.env['BATON_SHOT_CONFLICT'],
+        process.env['KOVAN_SHOT_CONFLICT'],
         (await win.webContents.capturePage()).toPNG()
       );
-      console.log(`shot: ${process.env['BATON_SHOT_CONFLICT']}`);
+      console.log(`shot: ${process.env['KOVAN_SHOT_CONFLICT']}`);
     }
   }
 
@@ -5493,16 +5493,16 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
           `Boolean(document.querySelector('.resizer.dragging')) &&
            document.body.classList.contains('resizing')`
         );
-        if (process.env['BATON_SHOT_RESIZE']) {
+        if (process.env['KOVAN_SHOT_RESIZE']) {
           await writeFile(
-            process.env['BATON_SHOT_RESIZE'],
+            process.env['KOVAN_SHOT_RESIZE'],
             (await win.webContents.capturePage()).toPNG()
           );
-          console.log(`shot: ${process.env['BATON_SHOT_RESIZE']}`);
+          console.log(`shot: ${process.env['KOVAN_SHOT_RESIZE']}`);
         }
       });
       const widened = await widthOf();
-      const stored = await read(win, `localStorage.getItem('baton.sidebar-width')`);
+      const stored = await read(win, `localStorage.getItem('kovan.sidebar-width')`);
 
       // The handle travelled with the edge, so aim the next drag from there —
       // exactly 140px along only holds because that drag landed short of
@@ -5545,7 +5545,7 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
         // Double-click drops the override, so the stylesheet default is back.
         afterReset: await widthOf(),
         overrideCleared: (await custom()) === null,
-        forgotten: (await read(win, `localStorage.getItem('baton.sidebar-width')`)) === null
+        forgotten: (await read(win, `localStorage.getItem('kovan.sidebar-width')`)) === null
       };
     } else if (attached) {
       summary['resize'] = { skipped: 'no .resizer in the DOM' };
@@ -5564,9 +5564,9 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
     `Array.from(document.querySelectorAll('.menu button')).map(b => b.textContent.trim())`
   );
 
-  if (process.env['BATON_SHOT_MENU']) {
-    await writeFile(process.env['BATON_SHOT_MENU'], (await win.webContents.capturePage()).toPNG());
-    console.log(`shot: ${process.env['BATON_SHOT_MENU']}`);
+  if (process.env['KOVAN_SHOT_MENU']) {
+    await writeFile(process.env['KOVAN_SHOT_MENU'], (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${process.env['KOVAN_SHOT_MENU']}`);
   }
   await read(win, `document.body.click()`);
 
@@ -5591,13 +5591,13 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
     folderLabel: await read(win, `document.querySelector('.ws-folders')?.textContent ?? ''`),
     // Removing a folder from a workspace must not touch the folder.
     stillOnDisk: removedName
-      ? existsSync(`${process.env['BATON_WS_FOLDER']?.split(':')[0]}`)
+      ? existsSync(`${process.env['KOVAN_WS_FOLDER']?.split(':')[0]}`)
       : 'not checked'
   };
 
-  if (process.env['BATON_SHOT_WS']) {
-    await writeFile(process.env['BATON_SHOT_WS'], (await win.webContents.capturePage()).toPNG());
-    console.log(`shot: ${process.env['BATON_SHOT_WS']}`);
+  if (process.env['KOVAN_SHOT_WS']) {
+    await writeFile(process.env['KOVAN_SHOT_WS'], (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${process.env['KOVAN_SHOT_WS']}`);
   }
 
   return summary;
@@ -5612,7 +5612,7 @@ async function driveWorkspace(win: BrowserWindow): Promise<Record<string, unknow
 async function driveFolderReorder(win: BrowserWindow): Promise<Record<string, unknown>> {
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const names = () => read(win, `Array.from(document.querySelectorAll('[data-root-row] > .repo .repo-name')).map(n => n.textContent)`);
-  const stored = () => read(win, `window.baton.workspaces().then(({ list, active }) =>
+  const stored = () => read(win, `window.kovan.workspaces().then(({ list, active }) =>
     list.find(w => w.id === active).folders.map(f => f.split('/').pop()))`);
   const centre = async (index: number, dy = 0) => await read(win, `(() => {
     const r = document.querySelectorAll('[data-root-row] > .repo')[${index}].getBoundingClientRect();
@@ -5640,9 +5640,9 @@ async function driveFolderReorder(win: BrowserWindow): Promise<Record<string, un
     line: document.querySelector('.ws-root.drop-before, .ws-root.drop-after')?.className ?? null,
     dimmed: Boolean(document.querySelector('.ws-root.dragged'))
   })`);
-  if (process.env['BATON_SHOT_REORDER']) {
-    await writeFile(process.env['BATON_SHOT_REORDER'], (await win.webContents.capturePage()).toPNG());
-    console.log(`shot: ${process.env['BATON_SHOT_REORDER']}`);
+  if (process.env['KOVAN_SHOT_REORDER']) {
+    await writeFile(process.env['KOVAN_SHOT_REORDER'], (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${process.env['KOVAN_SHOT_REORDER']}`);
   }
   win.webContents.sendInputEvent({ type: 'mouseUp', x: to.x, y: to.y, button: 'left', clickCount: 1 });
   await pause(400);
@@ -5674,7 +5674,7 @@ async function driveFolderReorder(win: BrowserWindow): Promise<Record<string, un
 
 /**
  * Item 17, driven for real against whatever repo `driveWorkspace` already
- * has the Changes tab open on. Only ever invoked behind `BATON_SMOKE_REVERT`
+ * has the Changes tab open on. Only ever invoked behind `KOVAN_SMOKE_REVERT`
  * — see the call site.
  */
 async function driveRevert(win: BrowserWindow): Promise<Record<string, unknown>> {
@@ -5690,13 +5690,13 @@ async function driveRevert(win: BrowserWindow): Promise<Record<string, unknown>>
   await read(win, `document.querySelector('.change-row .icon-button.revert')?.click()`);
   await until(win, `document.querySelector('.menu.confirm')`, 5_000);
   const oneRowConfirmText = await confirmText();
-  if (process.env['BATON_SHOT_REVERT_CONFIRM']) {
+  if (process.env['KOVAN_SHOT_REVERT_CONFIRM']) {
     await new Promise((r) => setTimeout(r, 150));
     await writeFile(
-      process.env['BATON_SHOT_REVERT_CONFIRM'],
+      process.env['KOVAN_SHOT_REVERT_CONFIRM'],
       (await win.webContents.capturePage()).toPNG()
     );
-    console.log(`shot: ${process.env['BATON_SHOT_REVERT_CONFIRM']}`);
+    console.log(`shot: ${process.env['KOVAN_SHOT_REVERT_CONFIRM']}`);
   }
   await read(win, `document.querySelector('.confirm-actions button:not(.menu-warn)')?.click()`);
   await new Promise((r) => setTimeout(r, 100));
@@ -5721,10 +5721,10 @@ async function driveRevert(win: BrowserWindow): Promise<Record<string, unknown>>
     await read(win, `document.querySelector('.icon-button.revert-all')?.click()`);
     await until(win, `document.querySelector('.menu.confirm')`, 5_000);
     allConfirmText = await confirmText();
-    if (process.env['BATON_SHOT_REVERT_ALL']) {
+    if (process.env['KOVAN_SHOT_REVERT_ALL']) {
       await new Promise((r) => setTimeout(r, 150));
-      await writeFile(process.env['BATON_SHOT_REVERT_ALL'], (await win.webContents.capturePage()).toPNG());
-      console.log(`shot: ${process.env['BATON_SHOT_REVERT_ALL']}`);
+      await writeFile(process.env['KOVAN_SHOT_REVERT_ALL'], (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${process.env['KOVAN_SHOT_REVERT_ALL']}`);
     }
     await read(win, `document.querySelector('.confirm-actions button.menu-warn')?.click()`);
     await until(

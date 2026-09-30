@@ -49,11 +49,11 @@ import {
   type QuickResult,
   type QuickTicketInput,
   type ReviewEvent
-} from '@baton/core';
+} from '@kovan/core';
 import {
   QUICK_OPENCODE_CONFIG, RunStore, loginShell, parseQuickOutput, quickArgs, shellEnvironment, subjectSlug,
   type QuickOutput
-} from '@baton/agent';
+} from '@kovan/agent';
 import type { DesktopHost } from './host';
 
 export interface QuickState {
@@ -156,7 +156,7 @@ export class QuickModel {
   available(fresh = false): Promise<string[]> {
     if (fresh) this.listed = undefined;
     this.listed ??= (async () => {
-      if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+      if (process.env['KOVAN_SMOKE'] && process.env['KOVAN_USER_DATA']) {
         return [QUICK_DEFAULT_MODEL, 'opencode/grok-code-fast-free', 'anthropic/claude-haiku-4-5', 'openai/gpt-5-mini'];
       }
       const opencode = await shellEnvironment.which('opencode');
@@ -232,9 +232,9 @@ export class QuickModel {
   private async loadJobs(): Promise<void> {
     try {
       const stored = JSON.parse(await readFile(this.jobsFile(), 'utf8')) as QuickJob[];
-      // Anything still "running" on disk was running when Baton last quit.
+      // Anything still "running" on disk was running when Kovan last quit.
       this.jobs = stored.map((job) =>
-        job.status === 'running' ? { ...job, status: 'failed', error: 'Baton quit while this was running.' } : job
+        job.status === 'running' ? { ...job, status: 'failed', error: 'Kovan quit while this was running.' } : job
       );
     } catch {
       this.jobs = [];
@@ -470,7 +470,7 @@ export class QuickModel {
    */
   private async nvReview(prompt: string, live: Live): Promise<string> {
     const env = { ...(await shellEnvironment.environment()), NV_MODEL: this.reviewModel() };
-    const cwd = await mkdtemp(path.join(tmpdir(), 'baton-review-'));
+    const cwd = await mkdtemp(path.join(tmpdir(), 'kovan-review-'));
     try {
       return await new Promise<string>((resolve, reject) => {
         const child = spawn(loginShell(), ['-i', '-c', 'nv-review'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -506,7 +506,7 @@ export class QuickModel {
 
   /**
    * One `opencode run` in an empty temp folder, material attached as a file.
-   * See `@baton/agent`'s `quick.ts` for why the tools are "ask", not "deny".
+   * See `@kovan/agent`'s `quick.ts` for why the tools are "ask", not "deny".
    */
   private async ask(model: string, material: string, instruction: string, live?: Live, timeoutMs = this.timeoutMs()): Promise<QuickOutput> {
     const opencode = await shellEnvironment.which('opencode');
@@ -514,7 +514,7 @@ export class QuickModel {
       throw new Error('opencode is not installed, or not on your login shell\'s PATH.');
     }
     const env = { ...(await shellEnvironment.environment()), OPENCODE_CONFIG_CONTENT: QUICK_OPENCODE_CONFIG };
-    const cwd = await mkdtemp(path.join(tmpdir(), 'baton-quick-'));
+    const cwd = await mkdtemp(path.join(tmpdir(), 'kovan-quick-'));
     try {
       const input = path.join(cwd, 'input.md');
       await writeFile(input, material, 'utf8');

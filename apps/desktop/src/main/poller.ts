@@ -19,10 +19,10 @@ import {
   type RepoRef,
   type SentryIssue,
   type GitHubBudget
-} from '@baton/core';
-import { Credentials, GitHubClient, HttpClient, JiraClient, SentryClient } from '@baton/providers';
-import { findClones } from '@baton/git';
-import { EventEmitter } from '@baton/host';
+} from '@kovan/core';
+import { Credentials, GitHubClient, HttpClient, JiraClient, SentryClient } from '@kovan/providers';
+import { findClones } from '@kovan/git';
+import { EventEmitter } from '@kovan/host';
 import type { DesktopHost } from './host';
 
 /** The three providers the poller itself fetches queues from — the ones a

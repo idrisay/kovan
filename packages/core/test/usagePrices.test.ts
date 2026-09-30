@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { costOf, priceFor } from '../src';
 
-// Item 95: Baton showed $8.13 for a session Claude Code itself priced at $4.75.
+// Item 95: Kovan showed $8.13 for a session Claude Code itself priced at $4.75.
 describe('current model prices', () => {
   it('prices Opus 5.5 at its own rates, not the older Opus catch-all', () => {
     expect(priceFor('claude-opus-5-5')).toMatchObject({ input: 4, output: 20, cacheRead: 0.2, cacheWrite1h: 8 });

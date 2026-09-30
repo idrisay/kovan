@@ -8,7 +8,7 @@ import { MinusIcon, PlusIcon } from './icons';
  * it lives in localStorage next to the sidebar width and the terminal dock
  * position, not in the settings store.
  */
-const KEY = 'baton.terminal-font-size';
+const KEY = 'kovan.terminal-font-size';
 const MIN = 9;
 const MAX = 22;
 const DEFAULT = 12;
@@ -35,7 +35,7 @@ const clamp = (px: number) => Math.min(MAX, Math.max(MIN, px));
  * Sessions tab, one for Settings). A plain window event, so every instance
  * applies the same step without lifting state somewhere shared.
  */
-const LOCAL_STEP_EVENT = 'baton:terminal-font-local-step';
+const LOCAL_STEP_EVENT = 'kovan:terminal-font-local-step';
 
 /**
  * The current terminal font size, plus a stepper. Cmd+=/Cmd+- (when a terminal

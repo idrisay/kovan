@@ -67,7 +67,7 @@ export interface ActivityEvent {
   /** Unique and stable: the same happening polled twice is one event. */
   id: string;
   kind: ActivityKind;
-  /** Epoch ms when Baton noticed it. */
+  /** Epoch ms when Kovan noticed it. */
   at: number;
   /** `owner/name#123` or `ACME-2485` — the same string sessions use. */
   subject: string;

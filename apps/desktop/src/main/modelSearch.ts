@@ -4,8 +4,8 @@
  * A search only ever adds names; it never changes which model is picked.
  */
 
-import { modelFamily, modelSearchPrompt, parseModelSearch, type ModelFamily } from '@baton/core';
-import { KNOWN_MODELS } from '@baton/agent';
+import { modelFamily, modelSearchPrompt, parseModelSearch, type ModelFamily } from '@kovan/core';
+import { KNOWN_MODELS } from '@kovan/agent';
 import type { DesktopHost } from './host';
 import { WebAsk } from './webAsk';
 
@@ -49,10 +49,10 @@ export class ModelSearch {
 
   async search(command: string): Promise<ModelList | { error: string }> {
     const family = modelFamily(command);
-    if (!family) return { error: 'Baton does not know how to look up models for this agent. Type the model name instead.' };
+    if (!family) return { error: 'Kovan does not know how to look up models for this agent. Type the model name instead.' };
 
     let models: string[];
-    if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA']) {
+    if (process.env['KOVAN_SMOKE'] && process.env['KOVAN_USER_DATA']) {
       models = family === 'claude' ? ['opus', 'sonnet', 'haiku', 'claude-opus-5-5'] : ['gpt-5', 'gpt-5-codex'];
     } else if (family === 'opencode') {
       models = await this.opencodeModels();

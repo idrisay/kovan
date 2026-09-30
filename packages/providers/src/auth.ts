@@ -8,8 +8,8 @@
  * each host and this is the half both of them share.
  */
 
-import { EventEmitter, type Disposable, type Host } from '@baton/host';
-import type { ProviderId } from '@baton/core';
+import { EventEmitter, type Disposable, type Host } from '@kovan/host';
+import type { ProviderId } from '@kovan/core';
 
 export interface CredentialField {
   /** Settings key this field is stored under, e.g. `jira.baseUrl`. */

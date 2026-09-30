@@ -184,7 +184,7 @@ export function quote(word: string): string {
  * time after we return, and the OS clears the temporary directory anyway.
  */
 export async function writePrompt(prompt: string): Promise<string> {
-  const dir = path.join(tmpdir(), 'baton-prompts');
+  const dir = path.join(tmpdir(), 'kovan-prompts');
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const file = path.join(dir, `prompt-${randomUUID()}.md`);
   await writeFile(file, prompt, { mode: 0o600 });
@@ -261,13 +261,13 @@ export async function resolve(
       // file defining it, so this one is interactive — the opposite of the
       // environment probe, where rc output would be noise. Here it is the point.
       if (!isSafeCommandName(runner.command)) return undefined;
-      // `zsh -ic 'name "$@"' baton ARGS…` — the prompt arrives as a positional
+      // `zsh -ic 'name "$@"' kovan ARGS…` — the prompt arrives as a positional
       // parameter and never passes through the parser. The only thing
       // interpolated is the runner's own name, checked above.
       const script = `${runner.command} "$@"`;
       return {
         executable: loginShell(),
-        args: ['-i', '-c', script, 'baton', ...modelArgs(runner), ...runner.leadingArgs, ...promptArgs]
+        args: ['-i', '-c', script, 'kovan', ...modelArgs(runner), ...runner.leadingArgs, ...promptArgs]
       };
     }
   }

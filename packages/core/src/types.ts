@@ -3,7 +3,7 @@
  *
  * These lived inside the VS Code extension's client and config files, which
  * meant importing a `vscode`-coupled module just to name a Jira issue. Pulled
- * out here so `@baton/core` stays platform-free and `@baton/providers` has
+ * out here so `@kovan/core` stays platform-free and `@kovan/providers` has
  * something to implement against.
  */
 

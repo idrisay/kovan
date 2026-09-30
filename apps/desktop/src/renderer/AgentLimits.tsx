@@ -1,4 +1,4 @@
-import type { LimitWindow } from '@baton/core';
+import type { LimitWindow } from '@kovan/core';
 import type { RunnerLimits } from './types';
 
 /**
@@ -42,7 +42,7 @@ export function AgentLimitsNote({ entry, compact }: {
     const detail = [
       ...limits.windows.map((w) => `${w.label}: ${w.reset ? 'reset' : `${Math.round(w.usedPercent)}%`}${!w.reset && w.resetsAt ? `, resets ${when(w.resetsAt, now)}` : ''}`),
       `As of ${ago(limits.asOf, now)}${limits.plan ? ` · ${limits.plan} plan` : ''}${limits.shared ? ' · from your status line, last Claude account used' : ''}.`,
-      `From ${limits.source}. Baton sends no request for these.`
+      `From ${limits.source}. Kovan sends no request for these.`
     ].join('\n');
     return (
       <div className="agent-limits compact" title={detail}>
@@ -58,7 +58,7 @@ export function AgentLimitsNote({ entry, compact }: {
   }
   if (limits) {
     return (
-      <div className="agent-limits" title={`From ${limits.source}${limits.plan ? ` · ${limits.plan} plan` : ''}. Baton sends no request for these.`}>
+      <div className="agent-limits" title={`From ${limits.source}${limits.plan ? ` · ${limits.plan} plan` : ''}. Kovan sends no request for these.`}>
         {limits.windows.map((w) => (
           <div key={w.label} className={`agent-limit ${w.reset ? 'reset' : tone(w)}`}>
             <span className="agent-limit-label">{w.label}</span>

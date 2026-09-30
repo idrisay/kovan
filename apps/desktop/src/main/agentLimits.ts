@@ -1,9 +1,9 @@
 /**
  * Agents' plan limits for the run sheet (item 108), read from what the agents
- * themselves already write on this Mac — Baton sends no request for them.
+ * themselves already write on this Mac — Kovan sends no request for them.
  *
  *   Claude Code  its status line is handed `rate_limits` on every refresh.
- *                For the Claude sessions Baton starts, Baton's own status-line
+ *                For the Claude sessions Kovan starts, Kovan's own status-line
  *                wrapper saves that payload and then runs your usual status
  *                line unchanged. ccstatusline's cache, when present, is a
  *                head start until the first such session has run.
@@ -23,8 +23,8 @@ import * as path from 'node:path';
 import {
   claudeLimitsFromCcstatusline, claudeLimitsFromStatusPayload, codexLimitsFromLine, modelFamily, newestLimits,
   settleWindows, type AgentLimits
-} from '@baton/core';
-import type { Runner } from '@baton/agent';
+} from '@kovan/core';
+import type { Runner } from '@kovan/agent';
 
 export interface ProviderDay {
   /** Requests today, per provider ("opencode", "nvidia"…). */
@@ -43,7 +43,7 @@ const HOME = os.homedir();
 // --- Claude: the status-line recorder ---------------------------------------
 
 const RECORDER = `#!/bin/sh
-# Baton's status line for the Claude Code sessions it starts (item 108).
+# Kovan's status line for the Claude Code sessions it starts (item 108).
 # Saves what Claude Code hands the status line when it carries rate limits,
 # then runs your own status line with the same input, so it looks unchanged.
 #   $1  file to save to      $2  your status-line command, base64
@@ -80,7 +80,7 @@ export class AgentLimitsReader {
     try {
       await mkdir(path.join(this.userData, 'bin'), { recursive: true });
       await mkdir(this.dir, { recursive: true });
-      const script = path.join(this.userData, 'bin', 'baton-claude-statusline.sh');
+      const script = path.join(this.userData, 'bin', 'kovan-claude-statusline.sh');
       await writeFile(script, RECORDER, 'utf8');
       await chmod(script, 0o755);
       const own = this.ownStatusLine(runner.command);

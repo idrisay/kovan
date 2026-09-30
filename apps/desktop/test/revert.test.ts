@@ -1,6 +1,6 @@
 /**
  * Item 17: rolling back a change in the Workspace tab, one row or "all of
- * them" at once. This is the second place in Baton (after `write`) that can
+ * them" at once. This is the second place in Kovan (after `write`) that can
  * destroy work, so it gets the same real-repository treatment as
  * `write.test.ts` rather than mocked git calls — the risk here is entirely
  * in what the actual `git restore` arguments do.
@@ -48,7 +48,7 @@ function hostFor(folders: string[]) {
 const git = (...args: string[]) => run('git', ['-C', root, ...args]);
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'baton-revert-'));
+  root = await mkdtemp(path.join(tmpdir(), 'kovan-revert-'));
   await git('init', '-q');
   await git('config', 'user.email', 'test@example.com');
   await git('config', 'user.name', 'Test');
@@ -137,7 +137,7 @@ describe('revert', () => {
   });
 
   it('refuses a repo outside every workspace folder', async () => {
-    const other = await mkdtemp(path.join(tmpdir(), 'baton-outside-'));
+    const other = await mkdtemp(path.join(tmpdir(), 'kovan-outside-'));
     try {
       await expect(
         workspaces.revert(other, [{ path: 'a.ts', side: 'unstaged', kind: 'modified' }])

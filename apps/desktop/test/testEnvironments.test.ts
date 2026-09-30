@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { accountPasswordKey, basicPasswordKey } from '@baton/core';
+import { accountPasswordKey, basicPasswordKey } from '@kovan/core';
 import { TestEnvironments } from '../src/main/testEnvironments';
 import type { DesktopHost } from '../src/main/host';
 
@@ -39,9 +39,9 @@ describe('test environments', () => {
     expect(state.savedPasswords).toContain(accountPasswordKey(id));
 
     expect(await envs.env({})).toEqual({
-      BATON_ACCOUNT_1_USER: 'me@x.invalid', BATON_ACCOUNT_1_PASSWORD: 'pw',
-      BATON_ENV_USER: 'me@x.invalid', BATON_ENV_PASSWORD: 'pw',
-      BATON_ENV_BASIC_USER: 'wall', BATON_ENV_BASIC_PASSWORD: 'wall-pw'
+      KOVAN_ACCOUNT_1_USER: 'me@x.invalid', KOVAN_ACCOUNT_1_PASSWORD: 'pw',
+      KOVAN_ENV_USER: 'me@x.invalid', KOVAN_ENV_PASSWORD: 'pw',
+      KOVAN_ENV_BASIC_USER: 'wall', KOVAN_ENV_BASIC_PASSWORD: 'wall-pw'
     });
     // The old keys stay, so an older build still works.
     expect(secrets['verify.password']).toBe('pw');
@@ -68,7 +68,7 @@ describe('test environments', () => {
 
     const onlyTeacher = await envs.env({ environmentId: 'local', accountIds: ['a2'] });
     expect(onlyTeacher).toEqual({
-      BATON_ACCOUNT_1_USER: 't', BATON_ACCOUNT_1_PASSWORD: 'p2', BATON_ENV_USER: 't', BATON_ENV_PASSWORD: 'p2'
+      KOVAN_ACCOUNT_1_USER: 't', KOVAN_ACCOUNT_1_PASSWORD: 'p2', KOVAN_ENV_USER: 't', KOVAN_ENV_PASSWORD: 'p2'
     });
     expect(await envs.env({ environmentId: 'dev' })).toEqual({});
 

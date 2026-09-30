@@ -1,7 +1,7 @@
 /**
  * The seam.
  *
- * Everything in `@baton/core` and `@baton/providers` reaches the outside world
+ * Everything in `@kovan/core` and `@kovan/providers` reaches the outside world
  * through this interface and nothing else. That is the whole reason one
  * provider implementation can serve both the Electron app and the VS Code
  * extension: each supplies its own `Host` and the shared code never learns

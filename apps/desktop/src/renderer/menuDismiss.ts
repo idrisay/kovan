@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-const OPENED = 'baton:menu-opened';
+const OPENED = 'kovan:menu-opened';
 
 /**
  * Closes a drop-down on any click outside it, on Escape, and when another

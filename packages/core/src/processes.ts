@@ -1,5 +1,5 @@
 /**
- * Every coding agent running on this Mac — inside Baton or not — and whether
+ * Every coding agent running on this Mac — inside Kovan or not — and whether
  * it is still doing anything.
  *
  * This file only reads text: `ps` and `lsof` output in, a classification out.
@@ -10,13 +10,13 @@
 export type AgentKind = 'claude' | 'codex' | 'opencode';
 
 /**
- * - `baton`: under one of Baton's own terminals.
+ * - `kovan`: under one of Kovan's own terminals.
  * - `terminal`: in any other terminal (it has a tty).
  * - `background`: no terminal, and not a known helper — a `claude -p` loop, say.
  * - `helper`: started and restarted by another app (VS Code's Codex server,
  *   Claude's Chrome bridge, an MCP server). Listed, never stopped from here.
  */
-export type AgentGroup = 'baton' | 'terminal' | 'background' | 'helper';
+export type AgentGroup = 'kovan' | 'terminal' | 'background' | 'helper';
 
 export type AgentState = 'working' | 'waiting' | 'idle';
 
@@ -47,7 +47,7 @@ export interface RunningAgent {
   kind: AgentKind;
   group: AgentGroup;
   title: string;
-  /** The Baton session it runs in, for `baton` agents. */
+  /** The Kovan session it runs in, for `kovan` agents. */
   sessionId?: string;
   subject?: string;
   cwd?: string;
@@ -205,8 +205,8 @@ export interface FoundAgent {
  * ran as a tool, or the native binary behind Codex's node wrapper) is part of
  * its parent, not a row of its own.
  *
- * `boundaries` are pids the nesting never looks past — Baton's own terminal
- * shells. Baton itself may have been started from an agent's terminal, and
+ * `boundaries` are pids the nesting never looks past — Kovan's own terminal
+ * shells. Kovan itself may have been started from an agent's terminal, and
  * what runs in its sessions is still its own agent, not part of that one.
  */
 export function findAgents(rows: ProcessRow[], boundaries: ReadonlySet<number> = new Set()): FoundAgent[] {

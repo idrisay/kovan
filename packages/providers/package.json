@@ -1,11 +1,11 @@
 {
-  "name": "@baton/providers",
+  "name": "@kovan/providers",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-  "dependencies": { "@baton/core": "*", "@baton/host": "*" },
+  "dependencies": { "@kovan/core": "*", "@kovan/host": "*" },
   "scripts": { "build": "tsc --build" }
 }

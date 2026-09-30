@@ -1,4 +1,4 @@
-import type { CancelSignal } from '@baton/host';
+import type { CancelSignal } from '@kovan/host';
 import {
   JIRA_MEDIA_PATTERN,
   adfToMarkdown,
@@ -7,7 +7,7 @@ import {
   type JiraIssue,
   type JiraMention,
   type JiraTransition
-} from '@baton/core';
+} from '@kovan/core';
 import { HttpError, type HttpClient } from '../http';
 
 interface RawAttachment {

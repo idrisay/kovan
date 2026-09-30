@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { filterQuickCommands, type QuickCommand } from '@baton/core';
+import { filterQuickCommands, type QuickCommand } from '@kovan/core';
 import { useMenuDismiss } from './menuDismiss';
 import { ChevronIcon, CloseIcon, CopyIcon, EditIcon, PlayIcon, PlusIcon, SearchIcon, TrashIcon } from './icons';
 import type { SessionInfo } from './types';
@@ -40,7 +40,7 @@ export function QuickCommands({ sessions, onRan }: {
   const search = useRef<HTMLInputElement>(null);
 
   const reload = useCallback(async () => {
-    const state = await window.baton.commands();
+    const state = await window.kovan.commands();
     setCommands(state.commands);
     setLast(state.last);
     setBusy(state.busy);
@@ -70,7 +70,7 @@ export function QuickCommands({ sessions, onRan }: {
 
   const run = useCallback(async (id: string) => {
     setError(undefined);
-    const result = await window.baton.commandRun(id);
+    const result = await window.kovan.commandRun(id);
     if (!result.ok) {
       setOpen(true);
       setError(result.error);
@@ -86,7 +86,7 @@ export function QuickCommands({ sessions, onRan }: {
   const save = async () => {
     if (!draft) return;
     setSaving(true);
-    const result = await window.baton.commandSave({ ...draft });
+    const result = await window.kovan.commandSave({ ...draft });
     setSaving(false);
     if (!result.ok) {
       setError(result.error);
@@ -171,7 +171,7 @@ export function QuickCommands({ sessions, onRan }: {
                   />
                   <button
                     type="button" className="ghost"
-                    onClick={() => void window.baton.commandFolder().then((p) => p && setDraft((d) => d && { ...d, cwd: p }))}
+                    onClick={() => void window.kovan.commandFolder().then((p) => p && setDraft((d) => d && { ...d, cwd: p }))}
                   >
                     Choose…
                   </button>
@@ -215,7 +215,7 @@ export function QuickCommands({ sessions, onRan }: {
                           <span className="spacer" />
                           <button
                             type="button" className="ghost qc-delete"
-                            onClick={() => void window.baton.commandDelete(c.id).then(reload).then(() => setConfirming(undefined))}
+                            onClick={() => void window.kovan.commandDelete(c.id).then(reload).then(() => setConfirming(undefined))}
                           >
                             Delete
                           </button>
@@ -241,7 +241,7 @@ export function QuickCommands({ sessions, onRan }: {
                           </button>
                           <span className="qc-row-actions">
                             <button type="button" className="icon-button" aria-label={`Duplicate ${c.name}`} title="Duplicate"
-                              onClick={() => void window.baton.commandDuplicate(c.id).then(reload)}>
+                              onClick={() => void window.kovan.commandDuplicate(c.id).then(reload)}>
                               <CopyIcon size={13} />
                             </button>
                             <button type="button" className="icon-button" aria-label={`Edit ${c.name}`} title="Edit"

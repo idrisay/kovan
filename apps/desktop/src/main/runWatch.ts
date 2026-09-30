@@ -67,7 +67,7 @@ export class RunWatcher {
     entry.timer = setTimeout(() => {
       entry.timer = undefined;
       for (const viewer of entry.viewers) {
-        if (!viewer.isDestroyed()) viewer.send('baton:run-changed', directory);
+        if (!viewer.isDestroyed()) viewer.send('kovan:run-changed', directory);
       }
     }, 150);
   }

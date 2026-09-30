@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { pullMentionsTicket } from '@baton/core';
+import { pullMentionsTicket } from '@kovan/core';
 import type { JiraIssue, PullSummary, SentryIssue, SessionInfo, Snapshot } from './types';
 import { EditIcon, OpenLinkIcon } from './icons';
 
@@ -33,9 +33,9 @@ export function findSubject(subject: string, snapshot: Snapshot): Selection | un
 }
 
 /**
- * Every pull request Baton has loaded that belongs to this ticket — the key
+ * Every pull request Kovan has loaded that belongs to this ticket — the key
  * in its title or its branch — open ones first (blocked, yours, awaiting your
- * review), then merged ones, newest first. Each opens in Baton's own Pull
+ * review), then merged ones, newest first. Each opens in Kovan's own Pull
  * requests tab. Deduplicated: a pull request that is both "blocked on you"
  * and "yours" is one row, not two.
  */

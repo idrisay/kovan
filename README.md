@@ -1,4 +1,4 @@
-# Baton
+# Kovan
 
 Tells you what is blocked on you, and hands it to a coding agent.
 
@@ -32,14 +32,14 @@ poller and the queue views. Verified against a real account — 42 pull requests
 | 7 | Codesign, notarise, auto-update | not started |
 
 Sentry, Grafana and Figma clients are **not** ported yet, though their pure
-logic is already in `@baton/core` and `CREDENTIAL_FIELDS` knows about them.
+logic is already in `@kovan/core` and `CREDENTIAL_FIELDS` knows about them.
 
 ## Getting started
 
 ```sh
 npm install
 npm run import          # move DevHub's tokens, settings and run history across
-npm run --workspace @baton/desktop dev
+npm run --workspace @kovan/desktop dev
 ```
 
 `npm run import` is safe to re-run and never deletes anything DevHub owns. Add
@@ -64,7 +64,7 @@ scripts              one-time migration from DevHub
 
 ## The one architectural rule
 
-**Baton is main-process-first.** The poller, providers, credentials and
+**Kovan is main-process-first.** The poller, providers, credentials and
 notifications live in the main process, and the window is *destroyed* when
 closed rather than hidden. The app is fully functional with no window open.
 
@@ -79,9 +79,9 @@ the limitation the project exists to fix.
 | `npm test` | unit tests (`vitest`) |
 | `npm run typecheck` | packages and app |
 | `npm run smoke` | launch, assert main/preload/renderer wiring, exit |
-| `npm run --workspace @baton/desktop smoke:seeded` | same, with a fixture snapshot, asserts row and flag rendering |
-| `npm run --workspace @baton/desktop smoke:live` | same, against your real accounts |
-| `npm run --workspace @baton/desktop smoke:workspace` | drives the explorer against scratch clones: expands the tree, collapses all, opens a diff, edits a file, saves it with ⌘S, forces a save conflict, and removes a folder |
+| `npm run --workspace @kovan/desktop smoke:seeded` | same, with a fixture snapshot, asserts row and flag rendering |
+| `npm run --workspace @kovan/desktop smoke:live` | same, against your real accounts |
+| `npm run --workspace @kovan/desktop smoke:workspace` | drives the explorer against scratch clones: expands the tree, collapses all, opens a diff, edits a file, saves it with ⌘S, forces a save conflict, and removes a folder |
 
 `smoke` exists because screenshots need a screen-recording permission that CI
 does not have, and "it rendered" is the assertion that actually matters.
@@ -98,9 +98,9 @@ and an agent started on a prompt nobody read is how the wrong thing gets built
 confidently.
 
 Every run leaves a folder under `runs/<ticket>/<timestamp>/` holding the prompt,
-the report the agent writes to `$BATON_REPORT`, and any screenshots it saves in
-`$BATON_SHOTS`. One folder per ticket, so the second time a ticket comes round
-the first time is already there. `$BATON_TICKET` is everything already known,
+the report the agent writes to `$KOVAN_REPORT`, and any screenshots it saves in
+`$KOVAN_SHOTS`. One folder per ticket, so the second time a ticket comes round
+the first time is already there. `$KOVAN_TICKET` is everything already known,
 written before the agent starts.
 
 ### The security rule
@@ -216,31 +216,31 @@ starts to show.
 - `noUncheckedIndexedAccess` is off, matching the extension's original compiler
   contract. Turning it on means auditing ~17 regex `match[1]` sites.
 - Queue scoping is account-wide only. The clone index that folder and workspace
-  scoping needs now exists in `@baton/git`; wiring it to the queue does not.
+  scoping needs now exists in `@kovan/git`; wiring it to the queue does not.
 - The workspace cannot stage, commit, rename, delete or create files.
-- `smoke:workspace` needs `BATON_USER_DATA` and `BATON_WS_FOLDER` set. The
+- `smoke:workspace` needs `KOVAN_USER_DATA` and `KOVAN_WS_FOLDER` set. The
   first is not optional — seeding a workspace into the real profile would leave
   a folder in your app that you never chose, and the seeder refuses without it.
-  It **edits and saves a real file**, so point `BATON_WS_FOLDER` at scratch
-  clones, never at a repository you care about. `BATON_WS_FOLDER` is
+  It **edits and saves a real file**, so point `KOVAN_WS_FOLDER` at scratch
+  clones, never at a repository you care about. `KOVAN_WS_FOLDER` is
   colon-separated, because the multi-folder workspace is the case worth
   exercising.
 
 ## Installing
 
 ```sh
-npm run install:app --workspace @baton/desktop
+npm run install:app --workspace @kovan/desktop
 ```
 
-Builds, copies to `/Applications/Baton.app`, re-signs and launches it. Re-run it
+Builds, copies to `/Applications/Kovan.app`, re-signs and launches it. Re-run it
 to update — it quits the running copy first, because swapping the bundle under a
 live process leaves it running old code from a deleted inode.
 
-Baton is **ad-hoc signed**. That is fine for a local install (Gatekeeper only
+Kovan is **ad-hoc signed**. That is fine for a local install (Gatekeeper only
 quarantines what was downloaded) but it is not distributable: sending the
 bundle to another Mac needs the Developer ID and notarisation of Phase 7.
 
-Only one Baton runs at a time — a single-instance lock means a `dev` build
+Only one Kovan runs at a time — a single-instance lock means a `dev` build
 exits immediately while the installed one is running. Quit it from the menu bar
 first.
 
@@ -284,11 +284,11 @@ process.
 ### Checking it
 
 ```sh
-BATON_SMOKE=live BATON_SHOT=/tmp/q.png BATON_SHOT_DETAIL=/tmp/d.png \
-  npm run --workspace @baton/desktop start
+KOVAN_SMOKE=live KOVAN_SHOT=/tmp/q.png KOVAN_SHOT_DETAIL=/tmp/d.png \
+  npm run --workspace @kovan/desktop start
 ```
 
-`BATON_THEME=light` forces the appearance so both can be captured without
+`KOVAN_THEME=light` forces the appearance so both can be captured without
 touching System Settings. The smoke harness waits for the UI to be *ready*
 rather than for a fixed delay — a fixed wait landed on the boundary where live
 data arrives, and different assertions in one run saw different states.

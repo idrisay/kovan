@@ -73,9 +73,9 @@ describe('substitution', () => {
     expect(out).toContain('Changes requested');
   });
 
-  it('carries the Baton env contract, not DevHub\'s', () => {
+  it('carries the Kovan env contract, not DevHub\'s', () => {
     const out = renderPullPrompt(DEFAULTUPDATETEMPLATE, pull);
-    expect(out).toContain('BATON_REPORT');
+    expect(out).toContain('KOVAN_REPORT');
     expect(out).not.toContain('DEVHUB_');
   });
 });
@@ -124,7 +124,7 @@ describe('the verify prompt', () => {
   it('mentions the basic-auth wall only where there is one', () => {
     const without = renderVerifyPrompt(DEFAULTVERIFYTEMPLATE, pull, env);
     const withWall = renderVerifyPrompt(DEFAULTVERIFYTEMPLATE, pull, { ...env, hasBasicAuth: true });
-    expect(without).not.toContain('BATON_ENV_BASIC_USER');
-    expect(withWall).toContain('BATON_ENV_BASIC_USER');
+    expect(without).not.toContain('KOVAN_ENV_BASIC_USER');
+    expect(withWall).toContain('KOVAN_ENV_BASIC_USER');
   });
 });

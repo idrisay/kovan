@@ -12,9 +12,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { parseQuickQuery, pushRecent, rankPaths, type QuickMatch } from '@baton/core';
+import { parseQuickQuery, pushRecent, rankPaths, type QuickMatch } from '@kovan/core';
 
-const RECENT_KEY = 'baton.recent-files';
+const RECENT_KEY = 'kovan.recent-files';
 
 export function recentFiles(): string[] {
   try {
@@ -82,10 +82,10 @@ export function QuickOpen({ onOpen, onClose }: {
 
   useEffect(() => {
     input.current?.focus();
-    void window.baton.workspaces().then(({ list: all, active: id }) => {
+    void window.kovan.workspaces().then(({ list: all, active: id }) => {
       setFolders(all.find((w) => w.id === id)?.folders ?? []);
     });
-    void window.baton.quickOpenFiles().then((answer) => {
+    void window.kovan.quickOpenFiles().then((answer) => {
       setWorkspace(answer.workspace);
       setFiles(answer.files);
     });

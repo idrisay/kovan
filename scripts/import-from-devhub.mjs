@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Moves DevHub's state to Baton. Run once, before first launch.
+ * Moves DevHub's state to Kovan. Run once, before first launch.
  *
  *   node scripts/import-from-devhub.mjs [--dry-run]
  *
@@ -32,7 +32,7 @@ import * as path from 'node:path';
 const DRY = process.argv.includes('--dry-run');
 const OLD_DOMAIN = 'com.idrisay.devhub';
 const OLD_SUPPORT = path.join(os.homedir(), 'Library/Application Support/DevHub');
-const NEW_SUPPORT = path.join(os.homedir(), 'Library/Application Support/Baton');
+const NEW_SUPPORT = path.join(os.homedir(), 'Library/Application Support/Kovan');
 
 const SERVICES = ['github', 'jira'];
 
@@ -147,7 +147,7 @@ function readKeychain(service) {
  * GitHub's token may not be in the Keychain at all.
  *
  * `github.useCLI` means the Swift app shelled out to `gh auth token` instead of
- * storing one, so there is nothing to migrate — the CLI already holds it. Baton
+ * storing one, so there is nothing to migrate — the CLI already holds it. Kovan
  * reads it the same way, which is also why this returns it rather than
  * prompting for a new personal access token.
  */
@@ -258,4 +258,4 @@ if (Object.keys(tokens).length > 0) {
 }
 
 say(`\nWritten to ${NEW_SUPPORT}`);
-say('Launch Baton; it will encrypt the staged tokens and remove the staging file.');
+say('Launch Kovan; it will encrypt the staged tokens and remove the staging file.');

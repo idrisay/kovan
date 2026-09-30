@@ -10,225 +10,225 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const api = {
-  snapshot: () => ipcRenderer.invoke('baton:snapshot'),
-  refresh: () => ipcRenderer.invoke('baton:refresh'),
-  refreshProvider: (id: string) => ipcRenderer.invoke('baton:refresh-provider', id),
-  openExternal: (url: string) => ipcRenderer.invoke('baton:open-external', url),
-  credentialFields: () => ipcRenderer.invoke('baton:credential-fields'),
-  missingFields: (id: string) => ipcRenderer.invoke('baton:missing-fields', id),
-  loadMoreMerged: (limit: number) => ipcRenderer.invoke('baton:merged-more', limit),
-  settings: () => ipcRenderer.invoke('baton:settings'),
-  setSetting: (key: string, value: unknown) => ipcRenderer.invoke('baton:set-setting', key, value),
+  snapshot: () => ipcRenderer.invoke('kovan:snapshot'),
+  refresh: () => ipcRenderer.invoke('kovan:refresh'),
+  refreshProvider: (id: string) => ipcRenderer.invoke('kovan:refresh-provider', id),
+  openExternal: (url: string) => ipcRenderer.invoke('kovan:open-external', url),
+  credentialFields: () => ipcRenderer.invoke('kovan:credential-fields'),
+  missingFields: (id: string) => ipcRenderer.invoke('kovan:missing-fields', id),
+  loadMoreMerged: (limit: number) => ipcRenderer.invoke('kovan:merged-more', limit),
+  settings: () => ipcRenderer.invoke('kovan:settings'),
+  setSetting: (key: string, value: unknown) => ipcRenderer.invoke('kovan:set-setting', key, value),
   /** Native chrome's side of the painted theme — see `renderer/appearance.tsx`. */
-  setNativeTheme: (source: 'system' | 'light' | 'dark'): Promise<void> => ipcRenderer.invoke('baton:native-theme', source),
+  setNativeTheme: (source: 'system' | 'light' | 'dark'): Promise<void> => ipcRenderer.invoke('kovan:native-theme', source),
   /** The accent colour chosen in System Settings, as "#rrggbb". */
-  systemAccent: (): Promise<string | undefined> => ipcRenderer.invoke('baton:system-accent'),
-  setSecret: (key: string, value: string) => ipcRenderer.invoke('baton:set-secret', key, value),
+  systemAccent: (): Promise<string | undefined> => ipcRenderer.invoke('kovan:system-accent'),
+  setSecret: (key: string, value: string) => ipcRenderer.invoke('kovan:set-secret', key, value),
   onSnapshot: (listener: (snapshot: unknown) => void) => {
     const handler = (_event: unknown, snapshot: unknown) => listener(snapshot);
-    ipcRenderer.on('baton:snapshot', handler);
-    return () => ipcRenderer.removeListener('baton:snapshot', handler);
+    ipcRenderer.on('kovan:snapshot', handler);
+    return () => ipcRenderer.removeListener('kovan:snapshot', handler);
   },
 
   // Detail
   pullDetail: (repo: string, number: number) =>
-    ipcRenderer.invoke('baton:pull-detail', repo, number),
-  reviewerCandidates: (repo: string) => ipcRenderer.invoke('baton:reviewer-candidates', repo),
+    ipcRenderer.invoke('kovan:pull-detail', repo, number),
+  reviewerCandidates: (repo: string) => ipcRenderer.invoke('kovan:reviewer-candidates', repo),
   requestReviewers: (repo: string, number: number, people: string[], teams: string[]) =>
-    ipcRenderer.invoke('baton:reviewers-request', repo, number, people, teams),
-  ticketDetail: (key: string) => ipcRenderer.invoke('baton:ticket-detail', key),
+    ipcRenderer.invoke('kovan:reviewers-request', repo, number, people, teams),
+  ticketDetail: (key: string) => ipcRenderer.invoke('kovan:ticket-detail', key),
 
   // Quick model
-  quickState: (kind: string, subject: string) => ipcRenderer.invoke('baton:quick-state', kind, subject),
-  quickRun: (kind: string, subject: string) => ipcRenderer.invoke('baton:quick-run', kind, subject),
-  quickCancel: (kind: string, subject: string) => ipcRenderer.invoke('baton:quick-cancel', kind, subject),
-  quickDismiss: (kind: string, subject: string) => ipcRenderer.invoke('baton:quick-dismiss', kind, subject),
-  quickTest: (model?: string) => ipcRenderer.invoke('baton:quick-test', model),
-  quickJobs: () => ipcRenderer.invoke('baton:quick-jobs'),
-  quickJobRemove: (id: string) => ipcRenderer.invoke('baton:quick-job-remove', id),
-  quickModel: (kind: string) => ipcRenderer.invoke('baton:quick-model', kind),
-  quickModelSet: (kind: string, model: string) => ipcRenderer.invoke('baton:quick-model-set', kind, model),
-  quickModelsAvailable: () => ipcRenderer.invoke('baton:quick-models-available'),
+  quickState: (kind: string, subject: string) => ipcRenderer.invoke('kovan:quick-state', kind, subject),
+  quickRun: (kind: string, subject: string) => ipcRenderer.invoke('kovan:quick-run', kind, subject),
+  quickCancel: (kind: string, subject: string) => ipcRenderer.invoke('kovan:quick-cancel', kind, subject),
+  quickDismiss: (kind: string, subject: string) => ipcRenderer.invoke('kovan:quick-dismiss', kind, subject),
+  quickTest: (model?: string) => ipcRenderer.invoke('kovan:quick-test', model),
+  quickJobs: () => ipcRenderer.invoke('kovan:quick-jobs'),
+  quickJobRemove: (id: string) => ipcRenderer.invoke('kovan:quick-job-remove', id),
+  quickModel: (kind: string) => ipcRenderer.invoke('kovan:quick-model', kind),
+  quickModelSet: (kind: string, model: string) => ipcRenderer.invoke('kovan:quick-model-set', kind, model),
+  quickModelsAvailable: () => ipcRenderer.invoke('kovan:quick-models-available'),
   priceCheck: (runner: string, model: string, rules: unknown[]) =>
-    ipcRenderer.invoke('baton:price-check', runner, model, rules),
-  priceCheckCancel: () => ipcRenderer.invoke('baton:price-check-cancel'),
-  reviewSubmit: (subject: string, event: string) => ipcRenderer.invoke('baton:review-submit', subject, event),
-  usage: () => ipcRenderer.invoke('baton:usage'),
+    ipcRenderer.invoke('kovan:price-check', runner, model, rules),
+  priceCheckCancel: () => ipcRenderer.invoke('kovan:price-check-cancel'),
+  reviewSubmit: (subject: string, event: string) => ipcRenderer.invoke('kovan:review-submit', subject, event),
+  usage: () => ipcRenderer.invoke('kovan:usage'),
   onUsage: (listener: (records: unknown[]) => void) => {
     const handler = (_event: unknown, records: unknown[]) => listener(records);
-    ipcRenderer.on('baton:usage', handler);
-    return () => ipcRenderer.removeListener('baton:usage', handler);
+    ipcRenderer.on('kovan:usage', handler);
+    return () => ipcRenderer.removeListener('kovan:usage', handler);
   },
-  runningAgents: () => ipcRenderer.invoke('baton:running-agents'),
-  runningAgentsWatch: (on: boolean) => ipcRenderer.invoke('baton:running-agents-watch', on),
-  runningAgentsStop: (keys: string[], children: boolean) => ipcRenderer.invoke('baton:running-agents-stop', keys, children),
-  runningAgentsForce: (key: string) => ipcRenderer.invoke('baton:running-agents-force', key),
+  runningAgents: () => ipcRenderer.invoke('kovan:running-agents'),
+  runningAgentsWatch: (on: boolean) => ipcRenderer.invoke('kovan:running-agents-watch', on),
+  runningAgentsStop: (keys: string[], children: boolean) => ipcRenderer.invoke('kovan:running-agents-stop', keys, children),
+  runningAgentsForce: (key: string) => ipcRenderer.invoke('kovan:running-agents-force', key),
   onRunningAgents: (listener: (report: unknown) => void) => {
     const handler = (_event: unknown, report: unknown) => listener(report);
-    ipcRenderer.on('baton:running-agents', handler);
-    return () => ipcRenderer.removeListener('baton:running-agents', handler);
+    ipcRenderer.on('kovan:running-agents', handler);
+    return () => ipcRenderer.removeListener('kovan:running-agents', handler);
   },
   onShowAgents: (listener: () => void) => {
     const handler = () => listener();
-    ipcRenderer.on('baton:show-agents', handler);
-    return () => ipcRenderer.removeListener('baton:show-agents', handler);
+    ipcRenderer.on('kovan:show-agents', handler);
+    return () => ipcRenderer.removeListener('kovan:show-agents', handler);
   },
   onQuickJobs: (listener: (jobs: unknown[]) => void) => {
     const handler = (_e: unknown, jobs: unknown[]) => listener(jobs);
-    ipcRenderer.on('baton:quick-jobs', handler);
-    return () => ipcRenderer.removeListener('baton:quick-jobs', handler);
+    ipcRenderer.on('kovan:quick-jobs', handler);
+    return () => ipcRenderer.removeListener('kovan:quick-jobs', handler);
   },
   onQuick: (listener: (kind: string, subject: string, state: unknown) => void) => {
     const handler = (_e: unknown, kind: string, subject: string, state: unknown) => listener(kind, subject, state);
-    ipcRenderer.on('baton:quick', handler);
-    return () => ipcRenderer.removeListener('baton:quick', handler);
+    ipcRenderer.on('kovan:quick', handler);
+    return () => ipcRenderer.removeListener('kovan:quick', handler);
   },
 
   // Agents
-  runners: () => ipcRenderer.invoke('baton:runners'),
-  knownModels: () => ipcRenderer.invoke('baton:known-models'),
-  modelsSearch: (command: string) => ipcRenderer.invoke('baton:models-search', command),
-  ticketStatuses: () => ipcRenderer.invoke('baton:ticket-statuses'),
-  clipboardImagePath: () => ipcRenderer.invoke('baton:clipboard-image'),
-  copyText: (text: string) => ipcRenderer.invoke('baton:clipboard-write', text),
+  runners: () => ipcRenderer.invoke('kovan:runners'),
+  knownModels: () => ipcRenderer.invoke('kovan:known-models'),
+  modelsSearch: (command: string) => ipcRenderer.invoke('kovan:models-search', command),
+  ticketStatuses: () => ipcRenderer.invoke('kovan:ticket-statuses'),
+  clipboardImagePath: () => ipcRenderer.invoke('kovan:clipboard-image'),
+  copyText: (text: string) => ipcRenderer.invoke('kovan:clipboard-write', text),
   // Electron 32 took `File.path` away; this is its replacement, and it has
   // to run here, where the File object still is.
   pathForFile: (file: File) => webUtils.getPathForFile(file),
-  modelsSearchCancel: () => ipcRenderer.invoke('baton:models-search-cancel'),
-  runTargets: (force?: boolean) => ipcRenderer.invoke('baton:run-targets', force),
+  modelsSearchCancel: () => ipcRenderer.invoke('kovan:models-search-cancel'),
+  runTargets: (force?: boolean) => ipcRenderer.invoke('kovan:run-targets', force),
   buildPrompt: (kind: string, subject: unknown, test?: unknown) =>
-    ipcRenderer.invoke('baton:build-prompt', kind, subject, test),
-  testEnvironments: () => ipcRenderer.invoke('baton:test-environments'),
-  testEnvironmentsSave: (next: unknown) => ipcRenderer.invoke('baton:test-environments-save', next),
-  defaultCwd: (repo?: string) => ipcRenderer.invoke('baton:default-cwd', repo),
+    ipcRenderer.invoke('kovan:build-prompt', kind, subject, test),
+  testEnvironments: () => ipcRenderer.invoke('kovan:test-environments'),
+  testEnvironmentsSave: (next: unknown) => ipcRenderer.invoke('kovan:test-environments-save', next),
+  defaultCwd: (repo?: string) => ipcRenderer.invoke('kovan:default-cwd', repo),
   startAgent: (request: unknown, subject: unknown) =>
-    ipcRenderer.invoke('baton:start-agent', request, subject),
-  runHistory: (subject: string) => ipcRenderer.invoke('baton:run-history', subject),
-  sentryFrames: (issueId: string) => ipcRenderer.invoke('baton:sentry-frames', issueId),
-  sentryCreateTicket: (issue: unknown) => ipcRenderer.invoke('baton:sentry-create-ticket', issue),
-  runFiles: (directory: string) => ipcRenderer.invoke('baton:run-files', directory),
-  runText: (file: string) => ipcRenderer.invoke('baton:run-text', file),
-  runImage: (file: string) => ipcRenderer.invoke('baton:run-image', file),
-  runReveal: (file: string) => ipcRenderer.invoke('baton:run-reveal', file),
-  runWatch: (directory: string, on: boolean) => ipcRenderer.invoke('baton:run-watch', directory, on),
-  agentLimits: () => ipcRenderer.invoke('baton:agent-limits'),
-  runSiteOpen: (directory: string, shot?: string) => ipcRenderer.invoke('baton:run-site-open', directory, shot),
+    ipcRenderer.invoke('kovan:start-agent', request, subject),
+  runHistory: (subject: string) => ipcRenderer.invoke('kovan:run-history', subject),
+  sentryFrames: (issueId: string) => ipcRenderer.invoke('kovan:sentry-frames', issueId),
+  sentryCreateTicket: (issue: unknown) => ipcRenderer.invoke('kovan:sentry-create-ticket', issue),
+  runFiles: (directory: string) => ipcRenderer.invoke('kovan:run-files', directory),
+  runText: (file: string) => ipcRenderer.invoke('kovan:run-text', file),
+  runImage: (file: string) => ipcRenderer.invoke('kovan:run-image', file),
+  runReveal: (file: string) => ipcRenderer.invoke('kovan:run-reveal', file),
+  runWatch: (directory: string, on: boolean) => ipcRenderer.invoke('kovan:run-watch', directory, on),
+  agentLimits: () => ipcRenderer.invoke('kovan:agent-limits'),
+  runSiteOpen: (directory: string, shot?: string) => ipcRenderer.invoke('kovan:run-site-open', directory, shot),
   onRunChanged: (listener: (directory: string) => void) => {
     const handler = (_event: unknown, directory: string) => listener(directory);
-    ipcRenderer.on('baton:run-changed', handler);
-    return () => ipcRenderer.removeListener('baton:run-changed', handler);
+    ipcRenderer.on('kovan:run-changed', handler);
+    return () => ipcRenderer.removeListener('kovan:run-changed', handler);
   },
 
   // Quick commands (item 91)
-  commands: () => ipcRenderer.invoke('baton:commands'),
+  commands: () => ipcRenderer.invoke('kovan:commands'),
   commandSave: (input: { id?: string; name: string; command: string; cwd: string }) =>
-    ipcRenderer.invoke('baton:command-save', input),
-  commandDuplicate: (id: string) => ipcRenderer.invoke('baton:command-duplicate', id),
-  commandDelete: (id: string) => ipcRenderer.invoke('baton:command-delete', id),
-  commandRun: (id: string) => ipcRenderer.invoke('baton:command-run', id),
-  commandFolder: () => ipcRenderer.invoke('baton:command-folder'),
+    ipcRenderer.invoke('kovan:command-save', input),
+  commandDuplicate: (id: string) => ipcRenderer.invoke('kovan:command-duplicate', id),
+  commandDelete: (id: string) => ipcRenderer.invoke('kovan:command-delete', id),
+  commandRun: (id: string) => ipcRenderer.invoke('kovan:command-run', id),
+  commandFolder: () => ipcRenderer.invoke('kovan:command-folder'),
 
   // Dictation (item 88)
-  dictationStart: () => ipcRenderer.invoke('baton:dictation-start'),
-  dictationStop: () => ipcRenderer.invoke('baton:dictation-stop'),
-  dictationCancel: () => ipcRenderer.invoke('baton:dictation-cancel'),
-  dictationStatus: (refresh?: boolean) => ipcRenderer.invoke('baton:dictation-status', refresh === true),
-  speechSetup: () => ipcRenderer.invoke('baton:speech-setup'),
-  quickOpenFiles: (force?: boolean) => ipcRenderer.invoke('baton:quick-open-files', force === true),
-  speechKey: (provider: string, key: string) => ipcRenderer.invoke('baton:speech-key', provider, key),
-  speechTest: (provider: string) => ipcRenderer.invoke('baton:speech-test', provider),
-  speechPickModel: () => ipcRenderer.invoke('baton:speech-pick-model'),
-  privacyOpen: (pane: 'mic' | 'speech') => ipcRenderer.invoke('baton:privacy-open', pane),
+  dictationStart: () => ipcRenderer.invoke('kovan:dictation-start'),
+  dictationStop: () => ipcRenderer.invoke('kovan:dictation-stop'),
+  dictationCancel: () => ipcRenderer.invoke('kovan:dictation-cancel'),
+  dictationStatus: (refresh?: boolean) => ipcRenderer.invoke('kovan:dictation-status', refresh === true),
+  speechSetup: () => ipcRenderer.invoke('kovan:speech-setup'),
+  quickOpenFiles: (force?: boolean) => ipcRenderer.invoke('kovan:quick-open-files', force === true),
+  speechKey: (provider: string, key: string) => ipcRenderer.invoke('kovan:speech-key', provider, key),
+  speechTest: (provider: string) => ipcRenderer.invoke('kovan:speech-test', provider),
+  speechPickModel: () => ipcRenderer.invoke('kovan:speech-pick-model'),
+  privacyOpen: (pane: 'mic' | 'speech') => ipcRenderer.invoke('kovan:privacy-open', pane),
   onDictation: (listener: (event: unknown) => void) => {
     const handler = (_event: unknown, payload: unknown) => listener(payload);
-    ipcRenderer.on('baton:dictation', handler);
-    return () => ipcRenderer.removeListener('baton:dictation', handler);
+    ipcRenderer.on('kovan:dictation', handler);
+    return () => ipcRenderer.removeListener('kovan:dictation', handler);
   },
 
   // Activity inbox (item 86)
-  activity: () => ipcRenderer.invoke('baton:activity'),
-  activityRead: (ids: string[] | 'all') => ipcRenderer.invoke('baton:activity-read', ids),
+  activity: () => ipcRenderer.invoke('kovan:activity'),
+  activityRead: (ids: string[] | 'all') => ipcRenderer.invoke('kovan:activity-read', ids),
   onActivity: (listener: (inbox: unknown) => void) => {
     const handler = (_event: unknown, inbox: unknown) => listener(inbox);
-    ipcRenderer.on('baton:activity', handler);
-    return () => ipcRenderer.removeListener('baton:activity', handler);
+    ipcRenderer.on('kovan:activity', handler);
+    return () => ipcRenderer.removeListener('kovan:activity', handler);
   },
   onActivityToast: (listener: (events: unknown) => void) => {
     const handler = (_event: unknown, events: unknown) => listener(events);
-    ipcRenderer.on('baton:activity-toast', handler);
-    return () => ipcRenderer.removeListener('baton:activity-toast', handler);
+    ipcRenderer.on('kovan:activity-toast', handler);
+    return () => ipcRenderer.removeListener('kovan:activity-toast', handler);
   },
   onActivityOpen: (listener: (subject: string) => void) => {
     const handler = (_event: unknown, subject: string) => listener(subject);
-    ipcRenderer.on('baton:activity-open', handler);
-    return () => ipcRenderer.removeListener('baton:activity-open', handler);
+    ipcRenderer.on('kovan:activity-open', handler);
+    return () => ipcRenderer.removeListener('kovan:activity-open', handler);
   },
 
   // Connection problems (item 120)
-  problems: () => ipcRenderer.invoke('baton:problems'),
+  problems: () => ipcRenderer.invoke('kovan:problems'),
   onProblems: (listener: (update: unknown) => void) => {
     const handler = (_event: unknown, update: unknown) => listener(update);
-    ipcRenderer.on('baton:problems', handler);
-    return () => ipcRenderer.removeListener('baton:problems', handler);
+    ipcRenderer.on('kovan:problems', handler);
+    return () => ipcRenderer.removeListener('kovan:problems', handler);
   },
 
   // Log (item 83)
-  logError: (report: unknown) => ipcRenderer.invoke('baton:error-log', report),
-  revealLog: () => ipcRenderer.invoke('baton:log-reveal'),
+  logError: (report: unknown) => ipcRenderer.invoke('kovan:error-log', report),
+  revealLog: () => ipcRenderer.invoke('kovan:log-reveal'),
 
   // Workspace
-  workspaces: () => ipcRenderer.invoke('baton:workspaces'),
-  workspaceCreate: () => ipcRenderer.invoke('baton:workspace-create'),
-  workspaceActivate: (id: string) => ipcRenderer.invoke('baton:workspace-activate', id),
-  workspaceAddFolder: (id: string) => ipcRenderer.invoke('baton:workspace-add-folder', id),
+  workspaces: () => ipcRenderer.invoke('kovan:workspaces'),
+  workspaceCreate: () => ipcRenderer.invoke('kovan:workspace-create'),
+  workspaceActivate: (id: string) => ipcRenderer.invoke('kovan:workspace-activate', id),
+  workspaceAddFolder: (id: string) => ipcRenderer.invoke('kovan:workspace-add-folder', id),
   workspaceRemoveFolder: (id: string, folder: string) =>
-    ipcRenderer.invoke('baton:workspace-remove-folder', id, folder),
+    ipcRenderer.invoke('kovan:workspace-remove-folder', id, folder),
   workspaceReorder: (id: string, folders: string[]) =>
-    ipcRenderer.invoke('baton:workspace-reorder', id, folders),
-  workspaceForget: (id: string) => ipcRenderer.invoke('baton:workspace-forget', id),
+    ipcRenderer.invoke('kovan:workspace-reorder', id, folders),
+  workspaceForget: (id: string) => ipcRenderer.invoke('kovan:workspace-forget', id),
   workspaceRepos: (id: string, force?: boolean) =>
-    ipcRenderer.invoke('baton:workspace-repos', id, force),
+    ipcRenderer.invoke('kovan:workspace-repos', id, force),
   workspaceRoots: (id: string, force?: boolean) =>
-    ipcRenderer.invoke('baton:workspace-roots', id, force),
+    ipcRenderer.invoke('kovan:workspace-roots', id, force),
   workspaceRename: (id: string, name: string) =>
-    ipcRenderer.invoke('baton:workspace-rename', id, name),
-  workspaceStatus: (repo: string) => ipcRenderer.invoke('baton:workspace-status', repo),
+    ipcRenderer.invoke('kovan:workspace-rename', id, name),
+  workspaceStatus: (repo: string) => ipcRenderer.invoke('kovan:workspace-status', repo),
   workspaceDiff: (repo: string, file: string, side: string, from?: string, context?: number) =>
-    ipcRenderer.invoke('baton:workspace-diff', repo, file, side, from, context),
+    ipcRenderer.invoke('kovan:workspace-diff', repo, file, side, from, context),
   workspaceRevert: (repo: string, changes: unknown[]) =>
-    ipcRenderer.invoke('baton:workspace-revert', repo, changes),
-  workspaceTree: (dir: string) => ipcRenderer.invoke('baton:workspace-tree', dir),
-  workspaceRead: (file: string) => ipcRenderer.invoke('baton:workspace-read', file),
+    ipcRenderer.invoke('kovan:workspace-revert', repo, changes),
+  workspaceTree: (dir: string) => ipcRenderer.invoke('kovan:workspace-tree', dir),
+  workspaceRead: (file: string) => ipcRenderer.invoke('kovan:workspace-read', file),
   workspaceWrite: (file: string, text: string, expected?: unknown) =>
-    ipcRenderer.invoke('baton:workspace-write', file, text, expected),
+    ipcRenderer.invoke('kovan:workspace-write', file, text, expected),
 
   // Terminals
-  sessions: () => ipcRenderer.invoke('baton:sessions'),
-  sessionBuffer: (id: string) => ipcRenderer.invoke('baton:session-buffer', id),
-  sessionWrite: (id: string, data: string) => ipcRenderer.invoke('baton:session-write', id, data),
+  sessions: () => ipcRenderer.invoke('kovan:sessions'),
+  sessionBuffer: (id: string) => ipcRenderer.invoke('kovan:session-buffer', id),
+  sessionWrite: (id: string, data: string) => ipcRenderer.invoke('kovan:session-write', id, data),
   sessionResize: (id: string, cols: number, rows: number) =>
-    ipcRenderer.invoke('baton:session-resize', id, cols, rows),
-  sessionClose: (id: string) => ipcRenderer.invoke('baton:session-close', id),
-  sessionRename: (id: string, title: string) => ipcRenderer.invoke('baton:session-rename', id, title),
+    ipcRenderer.invoke('kovan:session-resize', id, cols, rows),
+  sessionClose: (id: string) => ipcRenderer.invoke('kovan:session-close', id),
+  sessionRename: (id: string, title: string) => ipcRenderer.invoke('kovan:session-rename', id, title),
   openTerminal: (cwd?: string, subject?: string, title?: string) =>
-    ipcRenderer.invoke('baton:open-terminal', cwd, subject, title),
+    ipcRenderer.invoke('kovan:open-terminal', cwd, subject, title),
   onSessionOutput: (listener: (id: string, data: string) => void) => {
     const handler = (_e: unknown, id: string, data: string) => listener(id, data);
-    ipcRenderer.on('baton:session-output', handler);
-    return () => ipcRenderer.removeListener('baton:session-output', handler);
+    ipcRenderer.on('kovan:session-output', handler);
+    return () => ipcRenderer.removeListener('kovan:session-output', handler);
   },
   onSessions: (listener: (list: unknown[]) => void) => {
     const handler = (_e: unknown, list: unknown[]) => listener(list);
-    ipcRenderer.on('baton:sessions', handler);
-    return () => ipcRenderer.removeListener('baton:sessions', handler);
+    ipcRenderer.on('kovan:sessions', handler);
+    return () => ipcRenderer.removeListener('kovan:sessions', handler);
   },
   onFontSizeStep: (listener: (step: number) => void) => {
     const handler = (_e: unknown, step: number) => listener(step);
-    ipcRenderer.on('baton:font-size-step', handler);
-    return () => ipcRenderer.removeListener('baton:font-size-step', handler);
+    ipcRenderer.on('kovan:font-size-step', handler);
+    return () => ipcRenderer.removeListener('kovan:font-size-step', handler);
   }
 };
 
-contextBridge.exposeInMainWorld('baton', api);
+contextBridge.exposeInMainWorld('kovan', api);
 
-export type BatonApi = typeof api;
+export type KovanApi = typeof api;

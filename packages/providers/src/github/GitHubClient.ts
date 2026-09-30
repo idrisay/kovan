@@ -1,4 +1,4 @@
-import type { CancelSignal } from '@baton/host';
+import type { CancelSignal } from '@kovan/host';
 import {
   buildPullSearch,
   checkRunStatus,
@@ -11,7 +11,7 @@ import {
   type PullSummary,
   type RepoRef,
   type ReviewDecision
-} from '@baton/core';
+} from '@kovan/core';
 import type { HttpClient } from '../http';
 
 /** The pull request for the checked-out branch, with its review detail. */
@@ -113,7 +113,7 @@ const ACTIVITY_FIELDS = `
 const MERGED_FIELDS = PULL_FIELDS.replace('  reviewThreads(first: 100) { nodes { isResolved } }\n', '');
 
 const QUEUES_QUERY = `
-query BatonPullQueues($mine: String!, $review: String!, $merged: String!,
+query KovanPullQueues($mine: String!, $review: String!, $merged: String!,
                       $first: Int!, $mergedFirst: Int!) {
   viewer { login }
   rateLimit { cost remaining limit resetAt }
@@ -138,7 +138,7 @@ query BatonPullQueues($mine: String!, $review: String!, $merged: String!,
  * blank the list of things actually blocked on you.
  */
 const MERGED_QUERY = `
-query BatonMerged($merged: String!, $first: Int!) {
+query KovanMerged($merged: String!, $first: Int!) {
   merged: search(query: $merged, type: ISSUE, first: $first) {
     issueCount
     nodes { ... on PullRequest { ${MERGED_FIELDS} } }

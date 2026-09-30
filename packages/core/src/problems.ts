@@ -44,7 +44,7 @@ export function describeProblem(provider: ProviderId, raw: string): { title: str
     return { title: `${name} rejected the token`, detail: 'check it in Settings' };
   }
   if (/\b403\b|forbidden/i.test(raw)) return { title: `${name} refused access`, detail: 'the token may be missing a permission' };
-  if (/\b429\b|rate.?limit/i.test(raw)) return { title: `${name} is rate limiting Baton`, detail: 'too many requests; it waits and tries again' };
+  if (/\b429\b|rate.?limit/i.test(raw)) return { title: `${name} is rate limiting Kovan`, detail: 'too many requests; it waits and tries again' };
   if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ENETUNREACH|EHOSTUNREACH|network|fetch failed|offline|socket hang up/i.test(raw)) {
     return { title: `${name} couldn't be reached`, detail: 'no network, or the service is down' };
   }

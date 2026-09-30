@@ -1,11 +1,11 @@
 /**
- * Baton's side of the terminal host (item 114; the host is `ptyHost.ts`).
+ * Kovan's side of the terminal host (item 114; the host is `ptyHost.ts`).
  *
  * On start it connects to every host this profile has running — the one a
- * previous Baton left, and one from before an update still serving its own
+ * previous Kovan left, and one from before an update still serving its own
  * sessions — and hands their sessions back to `Sessions`. New sessions go to
  * the host matching this build, started on first use. When a host can't be
- * started, a session runs inside Baton as it used to, and ends with it.
+ * started, a session runs inside Kovan as it used to, and ends with it.
  *
  * Hosts are told apart by build: a host keeps using the node-pty it was
  * started with, so a new build gets a host of its own rather than sending new
@@ -25,7 +25,7 @@ const PROTOCOL = 1;
 
 export interface Pty {
   readonly pid: number;
-  /** Whether it lives in the terminal host, and so outlives Baton. */
+  /** Whether it lives in the terminal host, and so outlives Kovan. */
   readonly hosted: boolean;
   onData(listener: (data: string) => void): void;
   onExit(listener: (event: { exitCode: number }) => void): void;
@@ -34,7 +34,7 @@ export interface Pty {
   kill(): void;
   /** The foreground program's name, as node-pty's `process`. */
   foreground(): Promise<string>;
-  /** What a restarted Baton gets back with this session. */
+  /** What a restarted Kovan gets back with this session. */
   describe(meta: unknown): void;
 }
 
@@ -170,7 +170,7 @@ export class PtyHosts {
   }
 
   private get prefix(): string {
-    return `baton-pty-${createHash('sha1').update(this.userData).digest('hex').slice(0, 8)}-`;
+    return `kovan-pty-${createHash('sha1').update(this.userData).digest('hex').slice(0, 8)}-`;
   }
 
   private socketFile?: string;
@@ -189,7 +189,7 @@ export class PtyHosts {
     return path.join(os.tmpdir(), `${this.prefix}${build}.sock`);
   }
 
-  /** Every session a host of this profile still has — running or finished while Baton was away. */
+  /** Every session a host of this profile still has — running or finished while Kovan was away. */
   async restore(): Promise<RestoredPty[]> {
     let names: string[] = [];
     try { names = readdirSync(os.tmpdir()).filter((n) => n.startsWith(this.prefix) && n.endsWith('.sock')); } catch { return []; }
@@ -248,7 +248,7 @@ export class PtyHosts {
       }
     }
     if (!connection) {
-      this.log('terminal host did not answer; sessions run inside Baton');
+      this.log('terminal host did not answer; sessions run inside Kovan');
       return undefined;
     }
     const hello = await connection.hello();
@@ -258,7 +258,7 @@ export class PtyHosts {
     return connection;
   }
 
-  /** Baton is going; its hosts and their sessions stay. */
+  /** Kovan is going; its hosts and their sessions stay. */
   detach(): void {
     for (const c of this.connections) c.close();
     this.connections.length = 0;
@@ -266,7 +266,7 @@ export class PtyHosts {
   }
 }
 
-/** A session inside Baton itself, as before the host: it ends when Baton does. */
+/** A session inside Kovan itself, as before the host: it ends when Kovan does. */
 export function localPty(options: Omit<SpawnOptions, 'id' | 'meta'>): Pty {
   const pty = spawnLocal(options.file, options.args, {
     name: 'xterm-256color', cols: options.cols, rows: options.rows, cwd: options.cwd, env: options.env

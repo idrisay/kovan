@@ -3,7 +3,7 @@
  *
  * It used to open the environment's base URL, which for a signed-in visitor
  * redirects to the dashboard — never the page the agent was checking. Agents
- * now write the page address next to each screenshot in `$BATON_PAGES`
+ * now write the page address next to each screenshot in `$KOVAN_PAGES`
  * ("02-lesson-page.png https://…"), so the button opens the page of the
  * screenshot you are looking at. Older runs have no such file; for them the
  * last address on the same site in the report is the best guess. Only pages

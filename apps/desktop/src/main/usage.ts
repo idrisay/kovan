@@ -1,5 +1,5 @@
 /**
- * Token usage per Baton session, read from the agents' own logs.
+ * Token usage per Kovan session, read from the agents' own logs.
  *
  * ## How a terminal is tied to its agent's log
  *
@@ -17,7 +17,7 @@
  *
  * Logs are read incrementally (from the last offset), so a long transcript is
  * read once, not every tick. The totals are kept in `usage.json`, so a
- * ticket's cost survives the sessions being closed and Baton restarting.
+ * ticket's cost survives the sessions being closed and Kovan restarting.
  */
 
 import { execFile } from 'node:child_process';
@@ -33,7 +33,7 @@ import {
   type ModelUsage,
   type QuickJob,
   type UsageRecord
-} from '@baton/core';
+} from '@kovan/core';
 import type { DesktopHost } from './host';
 import type { Sessions, SessionInfo } from './sessions';
 
@@ -49,7 +49,7 @@ interface Reader {
 
 interface Tracked {
   readers: Map<string, Reader>;
-  /** When the Baton session started: earlier transcript lines aren't its own. */
+  /** When the Kovan session started: earlier transcript lines aren't its own. */
   since?: number;
   /** Stops one last read being repeated forever for a closed session. */
   finished: boolean;

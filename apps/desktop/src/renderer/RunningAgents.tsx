@@ -1,6 +1,6 @@
 /**
  * The Sessions tab's "Running agents": every Claude Code, Codex and opencode
- * process on this Mac — in Baton or in any other terminal — with how long it
+ * process on this Mac — in Kovan or in any other terminal — with how long it
  * has been idle, what it started, and a Stop that always asks first.
  *
  * The scanning and the signals are `main/running.ts`; this only shows the
@@ -16,7 +16,7 @@ import {
   type AgentGroup,
   type AgentsReport,
   type RunningAgent
-} from '@baton/core';
+} from '@kovan/core';
 import { useQuickJobs } from './QuickJobs';
 import { SessionUsageChip } from './Usage';
 import { ChevronIcon } from './icons';
@@ -38,8 +38,8 @@ function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   if (!started) {
     started = true;
-    void window.baton.runningAgents().then(publish);
-    window.baton.onRunningAgents(publish);
+    void window.kovan.runningAgents().then(publish);
+    window.kovan.onRunningAgents(publish);
   }
   return () => listeners.delete(listener);
 }
@@ -82,7 +82,7 @@ export function RunningAgentsRow({ selected, onSelect }: { selected: boolean; on
 // --- The pane -------------------------------------------------------------------------
 
 const GROUPS: { id: AgentGroup; label: string }[] = [
-  { id: 'baton', label: 'In Baton' },
+  { id: 'kovan', label: 'In Kovan' },
   { id: 'terminal', label: 'Other terminals' },
   { id: 'background', label: 'Background, no terminal' }
 ];
@@ -105,8 +105,8 @@ export function RunningAgentsPane({
 
   // Fast scans, with ports, only while this pane is on screen.
   useEffect(() => {
-    void window.baton.runningAgentsWatch(true).then(publish);
-    return () => void window.baton.runningAgentsWatch(false);
+    void window.kovan.runningAgentsWatch(true).then(publish);
+    return () => void window.kovan.runningAgentsWatch(false);
   }, []);
 
   const idle = idleAgents(r);
@@ -118,7 +118,7 @@ export function RunningAgentsPane({
   const stop = async (keys: string[]) => {
     setConfirm(undefined);
     setProgress((p) => ({ ...p, ...Object.fromEntries(keys.map((k) => [k, { phase: 'stopping' } as Progress])) }));
-    const outcomes = await window.baton.runningAgentsStop(keys, children);
+    const outcomes = await window.kovan.runningAgentsStop(keys, children);
     setProgress((p) => {
       const next = { ...p };
       for (const o of outcomes) {
@@ -132,7 +132,7 @@ export function RunningAgentsPane({
 
   const force = async (key: string) => {
     setProgress((p) => ({ ...p, [key]: { phase: 'stopping' } }));
-    const o = await window.baton.runningAgentsForce(key);
+    const o = await window.kovan.runningAgentsForce(key);
     setProgress((p) => {
       const next = { ...p };
       if (o.left > 0) next[key] = { phase: 'left', left: o.left };
@@ -159,7 +159,7 @@ export function RunningAgentsPane({
             </div>
             <div className="detail-meta">
               <span>
-                Claude Code, Codex and opencode on this Mac, in Baton and in any other terminal.
+                Claude Code, Codex and opencode on this Mac, in Kovan and in any other terminal.
                 Idle means nothing for over {formatIdle(r.idleMs)}. Change that in Settings.
               </span>
             </div>
@@ -225,7 +225,7 @@ export function RunningAgentsPane({
                       <span className="agent-title">{QUICK_KIND_LABEL[job.kind]} · {job.subject}</span>
                       <span className="agent-actions">
                         {match && <button type="button" className="ghost" onClick={() => onOpenSubject(match)}>Open</button>}
-                        <button type="button" className="agents-stop" onClick={() => void window.baton.quickCancel(job.kind, job.subject)}>
+                        <button type="button" className="agents-stop" onClick={() => void window.kovan.quickCancel(job.kind, job.subject)}>
                           Cancel
                         </button>
                       </span>

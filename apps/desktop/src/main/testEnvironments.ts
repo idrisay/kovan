@@ -1,7 +1,7 @@
 import {
   DEFAULT_ENVIRONMENTS, accountEnvVars, accountPasswordKey, basicPasswordKey, newTestId,
   type TestAccount, type TestEnvironment
-} from '@baton/core';
+} from '@kovan/core';
 import type { DesktopHost } from './host';
 
 /** What Settings and the run sheet see: no passwords, only whether one is saved. */
@@ -39,7 +39,7 @@ export class TestEnvironments {
   constructor(private readonly host: DesktopHost) {}
 
   /**
-   * The single environment Baton had before this — `verify.site`,
+   * The single environment Kovan had before this — `verify.site`,
    * `verify.username` and friends — becomes the first entry the first time
    * anything asks, with its username as one account and its passwords copied
    * to the new keys. The old keys are left where they were, so going back to
@@ -154,8 +154,8 @@ export class TestEnvironments {
     const vars = accountEnvVars(resolved.accounts, passwords);
     if (resolved.environment.basicAuth) {
       const basicPassword = await this.host.secrets.get(basicPasswordKey(resolved.environment.id));
-      if (resolved.environment.basicUsername) vars['BATON_ENV_BASIC_USER'] = resolved.environment.basicUsername;
-      if (basicPassword) vars['BATON_ENV_BASIC_PASSWORD'] = basicPassword;
+      if (resolved.environment.basicUsername) vars['KOVAN_ENV_BASIC_USER'] = resolved.environment.basicUsername;
+      if (basicPassword) vars['KOVAN_ENV_BASIC_PASSWORD'] = basicPassword;
     }
     return vars;
   }

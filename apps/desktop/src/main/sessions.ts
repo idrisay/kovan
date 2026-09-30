@@ -16,7 +16,7 @@
  * dead screen. It is also how a `-l` shell's profile — nvm, asdf, PATH — is
  * in force for the agent.
  *
- * The prompt never appears in that typed line; see `@baton/agent`'s
+ * The prompt never appears in that typed line; see `@kovan/agent`'s
  * `shellLine`, which routes it through a file.
  */
 
@@ -29,9 +29,9 @@ import {
   type AgentRun,
   type Runner,
   type RunKind
-} from '@baton/agent';
-import { EventEmitter } from '@baton/host';
-import { usefulTerminalTitle } from '@baton/core';
+} from '@kovan/agent';
+import { EventEmitter } from '@kovan/host';
+import { usefulTerminalTitle } from '@kovan/core';
 import { scanForBell, scanForTitles } from './bell';
 import type { AgentState, StatusSource } from './agentStatus';
 import { localPty, type Pty, type PtyHosts } from './ptyClient';
@@ -79,7 +79,7 @@ export interface SessionInfo {
   /** When `status` last changed, epoch ms — what "seen" is measured against. */
   statusAt?: number;
   statusSource?: StatusSource;
-  /** Whether it lives in the terminal host and outlives Baton (item 114). */
+  /** Whether it lives in the terminal host and outlives Kovan (item 114). */
   hosted?: boolean;
 }
 
@@ -108,10 +108,10 @@ export class Sessions {
   readonly onDidChange = this.changed.event;
 
   constructor(
-    /** The ticket a program's title names, when it names one Baton knows. */
+    /** The ticket a program's title names, when it names one Kovan knows. */
     private readonly ticketIn: (text: string) => string | undefined = () => undefined,
     private readonly options: {
-      /** The terminal host (item 114); without it sessions end with Baton. */
+      /** The terminal host (item 114); without it sessions end with Kovan. */
       hosts?: PtyHosts;
       /** Where agents write their status (item 112), handed to every session. */
       statusDir?: string;
@@ -125,7 +125,7 @@ export class Sessions {
   }
 
   /**
-   * Tells the list, and each host what to give back to a restarted Baton.
+   * Tells the list, and each host what to give back to a restarted Kovan.
    * Only on a real change — never per chunk of output.
    */
   private publish(): void {
@@ -144,7 +144,7 @@ export class Sessions {
   }
 
   /**
-   * The sessions a terminal host kept while Baton was away (item 114), as
+   * The sessions a terminal host kept while Kovan was away (item 114), as
    * they were left: still running, or finished with their scrollback.
    */
   async restore(): Promise<number> {
@@ -220,12 +220,12 @@ export class Sessions {
         ...base,
         ...options.env,
         TERM: 'xterm-256color',
-        // Tells a prompt or a wrapper that it is inside Baton, the way
+        // Tells a prompt or a wrapper that it is inside Kovan, the way
         // TERM_PROGRAM does for other terminals.
-        TERM_PROGRAM: 'Baton',
+        TERM_PROGRAM: 'Kovan',
         // Which session an agent's status hook writes for (item 112).
-        BATON_SESSION_ID: id,
-        ...(this.options.statusDir ? { BATON_STATUS_DIR: this.options.statusDir } : {})
+        KOVAN_SESSION_ID: id,
+        ...(this.options.statusDir ? { KOVAN_STATUS_DIR: this.options.statusDir } : {})
       },
       meta: info
     };
@@ -439,7 +439,7 @@ export class Sessions {
     this.publish();
   }
 
-  /** Ends every session — for tests, and a Baton with no terminal host. */
+  /** Ends every session — for tests, and a Kovan with no terminal host. */
   disposeAll(): void {
     for (const id of [...this.sessions.keys()]) {
       this.close(id);
@@ -449,8 +449,8 @@ export class Sessions {
   }
 
   /**
-   * Baton is quitting (item 114): sessions in the terminal host keep
-   * running and come back on the next start; any that live inside Baton
+   * Kovan is quitting (item 114): sessions in the terminal host keep
+   * running and come back on the next start; any that live inside Kovan
    * (no host could be started) end with it.
    */
   detachAll(): void {

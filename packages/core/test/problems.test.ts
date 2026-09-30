@@ -10,7 +10,7 @@ describe('describeProblem', () => {
 
   it('names a rejected token, a rate limit, no network and a server error', () => {
     expect(describeProblem('github', 'HTTP 401 Bad credentials').title).toBe('GitHub rejected the token');
-    expect(describeProblem('jira', 'HTTP 429 Too Many Requests').title).toBe('Jira is rate limiting Baton');
+    expect(describeProblem('jira', 'HTTP 429 Too Many Requests').title).toBe('Jira is rate limiting Kovan');
     expect(describeProblem('jira', 'getaddrinfo ENOTFOUND acme.atlassian.net').title).toBe("Jira couldn't be reached");
     expect(describeProblem('sentry', 'HTTP 502 Bad Gateway')).toEqual({ title: 'Sentry had a server error', detail: 'HTTP 502; usually passes' });
   });
@@ -43,7 +43,7 @@ describe('trackProblems', () => {
     expect(two.started.map((p) => p.title)).toEqual(['Jira rejected the token']);
     expect(two.log.map((p) => [p.title, p.clearedAt])).toEqual([
       ['Jira rejected the token', undefined],
-      ['Jira is rate limiting Baton', 2000]
+      ['Jira is rate limiting Kovan', 2000]
     ]);
   });
 

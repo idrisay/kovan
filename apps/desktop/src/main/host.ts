@@ -2,7 +2,7 @@
  * The Electron half of the `Host` seam.
  *
  * Its opposite number is the VS Code implementation in the extension. Neither
- * knows about the other; `@baton/providers` sees only the interface.
+ * knows about the other; `@kovan/providers` sees only the interface.
  */
 
 import { app, safeStorage } from 'electron';
@@ -17,8 +17,8 @@ import {
   type Host,
   type Logger,
   type SecretStore
-} from '@baton/host';
-import { DEFAULT_SETTINGS, type Settings } from '@baton/core';
+} from '@kovan/host';
+import { DEFAULT_SETTINGS, type Settings } from '@kovan/core';
 import { appendLog } from './logFile';
 
 const STATE_DIR = () => app.getPath('userData');

@@ -3,12 +3,12 @@
  *
  * Before this, every log line went to stdout, which the installed app has
  * nowhere to send: a crash in the window left a black screen and no trace.
- * Now every line also lands in `~/Library/Logs/Baton/baton.log` — the folder
+ * Now every line also lands in `~/Library/Logs/Kovan/kovan.log` — the folder
  * Console.app already lists under Log Reports — and so does anything that
  * crashes in main or in the window.
  *
  * Appending a line is the only work it does. When the file passes 1 MB it is
- * renamed to `baton.1.log` (replacing the previous one), so the two files
+ * renamed to `kovan.1.log` (replacing the previous one), so the two files
  * together never hold more than about 2 MB.
  */
 
@@ -27,7 +27,7 @@ export function logFilePath(): string {
   if (!file) {
     const dir = app.getPath('logs');
     mkdirSync(dir, { recursive: true });
-    file = path.join(dir, 'baton.log');
+    file = path.join(dir, 'kovan.log');
     try {
       written = statSync(file).size;
     } catch {
@@ -50,7 +50,7 @@ export function appendLog(level: string, message: string, args: readonly unknown
     const text = [message, ...args.map(format)].join(' ');
     const line = `${new Date().toISOString()} [${level}] ${text}\n`;
     if (written + line.length > MAX_BYTES) {
-      renameSync(target, path.join(path.dirname(target), 'baton.1.log'));
+      renameSync(target, path.join(path.dirname(target), 'kovan.1.log'));
       written = 0;
     }
     appendFileSync(target, line, { mode: 0o600 });

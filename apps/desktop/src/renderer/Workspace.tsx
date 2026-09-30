@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { changeMarks, moveBy, moveItem, type ChangeMark } from '@baton/core';
+import { changeMarks, moveBy, moveItem, type ChangeMark } from '@kovan/core';
 import { useMenuDismiss } from './menuDismiss';
 import { Editor, formatBytes, statusFor } from './Editor';
 import { rememberFile } from './QuickOpen';
@@ -97,7 +97,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
   const workspace = list.find((w) => w.id === active);
 
   const loadWorkspaces = useCallback(async () => {
-    const { list: all, active: id } = await window.baton.workspaces();
+    const { list: all, active: id } = await window.kovan.workspaces();
     setList(all);
     setActive((previous) => (previous && all.some((w) => w.id === previous) ? previous : id));
   }, []);
@@ -117,7 +117,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
   const refreshStatuses = useCallback(async (bump = true) => {
     if (!roots) return;
     const pairs = await Promise.all(
-      reposOf(roots).map(async (r) => [r.path, await window.baton.workspaceStatus(r.path)] as const)
+      reposOf(roots).map(async (r) => [r.path, await window.kovan.workspaceStatus(r.path)] as const)
     );
     setStatuses(Object.fromEntries(pairs));
     if (bump) setRevision((r) => r + 1);
@@ -155,11 +155,11 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
   const loadRoots = useCallback(async (id: string, force = false) => {
     setBusy(true);
     try {
-      const found = await window.baton.workspaceRoots(id, force);
+      const found = await window.kovan.workspaceRoots(id, force);
       setRoots(found);
       const pairs = await Promise.all(
         reposOf(found).map(
-          async (r) => [r.path, await window.baton.workspaceStatus(r.path)] as const
+          async (r) => [r.path, await window.kovan.workspaceStatus(r.path)] as const
         )
       );
       setStatuses(Object.fromEntries(pairs));
@@ -174,7 +174,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
     setRoots(undefined);
     setBusy(true);
     void (async () => {
-      const found = await window.baton.workspaceRoots(active);
+      const found = await window.kovan.workspaceRoots(active);
       if (cancelled) return;
       setRoots(found);
       // Every folder of the workspace starts open. That is the whole point of
@@ -183,7 +183,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
       setExpanded(new Set(found.map((r) => r.folder)));
       const pairs = await Promise.all(
         reposOf(found).map(
-          async (r) => [r.path, await window.baton.workspaceStatus(r.path)] as const
+          async (r) => [r.path, await window.kovan.workspaceStatus(r.path)] as const
         )
       );
       if (cancelled) return;
@@ -197,7 +197,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
   const ensure = useCallback((dir: string) => {
     if (entries.has(dir) || failed.has(dir) || loading.current.has(dir)) return;
     loading.current.add(dir);
-    void window.baton
+    void window.kovan
       .workspaceTree(dir)
       .then((list_) => setEntries((map) => new Map(map).set(dir, list_)))
       .catch((e: Error) => setFailed((map) => new Map(map).set(dir, e.message)))
@@ -230,7 +230,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
   }, [active, loadRoots]);
 
   const createWorkspace = useCallback(() => {
-    void window.baton.workspaceCreate().then(async (made) => {
+    void window.kovan.workspaceCreate().then(async (made) => {
       if (!made) return;
       await loadWorkspaces();
       setActive(made.id);
@@ -239,7 +239,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
 
   const addFolder = useCallback(() => {
     if (!active) return;
-    void window.baton.workspaceAddFolder(active).then(async (updated) => {
+    void window.kovan.workspaceAddFolder(active).then(async (updated) => {
       if (!updated) return;
       await loadWorkspaces();
       // Force, because the repo scan is cached per workspace and the new
@@ -254,7 +254,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
    */
   const removeFolder = useCallback((folder: string) => {
     if (!active) return;
-    void window.baton.workspaceRemoveFolder(active, folder).then(async (updated) => {
+    void window.kovan.workspaceRemoveFolder(active, folder).then(async (updated) => {
       if (!updated) return;
       await loadWorkspaces();
       await loadRoots(active, true);
@@ -271,7 +271,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
     if (!active || !roots) return;
     const byFolder = new Map(roots.map((r) => [r.folder, r]));
     setRoots(order.flatMap((f) => byFolder.get(f) ?? []));
-    void window.baton.workspaceReorder(active, order).then(async (updated) => {
+    void window.kovan.workspaceReorder(active, order).then(async (updated) => {
       if (updated) await loadWorkspaces();
       else await loadRoots(active, true);
     });
@@ -295,12 +295,12 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
 
   const renameWorkspace = useCallback((name: string) => {
     if (!active) return;
-    void window.baton.workspaceRename(active, name).then(() => void loadWorkspaces());
+    void window.kovan.workspaceRename(active, name).then(() => void loadWorkspaces());
   }, [active, loadWorkspaces]);
 
   const forgetWorkspace = useCallback(() => {
     if (!active) return;
-    void window.baton.workspaceForget(active).then(async () => {
+    void window.kovan.workspaceForget(active).then(async () => {
       setActive(undefined);
       await loadWorkspaces();
     });
@@ -413,11 +413,11 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
   const revert = useCallback(async (repoPath: string, changesToRevert: FileChange[]) => {
     setReverting(true);
     try {
-      await window.baton.workspaceRevert(repoPath, changesToRevert);
+      await window.kovan.workspaceRevert(repoPath, changesToRevert);
       for (const c of changesToRevert) {
         close(`diff:${c.side}:${repoPath}/${c.path}`);
       }
-      const fresh = await window.baton.workspaceStatus(repoPath);
+      const fresh = await window.kovan.workspaceStatus(repoPath);
       setStatuses((s) => ({ ...s, [repoPath]: fresh }));
       setRevision((r) => r + 1);
     } finally {
@@ -483,7 +483,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
                 open={!shutRoot}
                 onToggle={() => setShutRoot((v) => !v)}
                 onAddFolder={addFolder}
-                onSwitch={(id) => { setActive(id); void window.baton.workspaceActivate(id); }}
+                onSwitch={(id) => { setActive(id); void window.kovan.workspaceActivate(id); }}
                 onCreate={createWorkspace}
                 onRename={renameWorkspace}
                 onForget={forgetWorkspace}
@@ -1283,7 +1283,7 @@ function NoWorkspace({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="ws-empty">
       <p className="quiet">
-        A workspace is a folder Baton looks inside. It finds every git clone under it, so you
+        A workspace is a folder Kovan looks inside. It finds every git clone under it, so you
         can read — and edit — the code behind a ticket without leaving the app.
       </p>
       <button className="primary" onClick={onCreate}>Choose a folder</button>
@@ -1296,7 +1296,7 @@ function NoWorkspace({ onCreate }: { onCreate: () => void }) {
 
 /** Enough context lines to cover any file: the diff becomes one hunk. */
 const WHOLE_FILE = 1_000_000;
-const WHOLE_KEY = 'baton.diff-whole-file';
+const WHOLE_KEY = 'kovan.diff-whole-file';
 
 function loadWhole(): boolean {
   try { return localStorage.getItem(WHOLE_KEY) === '1'; } catch { return false; }
@@ -1344,7 +1344,7 @@ function TabBody({
   useEffect(() => {
     if (tab.kind !== 'file') return undefined;
     let cancelled = false;
-    void window.baton.workspaceRead(tab.path)
+    void window.kovan.workspaceRead(tab.path)
       .then((b) => { if (!cancelled) setBody(b); })
       .catch((e: Error) => { if (!cancelled) setError(e.message); });
     return () => { cancelled = true; };
@@ -1356,7 +1356,7 @@ function TabBody({
   useEffect(() => {
     let cancelled = false;
     if (tab.kind === 'diff') {
-      void window.baton
+      void window.kovan
         .workspaceDiff(tab.repo!, tab.path, tab.side!, tab.from, whole ? WHOLE_FILE : undefined)
         .then((d) => {
           if (cancelled) return;
@@ -1369,7 +1369,7 @@ function TabBody({
         .catch((e: Error) => { if (!cancelled) setError(e.message); });
     } else if (repo) {
       const relative = tab.path.slice(repo.length + 1);
-      void window.baton
+      void window.kovan
         .workspaceDiff(repo, relative, untracked ? 'untracked' : 'unstaged')
         .then((d) => { if (!cancelled) setMarks(changeMarks(d.hunks)); })
         // No bars is the honest answer when git can't say (an ignored file).

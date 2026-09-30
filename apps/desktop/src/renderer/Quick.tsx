@@ -4,7 +4,7 @@
  *
  * A third button weight, on purpose. Solid clay writes code, outline clay
  * reads and judges — both are agent runs. This one is neither: a free, slower
- * model that only turns text Baton already has into shorter text, so it gets
+ * model that only turns text Kovan already has into shorter text, so it gets
  * its own dashed blue look and a "free" tag rather than one more clay pill
  * that could be mistaken for "Unblock in an agent".
  */
@@ -14,7 +14,7 @@ import { useMenuDismiss } from './menuDismiss';
 import {
   NV_REVIEW_DEFAULT_MODEL, NV_REVIEW_SUFFIX, REVIEW_EVENT_LABEL, describeChange, formatAge, isNvReviewModel, priceFor, reviewModelName,
   type PriceRule, type QuickBasis, type QuickKind, type QuickResult, type ReviewEvent, type ReviewVerdict
-} from '@baton/core';
+} from '@kovan/core';
 import { Prose } from './Prose';
 import { CheckIcon, ChevronIcon, CloseIcon, CopyIcon } from './icons';
 import { useFold } from './folds';
@@ -29,8 +29,8 @@ export function useQuick(kind: QuickKind, subject: string) {
   useEffect(() => {
     let live = true;
     setState({});
-    void window.baton.quickState(kind, subject).then((s) => live && setState(s));
-    const off = window.baton.onQuick((k, s, next) => {
+    void window.kovan.quickState(kind, subject).then((s) => live && setState(s));
+    const off = window.kovan.onQuick((k, s, next) => {
       if (k === kind && s === subject) setState(next);
     });
     return () => {
@@ -41,9 +41,9 @@ export function useQuick(kind: QuickKind, subject: string) {
 
   return {
     state,
-    run: useCallback(() => void window.baton.quickRun(kind, subject), [kind, subject]),
-    cancel: useCallback(() => void window.baton.quickCancel(kind, subject), [kind, subject]),
-    dismiss: useCallback(() => void window.baton.quickDismiss(kind, subject), [kind, subject])
+    run: useCallback(() => void window.kovan.quickRun(kind, subject), [kind, subject]),
+    cancel: useCallback(() => void window.kovan.quickCancel(kind, subject), [kind, subject]),
+    dismiss: useCallback(() => void window.kovan.quickDismiss(kind, subject), [kind, subject])
   };
 }
 
@@ -67,21 +67,21 @@ function LinesIcon() {
   );
 }
 
-const MODEL_CHANGED = 'baton:quick-model-changed';
+const MODEL_CHANGED = 'kovan:quick-model-changed';
 
 /** The model a quick action runs on, kept in step across every button showing it. */
 function useQuickModel(kind: QuickKind): [string, (model: string) => Promise<void>] {
   const [model, setModel] = useState('');
   useEffect(() => {
     let live = true;
-    const load = () => void window.baton.quickModel(kind).then((m) => live && setModel(m));
+    const load = () => void window.kovan.quickModel(kind).then((m) => live && setModel(m));
     load();
     const onChange = (event: Event) => { if ((event as CustomEvent<QuickKind>).detail === kind) load(); };
     window.addEventListener(MODEL_CHANGED, onChange);
     return () => { live = false; window.removeEventListener(MODEL_CHANGED, onChange); };
   }, [kind]);
   const set = useCallback(async (next: string) => {
-    await window.baton.quickModelSet(kind, next);
+    await window.kovan.quickModelSet(kind, next);
     window.dispatchEvent(new CustomEvent(MODEL_CHANGED, { detail: kind }));
   }, [kind]);
   return [model, set];
@@ -183,7 +183,7 @@ function QuickModelPicker({ kind, label, model, alignRight, onPick }: {
   const [typed, setTyped] = useState('');
 
   useEffect(() => {
-    void window.baton.quickModelsAvailable().then(setAvailable);
+    void window.kovan.quickModelsAvailable().then(setAvailable);
   }, []);
 
   const opencodeProviders = [...new Set((available ?? []).map((m) => m.split('/')[0]!))].sort();
@@ -383,7 +383,7 @@ export function CopyResult({ text, what }: { text: string; what: string }) {
     <button
       type="button" className={copied ? 'ghost quick-copy copied' : 'ghost quick-copy'}
       aria-label={label} title={label}
-      onClick={() => void window.baton.copyText(text.trim()).then(() => setCopied(true))}
+      onClick={() => void window.kovan.copyText(text.trim()).then(() => setCopied(true))}
     >
       {copied ? <CheckIcon size={12} /> : <CopyIcon size={12} />}
       {copied ? 'Copied' : 'Copy'}
@@ -435,7 +435,7 @@ export function ReviewDecision({
           Posted as {REVIEW_EVENT_LABEL[event].toLowerCase()}
         </span>
         <span className="quick-card-meta">{formatAge(at)}</span>
-        {url && <button type="button" className="link" onClick={() => void window.baton.openExternal(url)}>View on GitHub</button>}
+        {url && <button type="button" className="link" onClick={() => void window.kovan.openExternal(url)}>View on GitHub</button>}
       </div>
     );
   }
@@ -453,7 +453,7 @@ export function ReviewDecision({
     if (!confirming) return;
     setBusy(true);
     setError(undefined);
-    const outcome = await window.baton.reviewSubmit(subject, confirming)
+    const outcome = await window.kovan.reviewSubmit(subject, confirming)
       .catch((err: unknown) => ({ ok: false, error: err instanceof Error ? err.message : String(err) }));
     setBusy(false);
     if (outcome.ok) setConfirming(undefined);

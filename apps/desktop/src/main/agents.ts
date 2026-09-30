@@ -2,8 +2,8 @@
  * Starting an agent on a piece of work.
  *
  * This is the join between four things that are separately testable and
- * deliberately kept apart: which agents exist (`@baton/agent`), what to say to
- * one (`@baton/core`'s prompts), where to run it (`@baton/git`), and the folder
+ * deliberately kept apart: which agents exist (`@kovan/agent`), what to say to
+ * one (`@kovan/core`'s prompts), where to run it (`@kovan/git`), and the folder
  * that records it (`RunStore`).
  */
 
@@ -31,13 +31,13 @@ import {
   extraDirArgs,
   foldersPromptSection,
   runPageUrl
-} from '@baton/core';
-import { isAppFrame, resolveFrame } from '@baton/core/node';
+} from '@kovan/core';
+import { isAppFrame, resolveFrame } from '@kovan/core/node';
 import { AgentLimitsReader } from './agentLimits';
 import { AgentStatus } from './agentStatus';
-import { RunStore, available, type RunKind, type Runner } from '@baton/agent';
-import { findClones, runTargets, type RunTarget } from '@baton/git';
-import { HttpClient, JiraClient, SentryClient, type RawSentryFrame } from '@baton/providers';
+import { RunStore, available, type RunKind, type Runner } from '@kovan/agent';
+import { findClones, runTargets, type RunTarget } from '@kovan/git';
+import { HttpClient, JiraClient, SentryClient, type RawSentryFrame } from '@kovan/providers';
 import type { DesktopHost } from './host';
 import type { Sessions } from './sessions';
 import type { QuickModel } from './quick';
@@ -301,7 +301,7 @@ export class Agents {
         error: 'No folder to run in. Add a watched folder in Connections first.'
       };
     }
-    // Only folders Baton itself offered — the renderer's list is a request,
+    // Only folders Kovan itself offered — the renderer's list is a request,
     // and these paths end up as command-line arguments.
     const targets = await this.targets();
     const folderOf = (p: string) => targets.find((t) => t.path === p) ?? { label: path.basename(p), path: p };

@@ -1,5 +1,5 @@
 /**
- * The write path, which is the only place in Baton that can destroy your work.
+ * The write path, which is the only place in Kovan that can destroy your work.
  *
  * Electron is mocked because `Workspaces` imports `dialog` for the folder
  * picker; nothing under test here touches it.
@@ -41,8 +41,8 @@ function hostFor(folders: string[]) {
 }
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'baton-ws-'));
-  outside = await mkdtemp(path.join(tmpdir(), 'baton-out-'));
+  root = await mkdtemp(path.join(tmpdir(), 'kovan-ws-'));
+  outside = await mkdtemp(path.join(tmpdir(), 'kovan-out-'));
   workspaces = new Workspaces(hostFor([root]));
   logged.length = 0;
 });
@@ -145,7 +145,7 @@ describe('write', () => {
     await writeFile(file, 'x\n');
     await workspaces.write(file, 'y\n', await stamp(file));
     const { readdir } = await import('node:fs/promises');
-    expect((await readdir(root)).filter((n) => n.startsWith('.baton-'))).toEqual([]);
+    expect((await readdir(root)).filter((n) => n.startsWith('.kovan-'))).toEqual([]);
   });
 
   it('round-trips a save, so the returned stamp is usable for the next one', async () => {

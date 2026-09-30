@@ -5,14 +5,14 @@ import {
   DEFAULT_IDLE_MINUTES, DEFAULT_PRICES, NV_REVIEW_DEFAULT_MODEL, PRICE_CHECK_RUNNERS, QUICK_DEFAULT_MODEL,
   QUICK_DEFAULT_TIMEOUT_SECONDS, applyPriceProposals,
   type Price, type PriceCheckRunner, type PriceProposal, type PriceRule, type ProviderId
-} from '@baton/core';
+} from '@kovan/core';
 import { savePrices, useUsage } from './Usage';
 import { AppearanceSettings } from './AppearanceSettings';
 import { FontSizeControl, useTerminalFontSize } from './terminalFontSize';
 import { TestEnvironmentSettings } from './TestEnvironments';
 import { ChromeSizeControl, ReadingSizeControl, SidebarSizeControl, useChromeSize, useReadingSize, useSidebarSize } from './readingSize';
 import { useAppearance } from './appearance';
-import { ACCENTS, THEMES, speechProvider } from '@baton/core';
+import { ACCENTS, THEMES, speechProvider } from '@kovan/core';
 import { ChevronIcon, CloseIcon, SearchIcon } from './icons';
 
 interface Field {
@@ -67,7 +67,7 @@ const EXTRA_FIELDS: Partial<Record<string, Field[]>> = {
  * dev environment an agent signs into — replacing what used to be a single
  * "Connections" list. Ported in spirit from DevHub's `SettingsView.swift`
  * (sidebar of sections, detail pane on the right), not literally: this is a
- * modal sheet, not a window, and the fields below are exactly what Baton's
+ * modal sheet, not a window, and the fields below are exactly what Kovan's
  * prompts already know how to use.
  */
 /**
@@ -81,7 +81,7 @@ function QuickModelSettings() {
   const [test, setTest] = useState<{ running?: boolean; ok?: boolean; text?: string }>({});
 
   useEffect(() => {
-    void window.baton.settings().then((settings) => {
+    void window.kovan.settings().then((settings) => {
       setModel(typeof settings['quick.model'] === 'string' ? settings['quick.model'] : '');
       const seconds = settings['quick.timeoutSeconds'];
       if (typeof seconds === 'number') setTimeoutSeconds(String(seconds));
@@ -91,7 +91,7 @@ function QuickModelSettings() {
 
   async function runTest() {
     setTest({ running: true });
-    const result = await window.baton.quickTest(model.trim() || undefined);
+    const result = await window.kovan.quickTest(model.trim() || undefined);
     setTest(
       result.ok
         ? { ok: true, text: `Answered in ${(result.ms / 1000).toFixed(1)}s` }
@@ -103,7 +103,7 @@ function QuickModelSettings() {
     <>
       <h3>Quick model</h3>
       <p className="settings-note">
-        Used only by Summarize on a pull request and Condense on a ticket. It reads text Baton already has and
+        Used only by Summarize on a pull request and Condense on a ticket. It reads text Kovan already has and
         returns text, with every tool call refused. Agent runs never use it.
       </p>
       <p className="settings-note">
@@ -119,7 +119,7 @@ function QuickModelSettings() {
           placeholder={QUICK_DEFAULT_MODEL}
           value={model}
           onChange={(e) => setModel(e.target.value)}
-          onBlur={() => void window.baton.setSetting('quick.model', model.trim())}
+          onBlur={() => void window.kovan.setSetting('quick.model', model.trim())}
         />
       </label>
       <label>
@@ -132,7 +132,7 @@ function QuickModelSettings() {
           onBlur={() => {
             const seconds = Math.max(10, Math.round(Number(timeout) || QUICK_DEFAULT_TIMEOUT_SECONDS));
             setTimeoutSeconds(String(seconds));
-            void window.baton.setSetting('quick.timeoutSeconds', seconds);
+            void window.kovan.setSetting('quick.timeoutSeconds', seconds);
           }}
         />
       </label>
@@ -143,7 +143,7 @@ function QuickModelSettings() {
           placeholder={NV_REVIEW_DEFAULT_MODEL}
           value={nvModel}
           onChange={(e) => setNvModel(e.target.value)}
-          onBlur={() => void window.baton.setSetting('review.nvModel', nvModel.trim())}
+          onBlur={() => void window.kovan.setSetting('review.nvModel', nvModel.trim())}
         />
       </label>
       <p className="settings-note">
@@ -160,12 +160,12 @@ function QuickModelSettings() {
   );
 }
 
-/** When Running agents calls an agent idle, and whether Baton says so. */
+/** When Running agents calls an agent idle, and whether Kovan says so. */
 function RunningAgentSettings() {
   const [minutes, setMinutes] = useState(String(DEFAULT_IDLE_MINUTES));
   const [remind, setRemind] = useState(true);
   useEffect(() => {
-    void window.baton.settings().then((settings) => {
+    void window.kovan.settings().then((settings) => {
       const stored = Number(settings['agents.idleMinutes']);
       if (stored > 0) setMinutes(String(stored));
       setRemind(settings['agents.remind'] !== false);
@@ -183,7 +183,7 @@ function RunningAgentSettings() {
           onBlur={() => {
             const value = Math.min(1440, Math.max(5, Math.round(Number(minutes)) || DEFAULT_IDLE_MINUTES));
             setMinutes(String(value));
-            void window.baton.setSetting('agents.idleMinutes', value);
+            void window.kovan.setSetting('agents.idleMinutes', value);
           }}
         />
       </label>
@@ -193,7 +193,7 @@ function RunningAgentSettings() {
           checked={remind}
           onChange={(e) => {
             setRemind(e.target.checked);
-            void window.baton.setSetting('agents.remind', e.target.checked);
+            void window.kovan.setSetting('agents.remind', e.target.checked);
           }}
         />
         <span>Remind me when an agent goes idle</span>
@@ -278,7 +278,7 @@ function TokenPriceSettings() {
   );
 }
 
-const PRICE_CHECK_KEY = 'baton.price-check';
+const PRICE_CHECK_KEY = 'kovan.price-check';
 
 function hostOf(url: string): string {
   try { return new URL(url).hostname || url; } catch { return url; }
@@ -323,7 +323,7 @@ function PriceCheckPanel({ rules, fields }: { rules: PriceRule[]; fields: { key:
     setRunning(true);
     setError(undefined);
     setProposals(undefined);
-    const result = await window.baton.priceCheck(runner, model, rules);
+    const result = await window.kovan.priceCheck(runner, model, rules);
     setRunning(false);
     if ('error' in result) {
       setError(result.error);
@@ -374,7 +374,7 @@ function PriceCheckPanel({ rules, fields }: { rules: PriceRule[]; fields: { key:
         {running ? (
           <>
             <span className="settings-note price-check-status">Searching pricing pages… this can take a minute or two.</span>
-            <button type="button" className="link" onClick={() => void window.baton.priceCheckCancel()}>Cancel</button>
+            <button type="button" className="link" onClick={() => void window.kovan.priceCheckCancel()}>Cancel</button>
           </>
         ) : (
           <>
@@ -423,7 +423,7 @@ function PriceCheckPanel({ rules, fields }: { rules: PriceRule[]; fields: { key:
                       ))}
                       <td>
                         {p.source && (
-                          <button type="button" className="link" onClick={() => void window.baton.openExternal(p.source!)}>
+                          <button type="button" className="link" onClick={() => void window.kovan.openExternal(p.source!)}>
                             {hostOf(p.source)}
                           </button>
                         )}
@@ -475,7 +475,7 @@ const SEARCH_INDEX: Record<SectionId, string[]> = {
     'Compact', 'Terminal colours', 'Boosted', 'Color', 'Night'],
   text: ['Terminal font size', 'Ticket and pull request text size', 'Sidebar text size',
     'Tabs, session header and status bar text size', 'Status bar', 'Tabs', 'Font', 'Zoom'],
-  notifications: ['macOS notifications', 'Launch Baton at login', 'Activity', ...ACTIVITY_SETTINGS.map((a) => a.label)],
+  notifications: ['macOS notifications', 'Launch Kovan at login', 'Activity', ...ACTIVITY_SETTINGS.map((a) => a.label)],
   dictation: ['Dictate with double-tap ⌘', 'Speech model', 'Apple Speech', 'whisper.cpp', 'OpenAI Whisper', 'Groq Whisper',
     'Deepgram', 'AssemblyAI', 'API key', 'Model file', 'Language', 'Microphone', 'Voice'],
   agents: ['Quick model', 'Model (opencode)', 'Give up after (seconds)', 'Running agents', 'Idle after (minutes)',
@@ -510,8 +510,8 @@ export function Settings({
   const [fontSize, bumpFontSize] = useTerminalFontSize();
 
   useEffect(() => {
-    void window.baton.credentialFields().then(setFields);
-    void window.baton.settings().then((settings) => {
+    void window.kovan.credentialFields().then(setFields);
+    void window.kovan.settings().then((settings) => {
       const seed: Record<string, string> = {};
       for (const [key, value] of Object.entries(settings)) {
         if (typeof value === 'string') {
@@ -537,8 +537,8 @@ export function Settings({
         // Secrets go to the Keychain via safeStorage, settings to disk. The
         // renderer never reads either back.
         await (field.secret
-          ? window.baton.setSecret(field.key, value)
-          : window.baton.setSetting(field.key, value));
+          ? window.kovan.setSecret(field.key, value)
+          : window.kovan.setSetting(field.key, value));
       }
       // A save that only touched non-secret fields (e.g. fixing a typo'd
       // project slug) never went through `setSecret`, which is the only
@@ -547,8 +547,8 @@ export function Settings({
       // showing "not connected" until the next scheduled poll, which is
       // exactly what looked like "does not return anything".
       if (section !== 'general' && section !== 'environment') {
-        await window.baton.refresh();
-        const missing = await window.baton.missingFields(section as ProviderId);
+        await window.kovan.refresh();
+        const missing = await window.kovan.missingFields(section as ProviderId);
         setSaveResult((r) => ({
           ...r,
           [section]: missing.length === 0
@@ -570,7 +570,7 @@ export function Settings({
 
   async function toggle(key: string, value: boolean, apply: (v: boolean) => void) {
     apply(value);
-    await window.baton.setSetting(key, value);
+    await window.kovan.setSetting(key, value);
   }
 
   function field(f: Field) {
@@ -592,7 +592,7 @@ export function Settings({
   const themeName = (id: string) => THEMES.find((t) => t.id === id)?.label ?? id;
   const on = (key: string) => raw[key] !== false;
 
-  // What each row says about itself when closed — Baton's state in seven lines.
+  // What each row says about itself when closed — Kovan's state in seven lines.
   const summary: Record<SectionId, string> = {
     appearance: [
       appearance.theme === 'system' ? `Match macOS · ${themeName(appearance.dayTheme)} / ${themeName(appearance.nightTheme)}`
@@ -651,7 +651,7 @@ export function Settings({
     const next = open === id && !find ? undefined : id;
     setOpen(next);
     // Summaries follow what was just changed in the section being left.
-    void window.baton.settings().then(setRaw);
+    void window.kovan.settings().then(setRaw);
     if (next && find) {
       // Once the section has rendered, bring the setting that matched into view.
       requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -698,11 +698,11 @@ export function Settings({
           <>
             <label className="checkbox-row">
               <input type="checkbox" checked={notify} onChange={(e) => void toggle('notify.enabled', e.target.checked, setNotify)} />
-              <span>macOS notifications: blocked pull requests, and Activity while Baton isn't in front</span>
+              <span>macOS notifications: blocked pull requests, and Activity while Kovan isn't in front</span>
             </label>
             <label className="checkbox-row">
               <input type="checkbox" checked={launchAtLogin} onChange={(e) => void toggle('launchAtLogin', e.target.checked, setLaunchAtLogin)} />
-              <span>Launch Baton at login</span>
+              <span>Launch Kovan at login</span>
             </label>
             <ActivitySettings />
           </>

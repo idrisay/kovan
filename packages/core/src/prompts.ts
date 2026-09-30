@@ -10,7 +10,7 @@
  * a confidence score and a list of questions, and stops. A high score does not
  * start Stage 2; only the user does.
  *
- * `$DEVHUB_*` became `$BATON_*` — the variables are named in the prompt text,
+ * `$DEVHUB_*` became `$KOVAN_*` — the variables are named in the prompt text,
  * so `packages/agent`'s RUN_ENV and these strings have to agree.
  */
 
@@ -145,13 +145,13 @@ Open the pull request against \${base}, requesting exactly the reviewers I  chos
 
 export const REPORTRULE = `# === LEAVE A RECORD ===
 
-Before you finish, write what you did to \`$BATON_REPORT\`. Baton collects  these into the ticket's own file, so this is what the next person — or the  next you — reads instead of starting again.
+Before you finish, write what you did to \`$KOVAN_REPORT\`. Kovan collects  these into the ticket's own file, so this is what the next person — or the  next you — reads instead of starting again.
 
 Say what you set out to do, what you actually changed and where, what you  verified and how, what you decided and why, and what is still uncertain.  Include the findings table if there was a review. Be specific about file  paths. If you were stopped part way, write that down too — a short honest  record beats none.
 
-If you take screenshots, save them as PNGs in \`$BATON_SHOTS\`, numbered in  the order you took them and named for what they show, e.g.  \`01-lesson-page.png\`. They are shown with the report. Save each one as  you take it rather than all at the end: Baton shows them live while you  work. As you go, overwrite \`$BATON_STATUS\` with one short line saying  what you are doing now, e.g. \`echo "Signing in as Teacher" > "$BATON_STATUS"\`.  When a screenshot shows a web page, also append its file name and the page's full address to \`$BATON_PAGES\`, e.g. \`echo "01-lesson-page.png https://…/lesson/12" >> "$BATON_PAGES"\`, so the page can be opened from Baton.
+If you take screenshots, save them as PNGs in \`$KOVAN_SHOTS\`, numbered in  the order you took them and named for what they show, e.g.  \`01-lesson-page.png\`. They are shown with the report. Save each one as  you take it rather than all at the end: Kovan shows them live while you  work. As you go, overwrite \`$KOVAN_STATUS\` with one short line saying  what you are doing now, e.g. \`echo "Signing in as Teacher" > "$KOVAN_STATUS"\`.  When a screenshot shows a web page, also append its file name and the page's full address to \`$KOVAN_PAGES\`, e.g. \`echo "01-lesson-page.png https://…/lesson/12" >> "$KOVAN_PAGES"\`, so the page can be opened from Kovan.
 
-Read \`$BATON_TICKET\` first if it exists: it is everything already known  about this ticket — what was asked for under "What was asked", the pull  requests that carried it, and every earlier run with what it concluded.  Do not edit it — Baton rebuilds it from these reports.`;
+Read \`$KOVAN_TICKET\` first if it exists: it is everything already known  about this ticket — what was asked for under "What was asked", the pull  requests that carried it, and every earlier run with what it concluded.  Do not edit it — Kovan rebuilds it from these reports.`;
 
 export const ATTRIBUTIONRULE = `Everything you write externally — commit messages, pull request titles and  descriptions, pull request and review comments, Jira comments — is written  as me. No attribution of any kind: no "Generated with", no \`Co-Authored-By\`  trailer, no model, tool, gateway or provider names, and nothing that  implies the work was produced or reviewed by several agents — no "one  reviewer noted", no "multiple reviewers found". If a template, CLI or hook  adds attribution, remove it before committing or posting. Reviewer names  and model IDs stay in the terminal and never reach GitHub or Jira.`;
 
@@ -159,7 +159,7 @@ export const DEFAULTVERIFYTEMPLATE = `Check whether \${title} is actually live o
 
 It was merged into \${repo} as #\${number} — \${url}
 
-Step 0 — read $BATON_TICKET. It is this ticket's file: what was asked for  in Jira's own words, the pull requests that carried it, the work already  done on it and every earlier check, with what each one concluded. Check  against what was asked, not against what the pull request says it did. If  it has been checked before, your job is partly to say what has changed  since. Do not edit that file — Baton rebuilds it from your report, and  anything you write into it is lost.
+Step 0 — read $KOVAN_TICKET. It is this ticket's file: what was asked for  in Jira's own words, the pull requests that carried it, the work already  done on it and every earlier check, with what each one concluded. Check  against what was asked, not against what the pull request says it did. If  it has been checked before, your job is partly to say what has changed  since. Do not edit that file — Kovan rebuilds it from your report, and  anything you write into it is lost.
 
 Step 1 — work out what to look for. Read what the pull request changed:
 
@@ -172,20 +172,20 @@ Step 2 — go and look. The site is \${site}. Drive a real browser with  Playwri
 
 \${accounts}
 \${basicAuth}
-Screenshot everything that proves something — the feature working, or the  place it should be and is not. Save each one as a PNG in $BATON_SHOTS,  numbered in the order you took them and named for what they show:
+Screenshot everything that proves something — the feature working, or the  place it should be and is not. Save each one as a PNG in $KOVAN_SHOTS,  numbered in the order you took them and named for what they show:
 
-    $BATON_SHOTS/01-signed-in.png
-    $BATON_SHOTS/02-lesson-page-scrolled.png
+    $KOVAN_SHOTS/01-signed-in.png
+    $KOVAN_SHOTS/02-lesson-page-scrolled.png
 
-Save each one the moment you take it — Baton shows them live while you  work. Before each step, overwrite $BATON_STATUS with one short line  saying what you are doing, e.g.
+Save each one the moment you take it — Kovan shows them live while you  work. Before each step, overwrite $KOVAN_STATUS with one short line  saying what you are doing, e.g.
 
-    echo "Opening the lesson page as Teacher" > "$BATON_STATUS"
+    echo "Opening the lesson page as Teacher" > "$KOVAN_STATUS"
 
-Each time you save a screenshot, also append its file name and the full  address of the page it shows to $BATON_PAGES, so Baton can open that  exact page for me:
+Each time you save a screenshot, also append its file name and the full  address of the page it shows to $KOVAN_PAGES, so Kovan can open that  exact page for me:
 
-    echo "02-lesson-page-scrolled.png https://…/course/12/unit/3" >> "$BATON_PAGES"
+    echo "02-lesson-page-scrolled.png https://…/course/12/unit/3" >> "$KOVAN_PAGES"
 
-Step 3 — write $BATON_REPORT. Its first line must be  exactly one of:
+Step 3 — write $KOVAN_REPORT. Its first line must be  exactly one of:
 
 \${verdicts}
 
@@ -197,7 +197,7 @@ Under it, say what you checked, what you saw, and which screenshot shows  it. If
  * Exported and rendered into the template rather than typed into it, so a
  * fifth verdict cannot leave the prompt offering four options to something
  * that knows five. Carried over from devhub-mac unchanged: these are the
- * words already written into every report Baton will read back.
+ * words already written into every report Kovan will read back.
  */
 export const VERDICTS = [
   'implemented',
@@ -221,7 +221,7 @@ function basicAuthClause(hasBasicAuth: boolean): string {
     return '';
   }
   return `
-Before that sign-in page, the site itself may ask for a separate username  and password in a browser dialog — an HTTP Basic Auth wall, not the app's  own login. If you see one, answer it with the username in  $BATON_ENV_BASIC_USER and the password in $BATON_ENV_BASIC_PASSWORD, then  continue signing in to the app as above.
+Before that sign-in page, the site itself may ask for a separate username  and password in a browser dialog — an HTTP Basic Auth wall, not the app's  own login. If you see one, answer it with the username in  $KOVAN_ENV_BASIC_USER and the password in $KOVAN_ENV_BASIC_PASSWORD, then  continue signing in to the app as above.
 `;
 }
 
@@ -233,14 +233,14 @@ export interface VerifyEnvironment {
   /** Whether there is a Basic Auth wall, distinct from the app's own sign-in. */
   hasBasicAuth?: boolean;
   /**
-   * Who the agent can sign in as, in the order `$BATON_ACCOUNT_n_*` numbers
-   * them. Left out, the prompt keeps the single `$BATON_ENV_USER` sign-in it
+   * Who the agent can sign in as, in the order `$KOVAN_ACCOUNT_n_*` numbers
+   * them. Left out, the prompt keeps the single `$KOVAN_ENV_USER` sign-in it
    * had before accounts existed.
    */
   accounts?: readonly TestAccount[];
 }
 
-const SINGLE_SIGN_IN = `Sign in with the username in $BATON_ENV_USER and the password in  $BATON_ENV_PASSWORD. Read both from the environment. Never print them,  never echo them into a terminal, never write them into a file, a commit or  a screenshot, and do not repeat them back to me.`;
+const SINGLE_SIGN_IN = `Sign in with the username in $KOVAN_ENV_USER and the password in  $KOVAN_ENV_PASSWORD. Read both from the environment. Never print them,  never echo them into a terminal, never write them into a file, a commit or  a screenshot, and do not repeat them back to me.`;
 
 /**
  * The "check it shipped" prompt.
@@ -260,9 +260,9 @@ export function renderVerifyPrompt(
   // Nothing configured yet: say so in the prompt. An agent told to go and
   // look at a site nobody named should stop and say it cannot, not guess a
   // URL and report confidently on whatever answers.
-  const named = environment.name.trim() || 'the environment set in Baton';
+  const named = environment.name.trim() || 'the environment set in Kovan';
   const site = environment.site.trim()
-    || 'NOT CONFIGURED — no site is set in Baton. Stop here and report `could not check`, saying that no environment is configured.';
+    || 'NOT CONFIGURED — no site is set in Kovan. Stop here and report `could not check`, saying that no environment is configured.';
 
   const accounts = environment.accounts
     ? verifyAccountsClause(named, environment.accounts)

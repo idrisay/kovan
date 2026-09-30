@@ -1,5 +1,5 @@
 /**
- * The filters and sorts that come back when Baton is reopened (item 93):
+ * The filters and sorts that come back when Kovan is reopened (item 93):
  * Pull requests' filter and sort, Tickets' filter and sort. Per window, so
  * localStorage (DESIGN.md: preferences vs settings) — every read and write in
  * try, and the defaults when it isn't there. The text in the Filter box
@@ -7,9 +7,9 @@
  * narrowed by yesterday's search would look like missing tickets.
  */
 
-import { choiceFrom, facetsFromJson, facetsToJson } from '@baton/core';
+import { choiceFrom, facetsFromJson, facetsToJson } from '@kovan/core';
 
-const KEY = 'baton.view-prefs';
+const KEY = 'kovan.view-prefs';
 
 interface Stored {
   pullFilters?: unknown;

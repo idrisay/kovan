@@ -5,7 +5,7 @@
  * The renderer never hands main a command line to run: it saves a command
  * (validated here, like any settings write) and then asks for one to be run
  * **by id**. That keeps the rule every other channel follows — a path or a
- * command that reaches a shell comes from Baton's own store, not from the
+ * command that reaches a shell comes from Kovan's own store, not from the
  * page — and it means a command is always exactly what you saw in the menu.
  */
 
@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { copyName, normalizeQuickCommands, validateQuickCommand, type QuickCommand } from '@baton/core';
+import { copyName, normalizeQuickCommands, validateQuickCommand, type QuickCommand } from '@kovan/core';
 import type { DesktopHost } from './host';
 import type { Sessions } from './sessions';
 

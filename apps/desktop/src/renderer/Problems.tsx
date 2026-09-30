@@ -15,8 +15,8 @@ const RETRYABLE = new Set<string>(['github', 'jira', 'sentry']);
 export function useProblems(): { log: Problem[]; started: Problem[] } {
   const [state, setState] = useState<{ log: Problem[]; started: Problem[] }>({ log: [], started: [] });
   useEffect(() => {
-    void window.baton.problems().then((log) => setState((s) => (s.log.length ? s : { log, started: [] })));
-    return window.baton.onProblems(setState);
+    void window.kovan.problems().then((log) => setState((s) => (s.log.length ? s : { log, started: [] })));
+    return window.kovan.onProblems(setState);
   }, []);
   return state;
 }
@@ -89,7 +89,7 @@ export function ProblemsPopover({ anchor, log, onClose }: { anchor: HTMLElement;
             <CopyDetails problem={p} />
           </span>
           {RETRYABLE.has(p.provider) && (
-            <button type="button" className="problem-retry" onClick={() => void window.baton.refreshProvider(p.provider as PolledProvider)}>
+            <button type="button" className="problem-retry" onClick={() => void window.kovan.refreshProvider(p.provider as PolledProvider)}>
               Retry
             </button>
           )}
@@ -130,7 +130,7 @@ export function ProblemToast({ started, onDetails }: { started: Problem[]; onDet
   return createPortal(
     <div className="problem-toast" role="status">
       <strong>{shown.title}</strong>
-      <span>{shown.detail}. Baton tries again at the next refresh; what's on screen is from the last one that worked.</span>
+      <span>{shown.detail}. Kovan tries again at the next refresh; what's on screen is from the last one that worked.</span>
       <span className="problem-toast-actions">
         <button type="button" className="link" onClick={() => { setShown(undefined); onDetails(); }}>Details</button>
         <button type="button" className="link" onClick={() => setShown(undefined)}>Dismiss</button>

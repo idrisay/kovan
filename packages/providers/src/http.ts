@@ -10,7 +10,7 @@
  * Retry policy, single-flight dedupe and the non-JSON detection are unchanged.
  */
 
-import { CancelledError, sleep, type CancelSignal, type Logger } from '@baton/host';
+import { CancelledError, sleep, type CancelSignal, type Logger } from '@kovan/host';
 
 export { CancelledError };
 

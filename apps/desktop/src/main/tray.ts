@@ -18,10 +18,10 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
  *
  * A *template* image: pure black plus alpha, which macOS recolours itself for
  * light and dark menu bars and for the highlighted state. Colour in a template
- * image is discarded, so the entire design here is the silhouette — which is
- * why it is a shorter, thicker baton than the Dock icon rather than a scaled
- * copy of it. A faithful scale becomes a hairline at 16pt, and a hairline in a
- * menu bar reads as dirt on the screen.
+ * image is discarded, so the entire design here is the silhouette: the K of
+ * hive cells from the Dock icon, with wider gaps so the cells stay apart at
+ * 16pt, and the waiting arm drawn fainter since grey can't be said in colour
+ * (`resources/alternatives/build-k-cells.py`).
  *
  * Loaded from disk rather than drawn in code: `nativeImage` picks the @2x file
  * automatically, which is what every Retina Mac actually displays.
@@ -37,7 +37,7 @@ function icon(): NativeImage {
     return nativeImage.createFromNamedImage('NSApplicationIcon', [0, 0, 0]).resize({ width: 16 });
   }
   image.setTemplateImage(true);
-  if (process.env['BATON_SMOKE']) {
+  if (process.env['KOVAN_SMOKE']) {
     const { width, height } = image.getSize();
     console.log(`tray glyph loaded from ${file} (${width}x${height}, template=${image.isTemplateImage()})`);
   }
@@ -52,12 +52,12 @@ export interface TrayActions {
   quit(): void;
 }
 
-export class BatonTray {
+export class KovanTray {
   private readonly tray: Tray;
 
   constructor(private readonly actions: TrayActions) {
     this.tray = new Tray(icon());
-    this.tray.setToolTip('Baton');
+    this.tray.setToolTip('Kovan');
     this.tray.on('click', () => this.actions.open());
     // Draw the menu immediately, so a right-click before the first refresh
     // lands gets a real menu rather than nothing.
@@ -70,7 +70,7 @@ export class BatonTray {
 
     this.tray.setTitle(blocked > 0 ? ` ${blocked}` : '');
     this.tray.setToolTip(
-      blocked > 0 ? `Baton — ${blocked} blocked on you` : 'Baton — nothing blocked on you'
+      blocked > 0 ? `Kovan — ${blocked} blocked on you` : 'Kovan — nothing blocked on you'
     );
 
     this.tray.setContextMenu(
@@ -81,7 +81,7 @@ export class BatonTray {
         },
         { label: `${reviews} awaiting your review`, enabled: false },
         { type: 'separator' },
-        { label: 'Open Baton', click: () => this.actions.open() },
+        { label: 'Open Kovan', click: () => this.actions.open() },
         {
           label: snapshot.refreshing ? 'Refreshing…' : 'Refresh now',
           enabled: !snapshot.refreshing,
@@ -95,7 +95,7 @@ export class BatonTray {
           click: () => this.actions.toggleLaunchAtLogin()
         },
         { type: 'separator' },
-        { label: 'Quit Baton', accelerator: 'Command+Q', click: () => this.actions.quit() }
+        { label: 'Quit Kovan', accelerator: 'Command+Q', click: () => this.actions.quit() }
       ])
     );
   }

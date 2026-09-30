@@ -1,12 +1,12 @@
 /**
  * Voice dictation (improvements item 88): the main-process half.
  *
- * The microphone and Apple's recogniser live in `baton-dictate`, a small Swift
+ * The microphone and Apple's recogniser live in `kovan-dictate`, a small Swift
  * helper built from `native/dictate` — see the note at the top of its source
  * for why a helper and not Chromium. This spawns it, forwards what it says to
- * the window as `baton:dictation` events, and passes on stop and cancel.
+ * the window as `kovan:dictation` events, and passes on stop and cancel.
  *
- * One dictation at a time. The helper exits on EOF, so if Baton goes away
+ * One dictation at a time. The helper exits on EOF, so if Kovan goes away
  * mid-dictation the microphone goes off with it.
  */
 
@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import {
   pickDictationLocale, speechKeyName, speechProvider, SPEECH_PROVIDERS,
   type DictationLocale, type SpeechProviderId
-} from '@baton/core';
+} from '@kovan/core';
 import type { DesktopHost } from './host';
 import { findWhisperModels, speechConfig, transcribe, whisperCliPath } from './transcribe';
 
@@ -65,8 +65,8 @@ export type SpeechTest = { ok: true; text: string; ms: number } | { ok: false; m
 
 function helperPath(): string {
   return app.isPackaged
-    ? path.join(process.resourcesPath, 'bin', 'baton-dictate')
-    : path.join(dirname, '../../resources/bin/baton-dictate');
+    ? path.join(process.resourcesPath, 'bin', 'kovan-dictate')
+    : path.join(dirname, '../../resources/bin/kovan-dictate');
 }
 
 export class Dictation {
@@ -136,12 +136,12 @@ export class Dictation {
    * own `say` — nothing is recorded.
    */
   async test(provider: SpeechProviderId): Promise<SpeechTest> {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'baton-speech-'));
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'kovan-speech-'));
     const wav = path.join(dir, 'sample.wav');
     const started = Date.now();
     try {
       await new Promise<void>((resolve, reject) => {
-        execFile('/usr/bin/say', ['-o', wav, '--data-format=LEI16@16000', 'Baton dictation test, one two three.'],
+        execFile('/usr/bin/say', ['-o', wav, '--data-format=LEI16@16000', 'Kovan dictation test, one two three.'],
           { timeout: 20_000 }, (error) => (error ? reject(new Error('Couldn’t make the test sample.')) : resolve()));
       });
       const spoken = Date.now();
@@ -175,12 +175,12 @@ export class Dictation {
   async start(target: WebContents): Promise<{ ok: true } | { ok: false; message: string }> {
     if (this.child) return { ok: false, message: 'Already listening.' };
     const send = (event: DictationEvent) => {
-      if (!target.isDestroyed()) target.send('baton:dictation', event);
+      if (!target.isDestroyed()) target.send('kovan:dictation', event);
     };
 
     // Smoke runs can't speak into a microphone; a scripted helper stands in,
     // only ever for a throwaway profile.
-    if (process.env['BATON_SMOKE'] && process.env['BATON_USER_DATA'] && process.env['BATON_DICTATE_FAKE']) {
+    if (process.env['KOVAN_SMOKE'] && process.env['KOVAN_USER_DATA'] && process.env['KOVAN_DICTATE_FAKE']) {
       return this.fake(send);
     }
 
@@ -194,7 +194,7 @@ export class Dictation {
     if (config && speechProvider(config.provider).kind === 'cloud' && !config.key) {
       return { ok: false, message: `No API key for ${speechProvider(config.provider).label} — add one in Settings › Dictation.` };
     }
-    const dir = config ? await mkdtemp(path.join(os.tmpdir(), 'baton-dictation-')) : undefined;
+    const dir = config ? await mkdtemp(path.join(os.tmpdir(), 'kovan-dictation-')) : undefined;
     const args = config && dir ? ['--record', path.join(dir, 'dictation.wav')] : ['--locale', status.locale];
     const child = spawn(helperPath(), args, { stdio: ['pipe', 'pipe', 'pipe'] });
     this.child = child;

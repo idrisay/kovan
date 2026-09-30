@@ -4,11 +4,11 @@
  *
  * ## Finding them
  *
- * One `ps` of the whole machine, classified by `@baton/core`'s `findAgents`.
- * An agent under one of Baton's own terminals belongs to that session; one
+ * One `ps` of the whole machine, classified by `@kovan/core`'s `findAgents`.
+ * An agent under one of Kovan's own terminals belongs to that session; one
  * with a tty is in some other terminal; one started by another app (VS Code's
  * Codex server, Claude's Chrome bridge) is a helper, listed but never stopped.
- * Quick-model jobs run under Baton itself and are listed from their own log,
+ * Quick-model jobs run under Kovan itself and are listed from their own log,
  * not from here.
  *
  * ## Idle or working
@@ -51,7 +51,7 @@ import {
   type AgentsReport,
   type ProcessRow,
   type RunningAgent
-} from '@baton/core';
+} from '@kovan/core';
 import type { DesktopHost } from './host';
 import type { Sessions, SessionInfo } from './sessions';
 import { claudeConfigDirs, claudeTranscript, findCodexLog } from './usage';
@@ -148,7 +148,7 @@ export class RunningAgents {
       const found = findAgents(rows, new Set(sessionsByPid.keys()))
         .map((agent) => ({ ...agent, key: processKey(agent.row) }))
         .map((agent) => ({ ...agent, session: agent.ancestors.map((a) => sessionsByPid.get(a.pid)).find(Boolean) }))
-        // A quick-model job: under Baton, but not in one of its terminals.
+        // A quick-model job: under Kovan, but not in one of its terminals.
         .filter((agent) => agent.session || !agent.ancestors.some((a) => a.pid === process.pid));
 
       await this.lookUpCwds(found.filter((a) => !this.cwds.has(a.key)).map((a) => ({ key: a.key, pid: a.row.pid })));
@@ -177,7 +177,7 @@ export class RunningAgents {
         const signs = [logged, this.busy.get(key)].filter((t): t is number => t !== undefined);
         const seen = this.firstSeen.get(key)!;
         // Nothing to go on yet: never "working" on no evidence, but count from
-        // when Baton first saw it, so an agent with no log still turns idle
+        // when Kovan first saw it, so an agent with no log still turns idle
         // rather than waiting forever.
         const lastActivity = signs.length > 0 ? Math.max(...signs) : seen;
         let state = signs.length > 0 ? agentState(lastActivity, now, idleMs) : now - seen >= idleMs ? 'idle' : 'waiting';
@@ -229,16 +229,16 @@ export class RunningAgents {
   }
 
   /**
-   * What stopping `agent` must never touch: Baton, what started it, and —
-   * when Baton was itself launched from inside that agent's terminal — Baton's
-   * own sessions. An agent inside a Baton terminal keeps everything it started.
+   * What stopping `agent` must never touch: Kovan, what started it, and —
+   * when Kovan was itself launched from inside that agent's terminal — Kovan's
+   * own sessions. An agent inside a Kovan terminal keeps everything it started.
    */
   private protectedPids(rows: ProcessRow[], agent: number): Set<number> {
     const byPid = new Map(rows.map((r) => [r.pid, r]));
     const pids = new Set<number>([0, 1, process.pid]);
     for (let row = byPid.get(process.pid); row && row.pid > 1; row = byPid.get(row.ppid)) pids.add(row.pid);
-    const baton = descendantsOf(childrenOf(rows), process.pid).map((d) => d.pid);
-    if (!baton.includes(agent)) for (const pid of baton) pids.add(pid);
+    const kovan = descendantsOf(childrenOf(rows), process.pid).map((d) => d.pid);
+    if (!kovan.includes(agent)) for (const pid of kovan) pids.add(pid);
     return pids;
   }
 
@@ -289,7 +289,7 @@ export class RunningAgents {
     for (const agent of fresh) this.notified.add(agent.key);
     if (fresh.length === 0) return;
     if (!this.host.config.get('agents.remind', true) || !this.host.config.get('notify.enabled', true)) return;
-    if (process.env['BATON_SMOKE'] || !Notification.isSupported()) return;
+    if (process.env['KOVAN_SMOKE'] || !Notification.isSupported()) return;
 
     const threshold = formatIdle(report.idleMs);
     const memory = formatMemory(idle.reduce((sum, a) => sum + a.memory, 0));
@@ -354,7 +354,7 @@ export class RunningAgents {
 }
 
 function groupOf(row: ProcessRow, session: SessionInfo | undefined, ancestors: ProcessRow[]): AgentGroup {
-  if (session) return 'baton';
+  if (session) return 'kovan';
   if (isHelperCommand(row.command)) return 'helper';
   if (row.tty) return 'terminal';
   // No terminal, but another app started it: that app's to manage.

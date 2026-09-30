@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { QUICK_KIND_LABEL, formatAge, type QuickJob } from '@baton/core';
+import { QUICK_KIND_LABEL, formatAge, type QuickJob } from '@kovan/core';
 import { Prose } from './Prose';
 import { ChevronIcon, CloseIcon, OpenLinkIcon } from './icons';
 import { findSubject, type Selection } from './sessionSubject';
@@ -19,8 +19,8 @@ import type { Snapshot } from './types';
 export function useQuickJobs(): QuickJob[] {
   const [jobs, setJobs] = useState<QuickJob[]>([]);
   useEffect(() => {
-    void window.baton.quickJobs().then(setJobs);
-    return window.baton.onQuickJobs(setJobs);
+    void window.kovan.quickJobs().then(setJobs);
+    return window.kovan.onQuickJobs(setJobs);
   }, []);
   return jobs;
 }
@@ -133,7 +133,7 @@ export function QuickJobRow({
               <button
                 type="button" className="icon-button"
                 aria-label="Cancel" title="Cancel"
-                onClick={(e) => { e.stopPropagation(); void window.baton.quickCancel(job.kind, job.subject); }}
+                onClick={(e) => { e.stopPropagation(); void window.kovan.quickCancel(job.kind, job.subject); }}
               >
                 <StopIcon />
               </button>
@@ -141,7 +141,7 @@ export function QuickJobRow({
             <button
               type="button" className="icon-button"
               aria-label={running ? 'Cancel and close' : 'Close'} title={running ? 'Cancel and close' : 'Close'}
-              onClick={(e) => { e.stopPropagation(); void window.baton.quickJobRemove(job.id); }}
+              onClick={(e) => { e.stopPropagation(); void window.kovan.quickJobRemove(job.id); }}
             >
               <CloseIcon size={10} />
             </button>
@@ -183,7 +183,7 @@ export function QuickJobView({
 }) {
   const now = useNow(job.status === 'running');
   const match = findSubject(job.subject, snapshot);
-  const cancel = () => void window.baton.quickCancel(job.kind, job.subject);
+  const cancel = () => void window.kovan.quickCancel(job.kind, job.subject);
 
   return (
     <div className="detail-shell">
@@ -221,7 +221,7 @@ export function QuickJobView({
               {match && (
                 <button type="button" className="ghost" onClick={() => onOpenSubject(match)}>Open {job.subject}</button>
               )}
-              <button type="button" className="ghost" onClick={() => void window.baton.quickJobRemove(job.id)}>
+              <button type="button" className="ghost" onClick={() => void window.kovan.quickJobRemove(job.id)}>
                 {job.status === 'running' ? 'Cancel and close' : 'Close'}
               </button>
             </div>

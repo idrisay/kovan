@@ -34,7 +34,7 @@ export * from './promptSettings';
 // `sentry/pathMapper` is deliberately NOT re-exported here. It imports node's
 // `path`, and this barrel is loaded by the renderer — one node import in it
 // pulls a browser-external shim into the bundle and fails at rollup. Node-only
-// code is reached through `@baton/core/node` instead, which only the main
+// code is reached through `@kovan/core/node` instead, which only the main
 // process imports.
 export * from './prompts';
 export * from './testAccounts';

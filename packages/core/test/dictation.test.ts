@@ -95,8 +95,8 @@ describe('joinDictation', () => {
 
 describe('speech providers (item 97)', () => {
   it('reads whisper-cli output as text, dropping its chatter', () => {
-    const out = 'whisper_init_from_file: loading model\n[00:00:00.000 --> 00:00:02.000]\n Baton dictation test.\n\n';
-    expect(whisperCliText(out)).toBe('Baton dictation test.');
+    const out = 'whisper_init_from_file: loading model\n[00:00:00.000 --> 00:00:02.000]\n Kovan dictation test.\n\n';
+    expect(whisperCliText(out)).toBe('Kovan dictation test.');
     expect(whisperCliText('[BLANK_AUDIO]\n')).toBe('');
   });
 

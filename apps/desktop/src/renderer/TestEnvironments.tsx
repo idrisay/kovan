@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ACCOUNT_ROLE_SUGGESTIONS, accountPasswordKey, basicPasswordKey, describeAccount, newTestId,
   type AccountSegment, type TestAccount, type TestEnvironment
-} from '@baton/core';
+} from '@kovan/core';
 import type { RunKind, TestEnvironmentState, TestSelection } from './types';
 
 /**
@@ -33,7 +33,7 @@ export function TestEnvironmentSettings() {
     setPasswords({});
     setActive((current) => (next.environments.some((e) => e.id === current) ? current : next.environments[0]?.id ?? ''));
   };
-  useEffect(() => { void window.baton.testEnvironments().then(load); }, []);
+  useEffect(() => { void window.kovan.testEnvironments().then(load); }, []);
 
   const env = environments.find((e) => e.id === active);
   const envAccounts = accounts.filter((a) => a.environmentId === active);
@@ -67,7 +67,7 @@ export function TestEnvironmentSettings() {
     setSaving(true);
     setNote(undefined);
     try {
-      load(await window.baton.testEnvironmentsSave({ environments, accounts, defaultEnvironment, passwords }));
+      load(await window.kovan.testEnvironmentsSave({ environments, accounts, defaultEnvironment, passwords }));
       setNote({ ok: true, text: 'Saved.' });
     } catch (err) {
       setNote({ ok: false, text: err instanceof Error ? err.message : 'Save failed.' });
@@ -239,7 +239,7 @@ export function TestEnvironmentSettings() {
   );
 }
 
-const PICK_KEY = 'baton.test-env-pick';
+const PICK_KEY = 'kovan.test-env-pick';
 
 /** What the last run of each kind tested on, so the sheet opens where you left it. */
 function rememberedPick(kind: RunKind): string | undefined {
@@ -251,7 +251,7 @@ function rememberedPick(kind: RunKind): string | undefined {
 }
 
 /** Item 94: the accounts you unticked on each environment, so they stay unticked. */
-const UNTICKED_KEY = 'baton.test-env-unticked';
+const UNTICKED_KEY = 'kovan.test-env-unticked';
 
 function rememberedUnticked(environmentId: string): string[] {
   try {
@@ -300,7 +300,7 @@ export function TestEnvironmentPicker({
   const required = kind === 'verify';
 
   useEffect(() => {
-    void window.baton.testEnvironments().then((s) => {
+    void window.kovan.testEnvironments().then((s) => {
       setState(s);
       const remembered = rememberedPick(kind);
       const valid = (id?: string) => Boolean(id) && s.environments.some((e) => e.id === id);
@@ -340,7 +340,7 @@ export function TestEnvironmentPicker({
     if (!state) return;
     setSavingSite(true);
     try {
-      setState(await window.baton.testEnvironmentsSave({
+      setState(await window.kovan.testEnvironmentsSave({
         environments: state.environments.map((e) => (e.id === environmentId ? { ...e, site: siteDraft.trim() } : e)),
         accounts: state.accounts,
         defaultEnvironment: state.defaultEnvironment,
@@ -408,7 +408,7 @@ export function TestEnvironmentPicker({
           <button
             type="button" className="link run-test-env-open"
             title={`Open ${siteDraft.trim()} in your default browser`}
-            onClick={() => void window.baton.openExternal(siteDraft.trim())}
+            onClick={() => void window.kovan.openExternal(siteDraft.trim())}
           >
             Open
           </button>

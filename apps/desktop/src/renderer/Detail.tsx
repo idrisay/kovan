@@ -5,7 +5,7 @@ import {
   isNvReviewModel,
   reviewModelName,
   TICKET_RECENT_COMMENTS
-} from '@baton/core';
+} from '@kovan/core';
 import { repoName, States, TONE } from './rows';
 import { Prose } from './Prose';
 import { CardTitle, CopyResult, QuickButton, QuickCard, ReviewDecision, VerdictBadge, useQuick } from './Quick';
@@ -77,7 +77,7 @@ interface HeadParts {
   title: string;
   /** The details line, one span each. */
   meta: React.ReactNode;
-  /** Related tickets or pull requests: chips that open them in Baton. */
+  /** Related tickets or pull requests: chips that open them in Kovan. */
   links: { label: string; onClick: () => void }[];
   service: { label: string; icon: JSX.Element; url: string };
   onTerminal: () => void;
@@ -91,7 +91,7 @@ function PlaceIcons({ service, onTerminal }: Pick<HeadParts, 'service' | 'onTerm
     <>
       <button
         type="button" className="icon-button detail-place-icon" aria-label={`Open on ${service.label}`}
-        title={`Open on ${service.label}`} onClick={() => void window.baton.openExternal(service.url)}
+        title={`Open on ${service.label}`} onClick={() => void window.kovan.openExternal(service.url)}
       >
         {service.icon}
       </button>
@@ -118,7 +118,7 @@ function LinkChips({ links }: Pick<HeadParts, 'links'>) {
 /**
  * Comfortable density (item 118, option C): a thin toolbar across the top of
  * the pane — where this lives, the way out (the service, a terminal) and its
- * related chips on the left, what Baton does on the right. Sticky, so the
+ * related chips on the left, what Kovan does on the right. Sticky, so the
  * agent button is one click away however far down the description you are.
  */
 function DetailToolbar(parts: HeadParts) {
@@ -238,7 +238,7 @@ function CommentCard({
  * push the conversation off screen. Remembered per PR or ticket.
  */
 function DescriptionSection({ subject, children }: { subject: string; children: React.ReactNode }) {
-  const [collapsed, toggle] = useFold(subject, 'baton.collapsed-descriptions');
+  const [collapsed, toggle] = useFold(subject, 'kovan.collapsed-descriptions');
   return (
     <section className={collapsed ? 'collapsible collapsed' : 'collapsible'}>
       <h3>
@@ -274,7 +274,7 @@ function ThreadCard({ thread, defaultExpanded }: { thread: ReviewThread; default
 /**
  * A ticket's pull requests, in its header where they are seen first at any
  * window width: one line each — headline state, where it lives, title — and
- * a click opens it in Baton's own Pull requests tab. Open ones first, then
+ * a click opens it in Kovan's own Pull requests tab. Open ones first, then
  * merged. They used to be small `repo #number` chips that said nothing about
  * state and only listed open pull requests with the key in their title; in
  * the side column they fell below the comments on a narrow window.
@@ -358,11 +358,11 @@ function Reviewers({ reviewers, request }: {
   );
 }
 
-type Candidates = Awaited<ReturnType<typeof window.baton.reviewerCandidates>>;
+type Candidates = Awaited<ReturnType<typeof window.kovan.reviewerCandidates>>;
 
 /**
  * "Add a reviewer…": the repo's collaborators and teams, the people you've
- * asked most through Baton first. Picking one requests them on GitHub at
+ * asked most through Kovan first. Picking one requests them on GitHub at
  * once — GitHub does the notifying. Loaded on first focus, not on opening
  * the pull request, so a PR you only read costs no extra call.
  */
@@ -385,7 +385,7 @@ function ReviewerPicker({ repo, number, author, taken, onRequested }: {
   function load() {
     setOpen(true);
     if (candidates) return;
-    window.baton.reviewerCandidates(repo).then(setCandidates).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    window.kovan.reviewerCandidates(repo).then(setCandidates).catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }
 
   async function ask(person?: string, team?: string) {
@@ -393,7 +393,7 @@ function ReviewerPicker({ repo, number, author, taken, onRequested }: {
     setBusy(who);
     setError('');
     try {
-      await window.baton.requestReviewers(repo, number, person ? [person] : [], team ? [team] : []);
+      await window.kovan.requestReviewers(repo, number, person ? [person] : [], team ? [team] : []);
       setAsked((list) => [...list, who]);
       setQuery('');
       setOpen(false);
@@ -534,7 +534,7 @@ function LiveSessions({
   // A running agent's own run, watched live in its viewer (item 90).
   const [watching, setWatching] = useState<AgentRun>();
   const watch = (session: SessionInfo) => {
-    void window.baton.runHistory(subject).then((runs) => {
+    void window.kovan.runHistory(subject).then((runs) => {
       const run = runs.find((r) => r.directory === session.runDirectory);
       if (run) setWatching(run);
     });
@@ -589,7 +589,7 @@ function History({ subject, refreshOn }: { subject: string; refreshOn?: string }
   const [viewing, setViewing] = useState<AgentRun>();
 
   useEffect(() => {
-    void window.baton.runHistory(subject).then(setRuns);
+    void window.kovan.runHistory(subject).then(setRuns);
     // `refreshOn` is a signature of this subject's own sessions (id:running
     // pairs) — a run starting, or an agent finishing without anyone closing
     // its terminal, changes it, which is exactly when a report or prompt
@@ -651,13 +651,13 @@ function AgentReport({ subject, pull, refreshOn }: { subject: string; pull?: str
 
   useEffect(() => {
     let live = true;
-    void window.baton.runHistory(subject).then(async (runs) => {
+    void window.kovan.runHistory(subject).then(async (runs) => {
       // On a pull request's page, only runs started from that pull request:
       // a ticket's folder collects runs from every pull request that named it.
       const latest = runs
         .filter((r) => r.reportPath && (!pull || r.pull === pull || r.subject === pull))
         .sort((a, b) => b.startedAt - a.startedAt)[0];
-      const body = latest?.reportPath ? await window.baton.runText(latest.reportPath).catch(() => '') : '';
+      const body = latest?.reportPath ? await window.kovan.runText(latest.reportPath).catch(() => '') : '';
       if (!live) return;
       setRun(latest);
       setText(body.trim());
@@ -715,9 +715,9 @@ function AgentReport({ subject, pull, refreshOn }: { subject: string; pull?: str
  */
 type DockPosition = 'bottom' | 'top' | 'left' | 'right';
 
-const DOCK_KEY = 'baton.terminal-dock';
-const HEIGHT_KEY = 'baton.terminal-height';
-const WIDTH_KEY = 'baton.terminal-width';
+const DOCK_KEY = 'kovan.terminal-dock';
+const HEIGHT_KEY = 'kovan.terminal-height';
+const WIDTH_KEY = 'kovan.terminal-width';
 const MIN_SIZE = 140;
 // A fraction of the shell's own box, not a fixed pixel ceiling — the panel
 // lives inside a ticket/PR pane whose size already scales with the window,
@@ -876,7 +876,7 @@ function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () 
             </button>
             <button
               type="button" className="icon-button boxed" aria-label="Close session" title="Close session"
-              onClick={() => void window.baton.sessionClose(session.id)}
+              onClick={() => void window.kovan.sessionClose(session.id)}
             >
               <CloseIcon size={11} />
             </button>
@@ -903,8 +903,8 @@ function useQuickTerminal(
   onOpenSession: (id: string) => void
 ): () => void {
   return useCallback(() => {
-    void window.baton.defaultCwd(cwdHint).then((cwd) =>
-      window.baton.openTerminal(cwd, subject, `Terminal — ${subject}`)
+    void window.kovan.defaultCwd(cwdHint).then((cwd) =>
+      window.kovan.openTerminal(cwd, subject, `Terminal — ${subject}`)
     ).then((session) => onOpenSession(session.id));
   }, [cwdHint, subject, onOpenSession]);
 }
@@ -937,7 +937,7 @@ export function PullPane({
     // new answer lands, rather than blanking the pane.
     if (detailVersion === 0) setDetail(undefined);
     setError('');
-    window.baton
+    window.kovan
       .pullDetail(pull.repo, pull.number)
       .then(setDetail)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
@@ -956,7 +956,7 @@ export function PullPane({
   const ticketKey = ticketKeyInTitle(pull.title);
   const subject = ticketKey || `${pull.repo}#${pull.number}`;
   // The header's ticket chip (item 118): the key in the title, else in the
-  // branch (`fix/ACME-2393-…`). It opens the ticket in Baton when it's
+  // branch (`fix/ACME-2393-…`). It opens the ticket in Kovan when it's
   // loaded, and in Jira otherwise — the link is worth more than its absence.
   const chipKey = ticketKey || ticketKeyInTitle((pull.headRef ?? detail?.headRef ?? '').toUpperCase());
   const chipTicket = chipKey ? findSubject(chipKey, snapshot)?.issue : undefined;
@@ -964,7 +964,7 @@ export function PullPane({
   const ticketChip = chipTicket
     ? { label: chipTicket.key, onClick: () => onOpenSubject({ issue: chipTicket }) }
     : chipKey && jiraBase
-      ? { label: chipKey, onClick: () => void window.baton.openExternal(`${jiraBase}${chipKey}`) }
+      ? { label: chipKey, onClick: () => void window.kovan.openExternal(`${jiraBase}${chipKey}`) }
       : undefined;
 
   // Only the session App.tsx currently has in mind, and only when it is
@@ -1167,7 +1167,7 @@ export function PullPane({
                     }`} />
                     <span className="file-path">{check.name}</span>
                     {check.url && (
-                      <button className="link" onClick={() => void window.baton.openExternal(check.url!)}>
+                      <button className="link" onClick={() => void window.kovan.openExternal(check.url!)}>
                         logs
                       </button>
                     )}
@@ -1238,7 +1238,7 @@ export function TicketPane({
 
   useEffect(() => {
     setDetail(undefined);
-    window.baton.ticketDetail(issue.key).then(setDetail).catch(() => {
+    window.kovan.ticketDetail(issue.key).then(setDetail).catch(() => {
       // The list version still has real (if attachment-free) text, so a
       // failed refetch is not worth surfacing as an error banner.
     });
@@ -1369,7 +1369,7 @@ export function TicketPane({
               <ul className="files">
                 {issue.subtasks.map((sub) => (
                   <li key={sub.key}>
-                    <button className="link" onClick={() => void window.baton.openExternal(sub.url)}>
+                    <button className="link" onClick={() => void window.kovan.openExternal(sub.url)}>
                       {sub.key}
                     </button>
                     <span className="file-path">{sub.summary}</span>
@@ -1429,7 +1429,7 @@ export function SentryPane({
     setLoadingFrames(true);
     setTicketResult(undefined);
     setTicketError('');
-    window.baton
+    window.kovan
       .sentryFrames(issue.id)
       .then(setFrames)
       // The pane still shows title/culprit/counts without a trace — worth
@@ -1443,7 +1443,7 @@ export function SentryPane({
     setTicketBusy(true);
     setTicketError('');
     try {
-      setTicketResult(await window.baton.sentryCreateTicket(issue));
+      setTicketResult(await window.kovan.sentryCreateTicket(issue));
     } catch (err) {
       setTicketError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1493,7 +1493,7 @@ export function SentryPane({
         {ticketResult && (
           <p className="quiet small">
             Filed as{' '}
-            <button className="link" onClick={() => void window.baton.openExternal(ticketResult.url)}>
+            <button className="link" onClick={() => void window.kovan.openExternal(ticketResult.url)}>
               {ticketResult.key}
             </button>
           </p>

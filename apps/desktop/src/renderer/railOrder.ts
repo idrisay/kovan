@@ -6,9 +6,9 @@
  */
 
 import { useCallback, useState } from 'react';
-import { reconcileOrder } from '@baton/core';
+import { reconcileOrder } from '@kovan/core';
 
-const KEY = 'baton.rail-order';
+const KEY = 'kovan.rail-order';
 
 function load<T extends string>(ids: readonly T[]): T[] {
   try {

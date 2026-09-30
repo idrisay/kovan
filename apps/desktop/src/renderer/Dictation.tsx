@@ -3,7 +3,7 @@
  * again, and what you said lands where you were typing — a prompt, a field,
  * or a terminal. Esc throws it away.
  *
- * The words are Apple's on-device recogniser's, through the `baton-dictate`
+ * The words are Apple's on-device recogniser's, through the `kovan-dictate`
  * helper (see `main/dictation.ts`). While you speak, a pill at the bottom
  * shows them live with a level meter, so there's never doubt it's listening.
  * Nothing is inserted until you finish: a half-heard sentence never lands in
@@ -17,13 +17,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DoubleTap, joinDictation, SPEECH_PROVIDERS, speechProvider, type SpeechProviderId } from '@baton/core';
+import { DoubleTap, joinDictation, SPEECH_PROVIDERS, speechProvider, type SpeechProviderId } from '@kovan/core';
 import type { DictationEvent, SpeechSetup } from './types';
 import { MicIcon } from './icons';
 
 /** Starts (or finishes) dictation into `target` — the mic buttons' way in. */
 export function requestDictation(target?: Element | null): void {
-  window.dispatchEvent(new CustomEvent('baton:dictate', { detail: { target: target ?? document.activeElement } }));
+  window.dispatchEvent(new CustomEvent('kovan:dictate', { detail: { target: target ?? document.activeElement } }));
 }
 
 type Phase = 'idle' | 'starting' | 'listening' | 'finishing' | 'done' | 'error';
@@ -71,7 +71,7 @@ async function insert(target: Element | null, text: string): Promise<string> {
   if (terminal) {
     const id = terminal.getAttribute('data-session-id')!;
     // Typed, not run: Enter is yours to press.
-    await window.baton.sessionWrite(id, said);
+    await window.kovan.sessionWrite(id, said);
     (terminal.querySelector('.xterm-helper-textarea') as HTMLElement | null)?.focus();
     return 'Typed into the terminal.';
   }
@@ -93,7 +93,7 @@ async function insert(target: Element | null, text: string): Promise<string> {
     return 'Inserted.';
   }
 
-  await window.baton.copyText(said);
+  await window.kovan.copyText(said);
   return 'Copied — no text field was focused.';
 }
 
@@ -119,24 +119,24 @@ export function DictationLayer() {
   }, [set]);
 
   const start = useCallback(async (into: Element | null) => {
-    const settings = await window.baton.settings();
+    const settings = await window.kovan.settings();
     if (settings['dictation.enabled'] === false) return;
     clearTimeout(doneTimer.current);
     target.current = into;
     cancelled.current = false;
     set({ ...IDLE, phase: 'starting' });
-    const result = await window.baton.dictationStart();
+    const result = await window.kovan.dictationStart();
     if (!result.ok) set({ ...IDLE, phase: 'error', message: result.message });
   }, [set]);
 
   const finish = useCallback(() => {
     set((s) => ({ ...s, phase: 'finishing' }));
-    void window.baton.dictationStop();
+    void window.kovan.dictationStop();
   }, [set]);
 
   const cancel = useCallback(() => {
     cancelled.current = true;
-    void window.baton.dictationCancel();
+    void window.kovan.dictationCancel();
     set(IDLE);
     (target.current as HTMLElement | null)?.focus?.();
   }, [set]);
@@ -148,7 +148,7 @@ export function DictationLayer() {
   }, [start, finish]);
 
   // What the helper says.
-  useEffect(() => window.baton.onDictation((event: DictationEvent) => {
+  useEffect(() => window.kovan.onDictation((event: DictationEvent) => {
     if (cancelled.current) return;
     switch (event.type) {
       case 'ready':
@@ -203,12 +203,12 @@ export function DictationLayer() {
     window.addEventListener('keydown', down, true);
     window.addEventListener('keyup', up, true);
     window.addEventListener('blur', blur);
-    window.addEventListener('baton:dictate', asked);
+    window.addEventListener('kovan:dictate', asked);
     return () => {
       window.removeEventListener('keydown', down, true);
       window.removeEventListener('keyup', up, true);
       window.removeEventListener('blur', blur);
-      window.removeEventListener('baton:dictate', asked);
+      window.removeEventListener('kovan:dictate', asked);
     };
   }, [toggle, cancel, set]);
 
@@ -246,7 +246,7 @@ export function DictationLayer() {
         <div className="dictation-error">
           <span>{state.message}</span>
           {state.pane && (
-            <button type="button" className="ghost" onClick={() => void window.baton.privacyOpen(state.pane!)}>
+            <button type="button" className="ghost" onClick={() => void window.kovan.privacyOpen(state.pane!)}>
               Open System Settings
             </button>
           )}
@@ -308,7 +308,7 @@ function SpeechProviderSettings({ onProvider }: { onProvider: (id: SpeechProvide
   const [key, setKey] = useState('');
   const [test, setTest] = useState<{ running: boolean; text?: string; ok?: boolean }>({ running: false });
 
-  const reload = useCallback(() => window.baton.speechSetup().then(setSetup), []);
+  const reload = useCallback(() => window.kovan.speechSetup().then(setSetup), []);
   useEffect(() => { void reload(); }, [reload]);
   if (!setup) return null;
 
@@ -317,18 +317,18 @@ function SpeechProviderSettings({ onProvider }: { onProvider: (id: SpeechProvide
     const next = { ...current, [info.id]: value };
     if (!value.trim()) delete next[info.id];
     setSetup({ ...setup, [setting === 'dictation.models' ? 'models' : 'baseUrls']: next });
-    void window.baton.setSetting(setting, next);
+    void window.kovan.setSetting(setting, next);
   };
   const pick = (id: SpeechProviderId) => {
     setSetup({ ...setup, provider: id });
     setKey('');
     setTest({ running: false });
     onProvider(id);
-    void window.baton.setSetting('dictation.provider', id);
+    void window.kovan.setSetting('dictation.provider', id);
   };
   const runTest = async () => {
     setTest({ running: true });
-    const result = await window.baton.speechTest(info.id);
+    const result = await window.kovan.speechTest(info.id);
     setTest(result.ok
       ? { running: false, ok: true, text: `Heard “${result.text}” in ${(result.ms / 1000).toFixed(1)} s.` }
       : { running: false, ok: false, text: result.message });
@@ -366,7 +366,7 @@ function SpeechProviderSettings({ onProvider }: { onProvider: (id: SpeechProvide
                 value={setup.whisperModel}
                 onChange={(e) => {
                   setSetup({ ...setup, whisperModel: e.target.value });
-                  void window.baton.setSetting('dictation.whisperModel', e.target.value);
+                  void window.kovan.setSetting('dictation.whisperModel', e.target.value);
                 }}
               >
                 {!setup.whisperModel && <option value="">No model found</option>}
@@ -374,7 +374,7 @@ function SpeechProviderSettings({ onProvider }: { onProvider: (id: SpeechProvide
                   <option key={f} value={f}>{fileName(f)}{f.includes('/VoiceSmith/') ? ' · VoiceSmith’s' : ''}</option>
                 ))}
               </select>
-              <button type="button" className="ghost" onClick={() => void window.baton.speechPickModel().then((f) => { if (f) void reload(); })}>
+              <button type="button" className="ghost" onClick={() => void window.kovan.speechPickModel().then((f) => { if (f) void reload(); })}>
                 Choose file…
               </button>
             </div>
@@ -401,12 +401,12 @@ function SpeechProviderSettings({ onProvider }: { onProvider: (id: SpeechProvide
               />
               <button
                 type="button" className="ghost" disabled={!key.trim()}
-                onClick={() => void window.baton.speechKey(info.id, key).then(() => { setKey(''); void reload(); })}
+                onClick={() => void window.kovan.speechKey(info.id, key).then(() => { setKey(''); void reload(); })}
               >
                 Save
               </button>
               {setup.keys[info.id] && (
-                <button type="button" className="ghost" onClick={() => void window.baton.speechKey(info.id, '').then(reload)}>
+                <button type="button" className="ghost" onClick={() => void window.kovan.speechKey(info.id, '').then(reload)}>
                   Remove
                 </button>
               )}
@@ -414,7 +414,7 @@ function SpeechProviderSettings({ onProvider }: { onProvider: (id: SpeechProvide
           </label>
           {info.keyUrl && (
             <p className="settings-note">
-              Get a key: <button type="button" className="link" onClick={() => void window.baton.openExternal(info.keyUrl!)}>{info.keyUrl.replace(/^https:\/\//, '')}</button>
+              Get a key: <button type="button" className="link" onClick={() => void window.kovan.openExternal(info.keyUrl!)}>{info.keyUrl.replace(/^https:\/\//, '')}</button>
             </p>
           )}
         </>
@@ -447,17 +447,17 @@ function SpeechProviderSettings({ onProvider }: { onProvider: (id: SpeechProvide
 export function DictationSettings() {
   const [enabled, setEnabled] = useState(true);
   const [setting, setSetting] = useState('');
-  const [status, setStatus] = useState<Awaited<ReturnType<typeof window.baton.dictationStatus>>>();
+  const [status, setStatus] = useState<Awaited<ReturnType<typeof window.kovan.dictationStatus>>>();
   const [provider, setProvider] = useState<SpeechProviderId>();
   const apple = (provider ?? status?.provider ?? 'apple') === 'apple';
 
   useEffect(() => {
-    void window.baton.settings().then((s) => {
+    void window.kovan.settings().then((s) => {
       setEnabled(s['dictation.enabled'] !== false);
       setSetting(typeof s['dictation.locale'] === 'string' ? s['dictation.locale'] : '');
     });
     // Permissions may have changed in System Settings since last time.
-    void window.baton.dictationStatus(true).then(setStatus);
+    void window.kovan.dictationStatus(true).then(setStatus);
   }, []);
 
   const auto = status?.locales.find((l) => l.id === status.locale);
@@ -474,7 +474,7 @@ export function DictationSettings() {
           checked={enabled}
           onChange={(e) => {
             setEnabled(e.target.checked);
-            void window.baton.setSetting('dictation.enabled', e.target.checked);
+            void window.kovan.setSetting('dictation.enabled', e.target.checked);
           }}
         />
         <span>Dictate with double-tap ⌘</span>
@@ -490,8 +490,8 @@ export function DictationSettings() {
               value={setting}
               onChange={(e) => {
                 setSetting(e.target.value);
-                void window.baton.setSetting('dictation.locale', e.target.value);
-                void window.baton.dictationStatus().then(setStatus);
+                void window.kovan.setSetting('dictation.locale', e.target.value);
+                void window.kovan.dictationStatus().then(setStatus);
               }}
             >
               <option value="">
@@ -514,7 +514,7 @@ export function DictationSettings() {
               <div>
                 Microphone: <strong>{PERMISSION[status.mic] ?? status.mic}</strong>
                 {status.mic === 'denied' && (
-                  <button type="button" className="link" onClick={() => void window.baton.privacyOpen('mic')}>
+                  <button type="button" className="link" onClick={() => void window.kovan.privacyOpen('mic')}>
                     Open System Settings
                   </button>
                 )}
@@ -522,7 +522,7 @@ export function DictationSettings() {
               {apple && <div>
                 Speech recognition: <strong>{PERMISSION[status.speech] ?? status.speech}</strong>
                 {status.speech === 'denied' && (
-                  <button type="button" className="link" onClick={() => void window.baton.privacyOpen('speech')}>
+                  <button type="button" className="link" onClick={() => void window.kovan.privacyOpen('speech')}>
                     Open System Settings
                   </button>
                 )}

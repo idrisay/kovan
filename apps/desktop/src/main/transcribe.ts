@@ -16,12 +16,12 @@ import * as path from 'node:path';
 import {
   preferredWhisperModel, speechKeyName, speechLanguage, speechProvider, whisperCliText,
   type SpeechProviderId
-} from '@baton/core';
+} from '@kovan/core';
 import type { DesktopHost } from './host';
 
 const WHISPER_CLI = ['/opt/homebrew/bin/whisper-cli', '/usr/local/bin/whisper-cli'];
 
-/** Where whisper.cpp models are looked for: Baton's own folder, and
+/** Where whisper.cpp models are looked for: Kovan's own folder, and
  *  VoiceSmith's, so a model downloaded there is never downloaded twice. */
 export function whisperModelFolders(userData: string): string[] {
   return [

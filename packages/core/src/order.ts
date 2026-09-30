@@ -43,7 +43,7 @@ export function isReordering<T>(current: readonly T[], next: readonly T[]): bool
  * A saved order brought up to date with what exists now: the saved items in
  * their saved order, then anything new in its default place relative to the
  * rest, and nothing that no longer exists. How the rail's order (item 89)
- * survives a new tab being added to Baton — Activity arrived after people had
+ * survives a new tab being added to Kovan — Activity arrived after people had
  * already ordered theirs.
  */
 export function reconcileOrder<T>(saved: readonly unknown[], current: readonly T[]): T[] {

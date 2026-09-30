@@ -1,5 +1,5 @@
 /**
- * What an agent Baton started says it is doing (item 112): Working, Input
+ * What an agent Kovan started says it is doing (item 112): Working, Input
  * (a question or a permission prompt waiting on you) or Done (its turn is
  * over) — from the agent itself, never guessed from terminal output.
  *
@@ -8,23 +8,23 @@
  *                a permission prompt → Input, Stop → Done. Your own hooks
  *                keep running beside them.
  *   Codex        its `notify` command fires when a turn completes → Done. Your
- *                own `notify` (config.toml) still runs, after Baton's. Codex
+ *                own `notify` (config.toml) still runs, after Kovan's. Codex
  *                has nothing for its approval prompts, so Sessions uses the
  *                bell there → Input.
- *   OpenCode     a small plugin, handed only to the sessions Baton starts
+ *   OpenCode     a small plugin, handed only to the sessions Kovan starts
  *                through OPENCODE_CONFIG_CONTENT, beside your own plugins.
  *
- * Each one writes a single word to `status/<session id>` in Baton's data
- * folder, named by the BATON_SESSION_ID every session is started with; the
- * watcher here reads it. Outside Baton the scripts do nothing.
+ * Each one writes a single word to `status/<session id>` in Kovan's data
+ * folder, named by the KOVAN_SESSION_ID every session is started with; the
+ * watcher here reads it. Outside Kovan the scripts do nothing.
  */
 
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync, watch, type FSWatcher } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { modelFamily } from '@baton/core';
-import type { Runner } from '@baton/agent';
+import { modelFamily } from '@kovan/core';
+import type { Runner } from '@kovan/agent';
 
 export type AgentState = 'working' | 'input' | 'done';
 export type StatusSource = 'claude' | 'codex' | 'opencode';
@@ -32,7 +32,7 @@ export type StatusSource = 'claude' | 'codex' | 'opencode';
 const STATES = new Set<AgentState>(['working', 'input', 'done']);
 
 const HOOK = `#!/bin/sh
-# Baton's agent-status hook (item 112). Writes one word for the session Baton
+# Kovan's agent-status hook (item 112). Writes one word for the session Kovan
 # started this agent in; does nothing anywhere else.
 #   $1  working | input | done     $2  claude | codex
 #   codex: $3 your own notify command, base64 (may be empty), $4 Codex's JSON
@@ -51,23 +51,23 @@ case "$2" in
       [ -n "$next" ] && /bin/sh -c "$next \\"\\$1\\"" sh "$4" >/dev/null 2>&1 &
     fi ;;
 esac
-[ -n "$BATON_STATUS_DIR" ] && [ -n "$BATON_SESSION_ID" ] || exit 0
-file="$BATON_STATUS_DIR/$BATON_SESSION_ID"
+[ -n "$KOVAN_STATUS_DIR" ] && [ -n "$KOVAN_SESSION_ID" ] || exit 0
+file="$KOVAN_STATUS_DIR/$KOVAN_SESSION_ID"
 printf '%s' "$state" > "$file.$$" 2>/dev/null && mv -f "$file.$$" "$file"
 exit 0
 `;
 
-const PLUGIN = `// Baton's OpenCode plugin (item 112): says Working, Input or Done for the
-// session Baton started OpenCode in. Loaded only there, through
-// OPENCODE_CONFIG_CONTENT; it does nothing without BATON_SESSION_ID.
+const PLUGIN = `// Kovan's OpenCode plugin (item 112): says Working, Input or Done for the
+// session Kovan started OpenCode in. Loaded only there, through
+// OPENCODE_CONFIG_CONTENT; it does nothing without KOVAN_SESSION_ID.
 import { renameSync, writeFileSync } from "node:fs";
 
 const children = new Set();
 let last;
 
 function set(state) {
-  const dir = process.env.BATON_STATUS_DIR;
-  const id = process.env.BATON_SESSION_ID;
+  const dir = process.env.KOVAN_STATUS_DIR;
+  const id = process.env.KOVAN_SESSION_ID;
   if (!dir || !id || state === last) return;
   last = state;
   try {
@@ -77,7 +77,7 @@ function set(state) {
   } catch {}
 }
 
-export const BatonStatus = async () => ({
+export const KovanStatus = async () => ({
   event: async ({ event }) => {
     const type = event && event.type;
     const p = (event && event.properties) || {};
@@ -98,7 +98,7 @@ export const BatonStatus = async () => ({
   }
 });
 
-export default { id: "baton-status", server: BatonStatus };
+export default { id: "kovan-status", server: KovanStatus };
 `;
 
 export interface RunnerStatus {
@@ -119,11 +119,11 @@ export class AgentStatus {
   }
 
   private get hook(): string {
-    return path.join(this.userData, 'bin', 'baton-agent-status.sh');
+    return path.join(this.userData, 'bin', 'kovan-agent-status.sh');
   }
 
   private get plugin(): string {
-    return path.join(this.userData, 'bin', 'baton-opencode-status.js');
+    return path.join(this.userData, 'bin', 'kovan-opencode-status.js');
   }
 
   /** What a runner is started with so it reports its status; nothing for an agent that can't. */
@@ -155,7 +155,7 @@ export class AgentStatus {
       if (family === 'codex') {
         await this.writeHook();
         const own = codexNotify();
-        // A notify Baton can't read is left alone rather than replaced.
+        // A notify Kovan can't read is left alone rather than replaced.
         if (own === 'unreadable') return { source: 'codex', args: [], env: {} };
         const next = own ? Buffer.from(own.map(shellQuote).join(' ')).toString('base64') : '';
         return { source: 'codex', args: ['-c', `notify=${JSON.stringify([this.hook, 'done', 'codex', next])}`], env: {} };
@@ -198,7 +198,7 @@ export class AgentStatus {
   }
 }
 
-/** Your own Codex `notify` command, to run after Baton's, when it's a plain list of strings. */
+/** Your own Codex `notify` command, to run after Kovan's, when it's a plain list of strings. */
 function codexNotify(): string[] | undefined | 'unreadable' {
   const file = path.join(process.env['CODEX_HOME'] ?? path.join(os.homedir(), '.codex'), 'config.toml');
   if (!existsSync(file)) return undefined;

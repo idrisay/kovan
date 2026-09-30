@@ -15,7 +15,7 @@
 
 import { useRef } from 'react';
 
-const KEY = 'baton.sidebar-width';
+const KEY = 'kovan.sidebar-width';
 const MIN = 220;
 // A fraction of the window, not a fixed number of pixels — a constant picked
 // against one laptop screen is already short of what an external monitor

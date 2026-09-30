@@ -6,7 +6,7 @@ describe('withoutInheritedClaudeSession', () => {
     const env = {
       PATH: '/usr/bin:/bin',
       HOME: '/Users/idrisay',
-      // What launching Baton from inside a Claude Code session leaves behind.
+      // What launching Kovan from inside a Claude Code session leaves behind.
       CLAUDE_CONFIG_DIR: '/Users/idrisay/.claude-admin',
       CLAUDE_CODE_SESSION_ID: 'abc123',
       CLAUDE_CODE_CHILD_SESSION: '1',

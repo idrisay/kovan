@@ -34,7 +34,7 @@ export function installZoomRouting(): void {
   document.addEventListener('pointerdown', note, true);
   document.addEventListener('focusin', note, true);
 
-  window.baton.onFontSizeStep((step) => {
+  window.kovan.onFontSizeStep((step) => {
     if (target === 'sidebar') stepSidebarSize(step);
     else if (target === 'reading') stepReadingSize(step);
     else if (target === 'chrome') stepChromeSize(step);

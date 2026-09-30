@@ -11,7 +11,7 @@ import react from '@vitejs/plugin-react';
  * instead, which also gives the main process a single file to load and keeps
  * `asar` packing simple.
  */
-const bundleWorkspace = { exclude: ['@baton/core', '@baton/host', '@baton/providers'] };
+const bundleWorkspace = { exclude: ['@kovan/core', '@kovan/host', '@kovan/providers'] };
 
 export default defineConfig({
   main: {

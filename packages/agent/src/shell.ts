@@ -17,21 +17,21 @@ const run = promisify(execFile);
 /** `command` | `function` | `alias` | `none` — what `whence -w` reports. */
 export type CommandKind = 'command' | 'function' | 'alias' | 'builtin' | 'none';
 
-const MARKER = '__baton_env_marker__';
+const MARKER = '__kovan_env_marker__';
 
 /**
  * Strips the environment a running Claude Code session leaves on its own
  * process — `CLAUDE_CONFIG_DIR` chief among them, plus the `CLAUDE_CODE_*`
  * session/messaging identifiers and `CLAUDECODE`/`AI_AGENT`.
  *
- * When Baton itself is launched from inside a Claude Code session — a normal
+ * When Kovan itself is launched from inside a Claude Code session — a normal
  * thing to do while developing it — that session's environment is what
  * `execFile` inherits here, `CLAUDE_CONFIG_DIR` included. Left in, every
  * "Claude Code" run this app starts would silently open under whichever
- * profile (`claude-personal`, `claude-admin`, …) happened to launch Baton,
+ * profile (`claude-personal`, `claude-admin`, …) happened to launch Kovan,
  * rather than the account you actually picked in Settings. Worse,
  * `CLAUDE_CODE_CHILD_SESSION` and the messaging socket/token would make the
- * new agent think it is a child of the session that launched Baton, not an
+ * new agent think it is a child of the session that launched Kovan, not an
  * independent run.
  */
 export function withoutInheritedClaudeSession(
@@ -91,7 +91,7 @@ export class ShellEnvironment {
    * and `.zshrc` is where installers put their PATH line: Claude Code's own
    * installer writes `export PATH="$HOME/.local/bin:$PATH"` there. Probing
    * with `-l` alone left `~/.local/bin` off the PATH, so `claude` was
-   * "not on your PATH" to Baton while `describe` (interactive) and every
+   * "not on your PATH" to Kovan while `describe` (interactive) and every
    * terminal found it. A plain `-l` probe stays as the fallback for an rc that
    * will not run non-attached.
    *
@@ -158,7 +158,7 @@ export class ShellEnvironment {
       try {
         const { stdout } = await run(
           loginShell(),
-          ['-i', '-l', '-c', script, 'baton', ...missing],
+          ['-i', '-l', '-c', script, 'kovan', ...missing],
           { env, maxBuffer: 1024 * 1024, timeout: 15_000 }
         );
         for (const line of stdout.split('\n')) {

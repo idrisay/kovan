@@ -3,7 +3,7 @@ import { DictateButton } from './Dictation';
 import { useMenuDismiss } from './menuDismiss';
 import {
   folderMemoryFrom, formatAge, modelFamily, recallFolders, rememberFolders, type FolderMemory, type ModelFamily
-} from '@baton/core';
+} from '@kovan/core';
 import type {
   JiraIssue, ModelList, PullSummary, RunKind, Runner, RunnerLimits, RunTarget, SentryFrame, SentryIssue, StartResult, TestSelection
 } from './types';
@@ -19,7 +19,7 @@ const LAST_MODEL_KEY = 'runner.lastModel';
  * the agent per kind of run, the folders per ticket or pull request — a new
  * ticket starts from the last ticket's.
  */
-const CHOICES_KEY = 'baton.run-choices';
+const CHOICES_KEY = 'kovan.run-choices';
 
 interface RunChoices { agent: Partial<Record<RunKind, string>>; folders: FolderMemory }
 
@@ -36,7 +36,7 @@ function readChoices(): RunChoices {
 }
 
 /** Whether the prompt was last left unfolded (item 117). */
-const PROMPT_OPEN_KEY = 'baton.run-prompt-open';
+const PROMPT_OPEN_KEY = 'kovan.run-prompt-open';
 
 function remember(key: string, value: boolean): void {
   try { localStorage.setItem(key, value ? '1' : '0'); } catch { /* a convenience */ }
@@ -105,10 +105,10 @@ export function RunSheet({
   const runner = runners.find((r) => r.id === runnerId);
   // Read once when the sheet opens: files the agents wrote, no requests (item 108).
   const [limits, setLimits] = useState<Record<string, RunnerLimits>>();
-  useEffect(() => { void window.baton.agentLimits().then(setLimits).catch(() => setLimits({})); }, []);
+  useEffect(() => { void window.kovan.agentLimits().then(setLimits).catch(() => setLimits({})); }, []);
 
   useEffect(() => {
-    void window.baton.runners().then((list) => {
+    void window.kovan.runners().then((list) => {
       setRunners(list);
       // The agent you last used for this kind of run, if it's still
       // installed (item 94); else the first.
@@ -116,9 +116,9 @@ export function RunSheet({
       const remembered = last && list.some((r) => r.id === last) ? last : undefined;
       setRunnerId((current) => current || remembered || list[0]?.id || '');
     });
-    void window.baton.knownModels().then(setKnownModels);
-    void window.baton.runTargets().then(setTargets);
-    void window.baton.defaultCwd(pull?.repo).then((dir) => setCwd((c) => c || dir || ''));
+    void window.kovan.knownModels().then(setKnownModels);
+    void window.kovan.runTargets().then(setTargets);
+    void window.kovan.defaultCwd(pull?.repo).then((dir) => setCwd((c) => c || dir || ''));
     // Rebuilding on every keystroke of the prompt would discard the user's
     // edits, so this deliberately runs once per sheet.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -151,7 +151,7 @@ export function RunSheet({
   }, [cwd, targets, pull]);
 
   const rebuild = useCallback((selection: TestSelection | undefined) => {
-    void window.baton.buildPrompt(kind, subject, selection).then((next) => {
+    void window.kovan.buildPrompt(kind, subject, selection).then((next) => {
       setPrompt(next);
       setEdited(false);
       setStale(false);
@@ -176,7 +176,7 @@ export function RunSheet({
   // there is no single "next time" to attach it to.
   useEffect(() => {
     if (!runnerId) return;
-    void window.baton.settings().then((settings) => {
+    void window.kovan.settings().then((settings) => {
       const remembered = (settings[LAST_MODEL_KEY] as Record<string, string> | undefined)?.[runnerId];
       setModel(remembered ?? '');
     });
@@ -186,14 +186,14 @@ export function RunSheet({
     setBusy(true);
     setError('');
     try {
-      const result: StartResult = await window.baton.startAgent(
+      const result: StartResult = await window.kovan.startAgent(
         { kind, subjectId, runnerId, cwd, extraCwds, prompt, model: model || undefined, test },
         subject
       );
       if (result.ok) {
-        const settings = await window.baton.settings();
+        const settings = await window.kovan.settings();
         const remembered = (settings[LAST_MODEL_KEY] as Record<string, string> | undefined) ?? {};
-        void window.baton.setSetting(LAST_MODEL_KEY, { ...remembered, [runnerId]: model });
+        void window.kovan.setSetting(LAST_MODEL_KEY, { ...remembered, [runnerId]: model });
         // What a run actually used is what next time starts from (item 94).
         writeChoices((c) => ({
           agent: { ...c.agent, [kind]: runnerId },
@@ -258,9 +258,9 @@ export function RunSheet({
               onChange={(next) => {
                 setModel(next);
                 // Kept the moment it's picked, not only when a run starts (item 94).
-                void window.baton.settings().then((settings) => {
+                void window.kovan.settings().then((settings) => {
                   const remembered = (settings[LAST_MODEL_KEY] as Record<string, string> | undefined) ?? {};
-                  void window.baton.setSetting(LAST_MODEL_KEY, { ...remembered, [runnerId]: next });
+                  void window.kovan.setSetting(LAST_MODEL_KEY, { ...remembered, [runnerId]: next });
                 });
               }}
               list={knownModels[modelFamily(runner.command) ?? ('' as ModelFamily)]}
@@ -344,7 +344,7 @@ function ModelField({ runner, model, list, onChange, onList }: {
   async function search() {
     setSearching(true);
     setError('');
-    const result = await window.baton.modelsSearch(runner.command);
+    const result = await window.kovan.modelsSearch(runner.command);
     setSearching(false);
     if ('error' in result) setError(result.error);
     else if (family) onList(family, result);
@@ -388,12 +388,12 @@ function ModelField({ runner, model, list, onChange, onList }: {
           <button type="button" className="link" onClick={() => { setTyping(false); onChange(''); }}>List</button>
         )}
         {searching ? (
-          <button type="button" className="link" onClick={() => void window.baton.modelsSearchCancel()}>Cancel</button>
+          <button type="button" className="link" onClick={() => void window.kovan.modelsSearchCancel()}>Cancel</button>
         ) : (
           <button
             type="button" className="icon-button boxed" disabled={!family}
             aria-label="Search for current models"
-            title={family ? 'Search for current models' : 'Baton cannot look up models for this agent'}
+            title={family ? 'Search for current models' : 'Kovan cannot look up models for this agent'}
             onClick={() => void search()}
           >
             <RefreshIcon size={13} />

@@ -8,8 +8,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { isModelName, type PriceCheckRunner } from '@baton/core';
-import { parseQuickOutput, shellEnvironment } from '@baton/agent';
+import { isModelName, type PriceCheckRunner } from '@kovan/core';
+import { parseQuickOutput, shellEnvironment } from '@kovan/agent';
 
 const TIMEOUT_MS = 5 * 60_000;
 
@@ -42,7 +42,7 @@ export class WebAsk {
     const executable = await shellEnvironment.which(runner);
     if (!executable) return { error: `${runner} is not installed, or not on your login shell's PATH.` };
 
-    const cwd = await mkdtemp(path.join(tmpdir(), 'baton-web-'));
+    const cwd = await mkdtemp(path.join(tmpdir(), 'kovan-web-'));
     const last = path.join(cwd, 'answer.txt');
     const env = { ...(await shellEnvironment.environment()) };
     let args: string[];

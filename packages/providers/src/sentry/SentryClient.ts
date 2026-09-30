@@ -1,9 +1,9 @@
-import type { CancelSignal } from '@baton/host';
-import type { SentryIssue } from '@baton/core';
+import type { CancelSignal } from '@kovan/host';
+import type { SentryIssue } from '@kovan/core';
 import type { HttpClient } from '../http';
 
 /** The wire shape of one stack frame, before `resolveFrame()` places it on
- *  disk — that step needs Node's `path` and lives in `@baton/core/node`,
+ *  disk — that step needs Node's `path` and lives in `@kovan/core/node`,
  *  which this package (built for the renderer too) cannot import. */
 export interface RawSentryFrame {
   filename?: string;

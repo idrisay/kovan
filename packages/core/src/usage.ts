@@ -306,11 +306,11 @@ export function codexSessionMeta(firstLine: string): { cwd: string; startedAt: n
 export type UsageSource = 'claude' | 'codex' | 'quick';
 
 /**
- * One Baton session's usage, or one quick-model job's. What the Sessions tab,
+ * One Kovan session's usage, or one quick-model job's. What the Sessions tab,
  * the Usage overview and the ticket/PR panes all total up.
  */
 export interface UsageRecord {
-  /** The Baton session id, or the quick job id. */
+  /** The Kovan session id, or the quick job id. */
   id: string;
   title: string;
   /** A ticket key or `repo#number` — what the session was started from. */

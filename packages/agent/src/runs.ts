@@ -32,7 +32,7 @@ export const RUN_KIND_LABEL: Record<RunKind, string> = {
 
 /**
  * What "Check it shipped" concluded, in the prompt's own four words
- * (`VERDICTS` in `@baton/core`'s prompts).
+ * (`VERDICTS` in `@kovan/core`'s prompts).
  */
 export type Verdict = 'unknown' | 'implemented' | 'partly' | 'not-implemented' | 'unchecked';
 
@@ -79,13 +79,13 @@ export interface AgentRun {
 
 /** The environment variables every run is given, and the prompts name. */
 export const RUN_ENV = {
-  report: 'BATON_REPORT',
-  shots: 'BATON_SHOTS',
-  ticket: 'BATON_TICKET',
+  report: 'KOVAN_REPORT',
+  shots: 'KOVAN_SHOTS',
+  ticket: 'KOVAN_TICKET',
   /** One line: what the agent is doing right now, shown above its newest screenshot. */
-  status: 'BATON_STATUS',
+  status: 'KOVAN_STATUS',
   /** "<screenshot> <url>" per line — the page each screenshot shows (item 109). */
-  pages: 'BATON_PAGES'
+  pages: 'KOVAN_PAGES'
 } as const;
 
 /**
@@ -115,13 +115,13 @@ export class RunStore {
   }
 
   /**
-   * `BATON_RUNS_ROOT` moves the store, which is what the tests use. Read from
+   * `KOVAN_RUNS_ROOT` moves the store, which is what the tests use. Read from
    * the environment rather than exposed as a setter: a global the app could
    * assign is a global the app eventually does assign, and then a bug puts
    * somebody's screenshots in /tmp.
    */
   static rootFor(stateDir: string): string {
-    return process.env['BATON_RUNS_ROOT'] ?? path.join(stateDir, 'runs');
+    return process.env['KOVAN_RUNS_ROOT'] ?? path.join(stateDir, 'runs');
   }
 
   /** Creates the folder for a new run and returns it, ready to be filled. */

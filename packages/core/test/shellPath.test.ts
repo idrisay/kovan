@@ -8,6 +8,6 @@ describe('shellPath', () => {
   });
 
   it('leaves a plain path alone', () => {
-    expect(shellPath('/tmp/baton-paste/pasted-2026.png')).toBe('/tmp/baton-paste/pasted-2026.png');
+    expect(shellPath('/tmp/kovan-paste/pasted-2026.png')).toBe('/tmp/kovan-paste/pasted-2026.png');
   });
 });

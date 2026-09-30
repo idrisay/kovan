@@ -37,8 +37,8 @@ import {
   type DiffSide,
   type FileDiff,
   type RepoStatus
-} from '@baton/git';
-import { isReordering } from '@baton/core';
+} from '@kovan/git';
+import { isReordering } from '@kovan/core';
 import type { DesktopHost } from './host';
 
 export interface Workspace {
@@ -337,7 +337,7 @@ export class Workspaces {
    *
    * An untracked path has no git state to restore, so it is deleted here
    * directly rather than through git — and deleted to the OS Trash, not
-   * `rm`ed outright, on the same principle Baton uses nowhere else yet but
+   * `rm`ed outright, on the same principle Kovan uses nowhere else yet but
    * should: a "roll back" button one misclick away from a change list must
    * stay recoverable, the way discarding a *tracked* edit already is (its
    * previous state lives in git whether or not this button existed).
@@ -508,7 +508,7 @@ export class Workspaces {
       // A temp file in /tmp would make this a copy, which is not.
       const temporary = path.join(
         path.dirname(resolved),
-        `.baton-${path.basename(resolved)}.${randomUUID().slice(0, 8)}`
+        `.kovan-${path.basename(resolved)}.${randomUUID().slice(0, 8)}`
       );
       try {
         // Carry the original's permission bits: writing 0644 over an

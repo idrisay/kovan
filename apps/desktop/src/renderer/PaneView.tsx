@@ -136,7 +136,7 @@ function PaneLeafView({
               <SessionUsageStrip id={shown.id} />
               <button
                 type="button" className="icon-button boxed" aria-label="Close session" title="Close session"
-                onClick={() => void window.baton.sessionClose(shown.id)}
+                onClick={() => void window.kovan.sessionClose(shown.id)}
               >
                 <CloseIcon size={11} />
               </button>

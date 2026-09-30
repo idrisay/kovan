@@ -1,5 +1,5 @@
 {
-  "name": "baton",
+  "name": "kovan",
   "version": "0.1.0",
   "private": true,
   "description": "Tells you what is blocked on you, and hands it to a coding agent.",
@@ -11,12 +11,12 @@
     "node": ">=22"
   },
   "scripts": {
-    "typecheck": "tsc --build && npm run typecheck --workspace @baton/desktop",
+    "typecheck": "tsc --build && npm run typecheck --workspace @kovan/desktop",
     "test": "vitest run",
-    "dev": "npm run dev --workspace @baton/desktop",
-    "build": "npm run build --workspace @baton/desktop",
+    "dev": "npm run dev --workspace @kovan/desktop",
+    "build": "npm run build --workspace @kovan/desktop",
     "clean": "tsc --build --clean",
-    "smoke": "npm run smoke --workspace @baton/desktop",
+    "smoke": "npm run smoke --workspace @kovan/desktop",
     "import": "node scripts/import-from-devhub.mjs"
   },
   "devDependencies": {

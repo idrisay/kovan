@@ -74,10 +74,10 @@ describe('finding agents', () => {
     expect(hostApp(claude.ancestors.map((a) => a.command))).toBe('VS Code');
   });
 
-  it('does not fold an agent into one above a Baton terminal', () => {
+  it('does not fold an agent into one above a Kovan terminal', () => {
     const rows = parsePs([
       '100     1 Wed Sep 23 09:40:12 2026   0:01.00 1000 ttys001  claude',
-      '200   100 Wed Sep 23 09:40:12 2026   0:01.00 1000 ttys001  /Applications/Baton.app/Contents/MacOS/Baton',
+      '200   100 Wed Sep 23 09:40:12 2026   0:01.00 1000 ttys001  /Applications/Kovan.app/Contents/MacOS/Kovan',
       '300   200 Wed Sep 23 09:40:12 2026   0:01.00 1000 ttys009  /bin/zsh -l',
       '400   300 Wed Sep 23 09:40:12 2026   0:01.00 1000 ttys009  claude'
     ].join('\n'));

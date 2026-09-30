@@ -790,7 +790,7 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 .run-buttons { display: contents; }
 
 /* Item 118. Comfortable: a toolbar pinned across the top of the pane (where
-   it lives, its related chips; the service, a terminal and what Baton does),
+   it lives, its related chips; the service, a terminal and what Kovan does),
    then the title and one quiet line of state and details. Its edges line up
    with the reading column under it. */
 .detail-toolbar {
@@ -2097,7 +2097,7 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 /*
  * The quick model's button and card (Quick.tsx). A third weight next to the
  * two clay run buttons: dashed and blue, because it is not an agent run — it
- * only turns text Baton already has into shorter text, with a free model.
+ * only turns text Kovan already has into shorter text, with a free model.
  */
 .quick {
   display: inline-flex; align-items: center; gap: 6px;
@@ -2464,7 +2464,7 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .row.one-line.drop-after::after { bottom: -2px; }
 
 /* A ticket's pull requests, one line each under its title. Each row opens
-   the pull request in Baton's Pull requests tab. */
+   the pull request in Kovan's Pull requests tab. */
 .linked-pulls {
   display: flex; flex-direction: column; margin-top: 12px; max-width: var(--column);
   border: 1px solid var(--hair); border-radius: 9px; overflow: hidden;

@@ -11,7 +11,7 @@
 
 import {
   formatAge, isBlocked, isMerged, primaryFlag, pullFlags, type PullFlagId, type PullSummary
-} from '@baton/core';
+} from '@kovan/core';
 import { ChevronIcon } from './icons';
 
 /** Which status colour a flag gets. The four are fixed by the design. */
