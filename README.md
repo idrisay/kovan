@@ -237,8 +237,22 @@ to update — it quits the running copy first, because swapping the bundle under
 live process leaves it running old code from a deleted inode.
 
 Kovan is **ad-hoc signed**. That is fine for a local install (Gatekeeper only
-quarantines what was downloaded) but it is not distributable: sending the
-bundle to another Mac needs the Developer ID and notarisation of Phase 7.
+quarantines what was downloaded). A downloaded copy opens after one
+**Open Anyway** in System Settings › Privacy & Security, until the Developer ID
+and notarisation of Phase 7 remove that step.
+
+### Releasing
+
+The source stays private; downloads are published to the public
+[idrisay/kovan-releases](https://github.com/idrisay/kovan-releases), whose
+README has the install steps.
+
+1. Raise `version` in `apps/desktop/package.json`.
+2. `npm run release` writes `Kovan-<version>-arm64.dmg`, a `.zip` and
+   `SHA256SUMS.txt` to `apps/desktop/release-<version>/`.
+3. Tag `v<version>` here, then publish the three files as a release of
+   `kovan-releases`. Upload to a draft and publish once GitHub's digests
+   match `SHA256SUMS.txt`; a large upload can time out and need a retry.
 
 Only one Kovan runs at a time — a single-instance lock means a `dev` build
 exits immediately while the installed one is running. Quit it from the menu bar
