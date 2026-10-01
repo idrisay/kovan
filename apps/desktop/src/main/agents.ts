@@ -394,8 +394,10 @@ export class Agents {
         const omitted = subject.issue.comments.length - recent.length;
         // What "Condense" on the ticket pane made of the omitted ones, if
         // anybody clicked it. It covers the first `condensed` comments; any
-        // that arrived after it was made are still just counted.
-        const condensed = omitted > 0 ? await this.quick?.result('ticket-condense', subject.issue.key) : undefined;
+        // that arrived after it was made are still just counted. Not when
+        // Condense is turned off in Settings (item 124): off means unused.
+        const condenseOn = this.host.config.get<boolean>('buttons.condense', true);
+        const condensed = omitted > 0 && condenseOn ? await this.quick?.result('ticket-condense', subject.issue.key) : undefined;
         const covered = Math.min(condensed?.basis['condensed'] ?? 0, omitted);
         if (condensed && covered > 0) {
           lines.push('### Earlier discussion', '');

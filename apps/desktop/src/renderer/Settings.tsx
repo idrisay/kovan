@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { ACTIVITY_SETTINGS, ActivitySettings } from './Activity';
 import { DictationSettings } from './Dictation';
 import {
@@ -12,6 +12,8 @@ import { FontSizeControl, useTerminalFontSize } from './terminalFontSize';
 import { TestEnvironmentSettings } from './TestEnvironments';
 import { ChromeSizeControl, ReadingSizeControl, SidebarSizeControl, useChromeSize, useReadingSize, useSidebarSize } from './readingSize';
 import { useAppearance } from './appearance';
+import { QUICK_BUTTONS, setQuickButton, useQuickButtons } from './quickButtons';
+import { setShell, useShellChoice } from './shellChoice';
 import { ACCENTS, THEMES, speechProvider } from '@kovan/core';
 import { ChevronIcon, CloseIcon, SearchIcon } from './icons';
 
@@ -70,6 +72,47 @@ const EXTRA_FIELDS: Partial<Record<string, Field[]>> = {
  * modal sheet, not a window, and the fields below are exactly what Kovan's
  * prompts already know how to use.
  */
+/**
+ * Which quick-model buttons the pull request and ticket headers show (item
+ * 124). Summarize and Review start off; ticking one shows it at once, behind
+ * this sheet, and unticking hides its button and card but keeps its setup.
+ */
+/** The shell new terminals open in (item 126) — the same choice as the switch in Sessions' + menu. */
+function ShellSetting() {
+  const { shells, chosen } = useShellChoice();
+  if (shells.length < 2 || !chosen) return null;
+  const login = shells.find((s) => s.login);
+  return (
+    <>
+      <label>
+        <span>Shell for new terminals</span>
+        <select value={chosen.path} onChange={(e) => setShell(e.target.value)}>
+          {shells.map((s) => <option key={s.path} value={s.path}>{s.login ? `${s.name} (login shell)` : s.name} · {s.path}</option>)}
+        </select>
+      </label>
+      <p className="settings-note">Also switchable in the + menu in Sessions. Agents always start in your login shell{login ? ` (${login.name})` : ''}.</p>
+    </>
+  );
+}
+
+function QuickButtonSettings() {
+  const shown = useQuickButtons();
+  return (
+    <>
+      <h3>Buttons on pull requests and tickets</h3>
+      {QUICK_BUTTONS.map((button) => (
+        <Fragment key={button.id}>
+          <label className="checkbox-row">
+            <input type="checkbox" checked={shown[button.id]} onChange={(e) => setQuickButton(button.id, e.target.checked)} />
+            <span>{button.label}</span>
+          </label>
+          <p className="settings-note">{button.note}</p>
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
 /**
  * The model behind "Summarize" and "Condense". Saved on blur, like a native
  * preferences pane, since there is no provider to re-check on Save.
@@ -473,12 +516,12 @@ const SEARCH_INDEX: Record<SectionId, string[]> = {
   appearance: ['Theme', 'Dark', 'Light', 'OLED Black', 'Cool Graphite', 'Ember Low Light', 'High Contrast', 'Paper Soft',
     'Match macOS', 'Schedule', 'Accent', 'Colour-safe status colours', 'Show a shape with every status', 'List density',
     'Compact', 'Terminal colours', 'Boosted', 'Color', 'Night'],
-  text: ['Terminal font size', 'Ticket and pull request text size', 'Sidebar text size',
+  text: ['Shell for new terminals', 'Default shell', 'zsh', 'bash', 'Terminal font size', 'Ticket and pull request text size', 'Sidebar text size',
     'Tabs, session header and status bar text size', 'Status bar', 'Tabs', 'Font', 'Zoom'],
   notifications: ['macOS notifications', 'Launch Kovan at login', 'Activity', ...ACTIVITY_SETTINGS.map((a) => a.label)],
   dictation: ['Dictate with double-tap ⌘', 'Speech model', 'Apple Speech', 'whisper.cpp', 'OpenAI Whisper', 'Groq Whisper',
     'Deepgram', 'AssemblyAI', 'API key', 'Model file', 'Language', 'Microphone', 'Voice'],
-  agents: ['Quick model', 'Model (opencode)', 'Give up after (seconds)', 'Running agents', 'Idle after (minutes)',
+  agents: ['Buttons on pull requests and tickets', 'Summarize', 'Review', 'Condense earlier comments', 'Quick model', 'Model (opencode)', 'Give up after (seconds)', 'Running agents', 'Idle after (minutes)',
     'Remind me when an agent goes idle', 'Token prices', 'Usage', 'Cost', 'Review model'],
   connections: ['Token', 'API key'],
   environments: ['Environments', 'Test accounts', 'Site URL', 'Basic auth', 'Check it shipped', 'Password']
@@ -503,11 +546,13 @@ export function Settings({
    *  section closes, so a summary shows what was just changed. */
   const [raw, setRaw] = useState<Record<string, unknown>>({});
   const appearance = useAppearance();
+  const buttons = useQuickButtons();
   const [reading] = useReadingSize();
   const [sidebar] = useSidebarSize();
   const [chrome] = useChromeSize();
   const [saveResult, setSaveResult] = useState<Record<string, { ok: boolean; text: string }>>({});
   const [fontSize, bumpFontSize] = useTerminalFontSize();
+  const shellChoice = useShellChoice();
 
   useEffect(() => {
     void window.kovan.credentialFields().then(setFields);
@@ -602,7 +647,7 @@ export function Settings({
       appearance.statusShapes ? 'shapes on' : 'shapes off',
       appearance.density === 'compact' ? 'compact' : ''
     ].filter(Boolean).join(' · '),
-    text: `Terminal ${fontSize} · Reading ${reading}% · Sidebar ${sidebar}% · Tabs and status bar ${chrome}%`,
+    text: `${shellChoice.chosen && shellChoice.shells.length > 1 ? `${shellChoice.chosen.name} · ` : ''}Terminal ${fontSize} · Reading ${reading}% · Sidebar ${sidebar}% · Tabs and status bar ${chrome}%`,
     notifications: [
       notify ? 'macOS notifications on' : 'macOS notifications off',
       `${ACTIVITY_SETTINGS.filter((a) => on(a.setting)).length} of ${ACTIVITY_SETTINGS.length} activity kinds`,
@@ -616,10 +661,13 @@ export function Settings({
         ].join(' · ')
       : 'Off',
     agents: [
-      `Quick model ${typeof raw['quick.model'] === 'string' && raw['quick.model'] ? raw['quick.model'] : 'default'}`,
+      QUICK_BUTTONS.filter((b) => buttons[b.id]).map((b) => b.label.split(' ')[0]).join(', ') || 'No quick buttons',
+      buttons.summarize || buttons.review || buttons.condense
+        ? `Quick model ${typeof raw['quick.model'] === 'string' && raw['quick.model'] ? raw['quick.model'] : 'default'}`
+        : '',
       `idle after ${Number(raw['agents.idleMinutes']) || DEFAULT_IDLE_MINUTES} min`,
       on('agents.remind') ? 'reminders on' : 'reminders off'
-    ].join(' · '),
+    ].filter(Boolean).join(' · '),
     connections: providers.length === 0 ? '' : [
       ...providers.filter((id) => connected.includes(id as ProviderId)).map((id) => `✓ ${label(id)}`),
       (() => {
@@ -674,6 +722,7 @@ export function Settings({
       case 'text':
         return (
           <>
+            <ShellSetting />
             <label>
               <span>Terminal font size</span>
               <FontSizeControl size={fontSize} onBump={bumpFontSize} />
@@ -712,7 +761,9 @@ export function Settings({
       case 'agents':
         return (
           <>
-            <QuickModelSettings />
+            <QuickButtonSettings />
+            {/* Its setup only matters while one of them is on. */}
+            {(buttons.summarize || buttons.review || buttons.condense) && <QuickModelSettings />}
             <RunningAgentSettings />
             <TokenPriceSettings />
           </>

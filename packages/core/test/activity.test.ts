@@ -95,6 +95,57 @@ describe('diffActivity', () => {
     expect(events.map((e) => e.kind)).toEqual(['approved']);
   });
 
+  // Item 130: in a repository that doesn't require reviews GitHub leaves
+  // reviewDecision empty, and the approval only shows as one more "comment".
+  it("calls an approval an approval where the decision doesn't move", () => {
+    const { events } = twice(
+      github([pull(1, { commentCount: 2 })]),
+      github([pull(1, { commentCount: 3, lastCommenter: 'erin-dev', lastReviewState: 'APPROVED' })])
+    );
+    expect(events).toMatchObject([{ kind: 'approved', who: 'erin-dev', subject: 'acme/web#1' }]);
+  });
+
+  it('calls a second approval an approval, not a comment', () => {
+    const { events } = twice(
+      github([pull(1, { reviewDecision: 'approved', commentCount: 2 })]),
+      github([pull(1, { reviewDecision: 'approved', commentCount: 3, lastCommenter: 'bob-dev', lastReviewState: 'APPROVED' })])
+    );
+    expect(events.map((e) => e.kind)).toEqual(['approved']);
+  });
+
+  it('calls requested changes what they are', () => {
+    const { events } = twice(
+      github([pull(1, { commentCount: 2 })]),
+      github([pull(1, { commentCount: 3, lastCommenter: 'bob-dev', lastReviewState: 'CHANGES_REQUESTED' })])
+    );
+    expect(events.map((e) => e.kind)).toEqual(['changes-requested']);
+  });
+
+  it('still calls a commenting review a comment', () => {
+    const { events } = twice(
+      github([pull(1, { commentCount: 2 })]),
+      github([pull(1, { commentCount: 3, lastCommenter: 'bob-dev', lastReviewState: 'COMMENTED' })])
+    );
+    expect(events).toMatchObject([{ kind: 'new-comment', who: 'bob-dev' }]);
+  });
+
+  it('reports a comment that came with an approval as well', () => {
+    const { events } = twice(
+      github([pull(1, { commentCount: 2 })]),
+      github([pull(1, { commentCount: 4, lastCommenter: 'bob-dev', lastReviewState: 'APPROVED' })])
+    );
+    expect(events.map((e) => e.kind)).toEqual(['approved', 'new-comment']);
+  });
+
+  it('names the reviewer on an approval the decision reported', () => {
+    const { events } = twice(
+      github([pull(1, { commentCount: 2 })]),
+      github([pull(1, { reviewDecision: 'approved', commentCount: 3, lastCommenter: 'bob-dev', lastReviewState: 'APPROVED' })])
+    );
+    expect(events).toMatchObject([{ kind: 'approved', who: 'bob-dev' }]);
+    expect(events).toHaveLength(1);
+  });
+
   it('reports a newly assigned ticket', () => {
     const { events } = twice({ jira: { tickets: [ticket('A-1')] } }, { jira: { tickets: [ticket('A-1'), ticket('A-2')] } });
     expect(events).toMatchObject([{ kind: 'new-ticket', subject: 'A-2', title: 'Ticket A-2' }]);
@@ -156,6 +207,21 @@ describe('summaryFromApi comments', () => {
       reviews: { totalCount: 0, nodes: [] }
     });
     expect(summary).toMatchObject({ commentCount: 1, lastCommenter: 'a' });
+  });
+
+  it("keeps the newest review's state, and only when a review is the newest", () => {
+    const approved = summaryFromApi({
+      ...node,
+      comments: { totalCount: 1, nodes: [{ author: { login: 'a' }, createdAt: '2026-09-01T10:00:00Z' }] },
+      reviews: { totalCount: 1, nodes: [{ author: { login: 'b' }, submittedAt: '2026-09-02T10:00:00Z', state: 'APPROVED' }] }
+    });
+    expect(approved.lastReviewState).toBe('APPROVED');
+    const commentLast = summaryFromApi({
+      ...node,
+      comments: { totalCount: 1, nodes: [{ author: { login: 'a' }, createdAt: '2026-09-03T10:00:00Z' }] },
+      reviews: { totalCount: 1, nodes: [{ author: { login: 'b' }, submittedAt: '2026-09-02T10:00:00Z', state: 'APPROVED' }] }
+    });
+    expect(commentLast.lastReviewState).toBeUndefined();
   });
 
   it('leaves the count off when the query did not ask for comments', () => {

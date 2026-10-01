@@ -37,6 +37,13 @@ import type { RunnerLimits } from '../main/agentLimits';
  *  see the note on `Snapshot['refreshedAt']` in `main/poller.ts`. */
 export type PolledProvider = 'github' | 'jira' | 'sentry';
 
+/** A shell a new terminal can open in — see `main/shells.ts`. */
+export interface ShellOption {
+  path: string;
+  name: string;
+  login: boolean;
+}
+
 export interface SessionInfo {
   id: string;
   title: string;
@@ -53,6 +60,8 @@ export interface SessionInfo {
   /** The title the program running in a plain terminal set — see `SessionInfo.task` in main. */
   task?: string;
   renamed?: boolean;
+  /** The shell a plain terminal runs, when it isn't the login shell (item 126). */
+  shell?: string;
   /** The quick command (item 91) running in it, if any. */
   commandId?: string;
   /** What the agent says it is doing (item 112) — see `status` on `SessionInfo` in main. */
@@ -273,11 +282,13 @@ export interface KovanApi {
   workspaceWrite(file: string, text: string, expected?: FileStamp): Promise<WriteResult>;
 
   sessions(): Promise<SessionInfo[]>;
-  sessionBuffer(id: string): Promise<string>;
+  sessionBuffer(id: string): Promise<{ data: string; cols?: number; rows?: number; truncated: boolean }>;
   sessionWrite(id: string, data: string): Promise<void>;
   sessionResize(id: string, cols: number, rows: number): Promise<void>;
   sessionClose(id: string): Promise<void>;
   sessionRename(id: string, title: string): Promise<void>;
+  /** Installed shells from /etc/shells, login shell first (item 126). */
+  shells(): Promise<ShellOption[]>;
   openTerminal(cwd?: string, subject?: string, title?: string): Promise<SessionInfo>;
   onSessionOutput(listener: (id: string, data: string) => void): () => void;
   onSessions(listener: (list: SessionInfo[]) => void): () => void;

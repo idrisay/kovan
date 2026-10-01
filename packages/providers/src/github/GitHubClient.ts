@@ -95,7 +95,8 @@ const PULL_FIELDS = `
 /**
  * What Activity (item 86) needs to notice a new comment on your own pull
  * requests: the latest conversation comment and the latest review, with
- * their counts. A reply in a code review thread is posted as a review, so it
+ * their counts. The review's `state` tells an approval from a comment
+ * (item 130). A reply in a code review thread is posted as a review, so it
  * counts too.
  *
  * Deliberately not each review thread's latest comment: GitHub charges a
@@ -106,7 +107,7 @@ const PULL_FIELDS = `
  */
 const ACTIVITY_FIELDS = `
   comments(last: 1) { totalCount nodes { author { login } createdAt } }
-  reviews(last: 1) { totalCount nodes { author { login } submittedAt } }
+  reviews(last: 1) { totalCount nodes { author { login } submittedAt state } }
 `;
 
 /** A merged row shows neither review threads nor activity. */

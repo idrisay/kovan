@@ -1,9 +1,12 @@
 /**
  * Rail and control icons.
  *
- * Inline stroke SVG at 1.6, matching the design canvas. Not an icon font and
- * not emoji: these have to take `currentColor` so the rail's selected state
- * tints them, and they have to stay crisp at 19px.
+ * Lucide's drawings (lucide.dev, ISC licence), picked in item 128 so every
+ * icon comes from one family on one grid. They are inline stroke SVG at 1.6
+ * (Lucide's own default is 2), with small icons keeping a heavier stroke. Not
+ * an icon font and not emoji: these have to take `currentColor` so the rail's
+ * selected state tints them, and they have to stay crisp at 19px. A new icon
+ * is copied from lucide-static's SVG; GitHub and Jira keep their own marks (Jira's from simple-icons, CC0).
  */
 
 const stroke = {
@@ -19,12 +22,10 @@ type Props = { size?: number };
 export function PullRequestIcon({ size = 19 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <circle cx="6.5" cy="6" r="2.6" />
-      <circle cx="6.5" cy="18.5" r="2.6" />
-      <path d="M6.5 8.6v7.3" />
-      <circle cx="17.5" cy="18.5" r="2.6" />
-      <path d="M17.5 15.9V9.4a3 3 0 0 0-3-3h-3.6" />
-      <path d="M13.4 4.1 10.9 6.4l2.5 2.3" />
+      <circle cx="18" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+      <line x1="6" x2="6" y1="9" y2="21" />
     </svg>
   );
 }
@@ -32,8 +33,8 @@ export function PullRequestIcon({ size = 19 }: Props) {
 export function ReviewIcon({ size = 19 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M2.6 12S6 5.8 12 5.8 21.4 12 21.4 12 18 18.2 12 18.2 2.6 12 2.6 12Z" />
-      <circle cx="12" cy="12" r="2.6" />
+      <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+      <circle cx="12" cy="12" r="3" />
     </svg>
   );
 }
@@ -41,11 +42,9 @@ export function ReviewIcon({ size = 19 }: Props) {
 export function BranchIcon({ size = 19 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <circle cx="7" cy="5.5" r="2.5" />
-      <circle cx="7" cy="18.5" r="2.5" />
-      <circle cx="17" cy="8.5" r="2.5" />
-      <path d="M7 8v8" />
-      <path d="M17 11v1.5a3.5 3.5 0 0 1-3.5 3.5H10" />
+      <path d="M15 6a9 9 0 0 0-9 9V3" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
     </svg>
   );
 }
@@ -53,10 +52,11 @@ export function BranchIcon({ size = 19 }: Props) {
 export function TicketIcon({ size = 19 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M4 7.5 5.8 9.3 9 6" />
-      <path d="M12 7.6h8" />
-      <path d="M4 16.5 5.8 18.3 9 15" />
-      <path d="M12 16.6h8" />
+      <path d="M13 5h8" />
+      <path d="M13 12h8" />
+      <path d="M13 19h8" />
+      <path d="m3 17 2 2 4-4" />
+      <path d="m3 7 2 2 4-4" />
     </svg>
   );
 }
@@ -64,9 +64,9 @@ export function TicketIcon({ size = 19 }: Props) {
 export function SentryIcon({ size = 19 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M12 4 21 19H3Z" />
-      <path d="M12 10v4.2" />
-      <circle cx="12" cy="17.2" r="0.15" fill="currentColor" />
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
     </svg>
   );
 }
@@ -74,8 +74,9 @@ export function SentryIcon({ size = 19 }: Props) {
 export function TerminalIcon({ size = 19 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M5 16.5 9.6 12 5 7.5" />
-      <path d="M12 17h7" />
+      <path d="m7 11 2-2-2-2" />
+      <path d="M11 13h4" />
+      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
     </svg>
   );
 }
@@ -83,8 +84,10 @@ export function TerminalIcon({ size = 19 }: Props) {
 export function RefreshIcon({ size = 18 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M20 12a8 8 0 1 1-2.5-5.8" />
-      <path d="M20 4.5V9h-4.5" />
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+      <path d="M8 16H3v5" />
     </svg>
   );
 }
@@ -94,7 +97,7 @@ export function RefreshIcon({ size = 18 }: Props) {
 export function SettingsIcon({ size = 18 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />
       <circle cx="12" cy="12" r="3" />
     </svg>
   );
@@ -104,7 +107,7 @@ export function SettingsIcon({ size = 18 }: Props) {
 export function AgentsIcon({ size = 19 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M3 12h3.5l2.5-6.5 5 13 2.5-6.5H21" />
+      <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />
     </svg>
   );
 }
@@ -112,8 +115,8 @@ export function AgentsIcon({ size = 19 }: Props) {
 export function SearchIcon({ size = 13 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={1.8} aria-hidden="true">
-      <circle cx="11" cy="11" r="6" />
-      <path d="m16 16 4 4" />
+      <path d="m21 21-4.34-4.34" />
+      <circle cx="11" cy="11" r="8" />
     </svg>
   );
 }
@@ -121,7 +124,9 @@ export function SearchIcon({ size = 13 }: Props) {
 export function FilterIcon({ size = 14 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={1.8} aria-hidden="true">
-      <path d="M4 5.5h16" /><path d="M7.5 12h9" /><path d="M10.5 18.5h3" />
+      <path d="M2 5h20" />
+      <path d="M6 12h12" />
+      <path d="M9 19h6" />
     </svg>
   );
 }
@@ -129,8 +134,10 @@ export function FilterIcon({ size = 14 }: Props) {
 export function SortIcon({ size = 14 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={1.8} aria-hidden="true">
-      <path d="M7 4v16" /><path d="m4 17 3 3 3-3" />
-      <path d="M17 20V4" /><path d="m14 7 3-3 3 3" />
+      <path d="m21 16-4 4-4-4" />
+      <path d="M17 20V4" />
+      <path d="m3 8 4-4 4 4" />
+      <path d="M7 4v16" />
     </svg>
   );
 }
@@ -138,7 +145,7 @@ export function SortIcon({ size = 14 }: Props) {
 export function WorkspaceIcon({ size = 19 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M3 7.2a1.7 1.7 0 0 1 1.7-1.7h3.4l1.8 2.2h8.4A1.7 1.7 0 0 1 20 9.4v8.1a1.7 1.7 0 0 1-1.7 1.7H4.7A1.7 1.7 0 0 1 3 17.5Z" />
+      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
     </svg>
   );
 }
@@ -150,7 +157,7 @@ export function ChevronIcon({ size = 12, open = false }: Props & { open?: boolea
       aria-hidden="true"
       style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 120ms ease' }}
     >
-      <path d="m9 5 7 7-7 7" />
+      <path d="m9 18 6-6-6-6" />
     </svg>
   );
 }
@@ -159,7 +166,8 @@ export function ChevronIcon({ size = 12, open = false }: Props & { open?: boolea
 export function BackIcon({ size = 15 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={2} aria-hidden="true">
-      <path d="M19 12H5M11 6l-6 6 6 6" />
+      <path d="m12 19-7-7 7-7" />
+      <path d="M19 12H5" />
     </svg>
   );
 }
@@ -167,7 +175,8 @@ export function BackIcon({ size = 15 }: Props) {
 export function ForwardIcon({ size = 15 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={2} aria-hidden="true">
-      <path d="M5 12h14M13 6l6 6-6 6" />
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
     </svg>
   );
 }
@@ -175,7 +184,7 @@ export function ForwardIcon({ size = 15 }: Props) {
 export function FolderIcon({ size = 14 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M3 7.2a1.7 1.7 0 0 1 1.7-1.7h3.4l1.8 2.2h8.4A1.7 1.7 0 0 1 20 9.4v8.1a1.7 1.7 0 0 1-1.7 1.7H4.7A1.7 1.7 0 0 1 3 17.5Z" />
+      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
     </svg>
   );
 }
@@ -183,8 +192,8 @@ export function FolderIcon({ size = 14 }: Props) {
 export function FileIcon({ size = 14 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M13.5 3.5H7a1.8 1.8 0 0 0-1.8 1.8v13.4A1.8 1.8 0 0 0 7 20.5h10a1.8 1.8 0 0 0 1.8-1.8V8.8Z" />
-      <path d="M13.5 3.5v4.4a1 1 0 0 0 1 1h4.3" />
+      <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />
+      <path d="M14 2v5a1 1 0 0 0 1 1h5" />
     </svg>
   );
 }
@@ -192,7 +201,8 @@ export function FileIcon({ size = 14 }: Props) {
 export function CloseIcon({ size = 12 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={2.2} aria-hidden="true">
-      <path d="M6 6 18 18" /><path d="M18 6 6 18" />
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
     </svg>
   );
 }
@@ -200,19 +210,20 @@ export function CloseIcon({ size = 12 }: Props) {
 export function PlusIcon({ size = 14 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={2} aria-hidden="true">
-      <path d="M12 5v14" /><path d="M5 12h14" />
+      <path d="M5 12h14" />
+      <path d="M12 5v14" />
     </svg>
   );
 }
 
-/** Source control: the two-sided compare, not a branch. */
+/** Source control: a changed file, not a branch. */
 export function ChangesIcon({ size = 14 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <circle cx="6" cy="6" r="2.4" />
-      <circle cx="18" cy="18" r="2.4" />
-      <path d="M6 8.4v5.3a2.3 2.3 0 0 0 2.3 2.3H15" />
-      <path d="m12.6 13.4 2.6 2.6-2.6 2.6" />
+      <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />
+      <path d="M9 10h6" />
+      <path d="M12 13V7" />
+      <path d="M9 17h6" />
     </svg>
   );
 }
@@ -221,9 +232,14 @@ export function ChangesIcon({ size = 14 }: Props) {
 export function CollapseIcon({ size = 14 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={1.8} aria-hidden="true">
-      <path d="M9 4 5 8h8Z" />
-      <path d="M15 20l4-4h-8Z" />
-      <path d="M4 12h16" />
+      <path d="M12 22v-6" />
+      <path d="M12 8V2" />
+      <path d="M4 12H2" />
+      <path d="M10 12H8" />
+      <path d="M16 12h-2" />
+      <path d="M22 12h-2" />
+      <path d="m15 19-3-3-3 3" />
+      <path d="m15 5-3 3-3-3" />
     </svg>
   );
 }
@@ -232,8 +248,9 @@ export function CollapseIcon({ size = 14 }: Props) {
 export function AddFolderIcon({ size = 14 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M20 13.2V9.4a1.7 1.7 0 0 0-1.7-1.7H9.9L8.1 5.5H4.7A1.7 1.7 0 0 0 3 7.2v10.3a1.7 1.7 0 0 0 1.7 1.7h8.4" />
-      <path d="M18 15.2v5.2" /><path d="M15.4 17.8h5.2" />
+      <path d="M12 10v6" />
+      <path d="M9 13h6" />
+      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
     </svg>
   );
 }
@@ -241,50 +258,50 @@ export function AddFolderIcon({ size = 14 }: Props) {
 /** The overflow menu: three dots, as every editor draws it. */
 export function MoreIcon({ size = 14 }: Props) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true"
-      fill="currentColor" stroke="none">
-      <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" />
-      <circle cx="19" cy="12" r="1.6" />
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="19" cy="12" r="1" />
+      <circle cx="5" cy="12" r="1" />
     </svg>
   );
 }
 
 /**
- * Dock position icons: a window frame with one edge filled in, so which side
- * a panel is about to move to reads at a glance rather than from a tooltip.
+ * Dock position icons: a window frame split on one side, so which side a
+ * panel is about to move to reads at a glance rather than from a tooltip.
  */
 export function DockBottomIcon({ size = 14 }: Props) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="3.5" y="3.5" width="17" height="17" rx="1.6" {...stroke} strokeWidth={1.5} />
-      <rect x="4.3" y="14.8" width="15.4" height="5" rx="0.8" fill="currentColor" opacity="0.55" />
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M3 15h18" />
     </svg>
   );
 }
 
 export function DockTopIcon({ size = 14 }: Props) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="3.5" y="3.5" width="17" height="17" rx="1.6" {...stroke} strokeWidth={1.5} />
-      <rect x="4.3" y="4.2" width="15.4" height="5" rx="0.8" fill="currentColor" opacity="0.55" />
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M3 9h18" />
     </svg>
   );
 }
 
 export function DockLeftIcon({ size = 14 }: Props) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="3.5" y="3.5" width="17" height="17" rx="1.6" {...stroke} strokeWidth={1.5} />
-      <rect x="4.2" y="4.3" width="6.2" height="15.4" rx="0.8" fill="currentColor" opacity="0.55" />
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M9 3v18" />
     </svg>
   );
 }
 
 export function DockRightIcon({ size = 14 }: Props) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="3.5" y="3.5" width="17" height="17" rx="1.6" {...stroke} strokeWidth={1.5} />
-      <rect x="13.6" y="4.3" width="6.2" height="15.4" rx="0.8" fill="currentColor" opacity="0.55" />
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M15 3v18" />
     </svg>
   );
 }
@@ -292,8 +309,8 @@ export function DockRightIcon({ size = 14 }: Props) {
 export function RevertIcon({ size = 13 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M4 9h9.5a5.5 5.5 0 0 1 0 11H8" />
-      <path d="M8 4.2 4 9l4 4.8" />
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" />
     </svg>
   );
 }
@@ -311,8 +328,8 @@ export function MinusIcon({ size = 14 }: Props) {
 export function EditIcon({ size = 13 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M15.2 4.8 19.2 8.8 8 20H4v-4Z" />
-      <path d="M13.4 6.6 17.4 10.6" />
+      <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+      <path d="m15 5 4 4" />
     </svg>
   );
 }
@@ -323,9 +340,9 @@ export function EditIcon({ size = 13 }: Props) {
 export function OpenLinkIcon({ size = 13 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M10 6H5.8A1.8 1.8 0 0 0 4 7.8v10.4A1.8 1.8 0 0 0 5.8 20h10.4A1.8 1.8 0 0 0 18 18.2V14" />
-      <path d="M14 4h6v6" />
-      <path d="M20 4 11 13" />
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
     </svg>
   );
 }
@@ -335,7 +352,10 @@ export function OpenLinkIcon({ size = 13 }: Props) {
 export function HideIcon({ size = 13 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={2} aria-hidden="true">
-      <path d="M6 9.5 12 15l6-5.5" />
+      <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" />
+      <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" />
+      <path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" />
+      <path d="m2 2 20 20" />
     </svg>
   );
 }
@@ -343,7 +363,8 @@ export function HideIcon({ size = 13 }: Props) {
 export function CopyIcon({ size = 13 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={1.8} aria-hidden="true">
-      <rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
     </svg>
   );
 }
@@ -351,7 +372,7 @@ export function CopyIcon({ size = 13 }: Props) {
 export function CheckIcon({ size = 13 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} strokeWidth={2.2} aria-hidden="true">
-      <path d="m5 12.5 4.5 4.5L19 7.5" />
+      <path d="M20 6 9 17l-5-5" />
     </svg>
   );
 }
@@ -360,8 +381,8 @@ export function CheckIcon({ size = 13 }: Props) {
 export function BellIcon({ size = 19 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" />
-      <path d="M10 20.5a2.2 2.2 0 0 0 4 0" />
+      <path d="M10.268 21a2 2 0 0 0 3.464 0" />
+      <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />
     </svg>
   );
 }
@@ -370,9 +391,9 @@ export function BellIcon({ size = 19 }: Props) {
 export function MicIcon({ size = 16 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M5.5 11a6.5 6.5 0 0 0 13 0" />
-      <path d="M12 17.5V21" />
+      <path d="M12 19v3" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <rect x="9" y="2" width="6" height="13" rx="3" />
     </svg>
   );
 }
@@ -380,8 +401,8 @@ export function MicIcon({ size = 16 }: Props) {
 /** ▶ — runs a quick command (item 91). */
 export function PlayIcon({ size = 12 }: Props) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M7 4.8v14.4a1 1 0 0 0 1.5.86l11.6-7.2a1 1 0 0 0 0-1.72L8.5 3.94A1 1 0 0 0 7 4.8z" />
+    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
+      <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />
     </svg>
   );
 }
@@ -390,9 +411,11 @@ export function PlayIcon({ size = 12 }: Props) {
 export function TrashIcon({ size = 14 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="M4 7h16" />
-      <path d="M9.5 7V4.8h5V7" />
-      <path d="M6.5 7l.9 12.2a1.5 1.5 0 0 0 1.5 1.3h6.2a1.5 1.5 0 0 0 1.5-1.3L17.5 7" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M3 6h18" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
     </svg>
   );
 }
@@ -407,11 +430,21 @@ export function GitHubIcon({ size = 14 }: Props) {
   );
 }
 
-/** Jira's mark, filled — "open in Jira" beside a ticket's links. */
+/**
+ * Jira's logo as Atlassian shows it now (item 131): the stacked mark in white
+ * on a blue tile. The mark is simple-icons' `jira` (CC0) scaled into the tile.
+ * In brand colour, not `currentColor`: the tile is what makes it read as
+ * Jira at 13px; the old diamond, in grey, read as nothing in particular.
+ */
 export function JiraIcon({ size = 14 }: Props) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M15.4 7.4 8.6.6 8 0 2.9 5.1.6 7.4a.8.8 0 0 0 0 1.2l4.6 4.6L8 16l5.1-5.1.1-.1 2.2-2.2a.8.8 0 0 0 0-1.2zM8 10.2 5.8 8 8 5.8 10.2 8 8 10.2z" />
+    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
+      <rect width="16" height="16" rx="3.5" fill="#1868DB" />
+      <path
+        transform="translate(2.75 2.75) scale(0.4375)"
+        fill="#fff"
+        d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0Z"
+      />
     </svg>
   );
 }

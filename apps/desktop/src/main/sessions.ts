@@ -70,6 +70,8 @@ export interface SessionInfo {
   commandId?: string;
   /** Renamed by hand: the name is theirs and nothing retitles it. */
   renamed?: boolean;
+  /** The shell a plain terminal runs, when it isn't the login shell (item 126). */
+  shell?: string;
   /**
    * What the agent says it is doing (item 112), for the agents that can say:
    * see `agentStatus.ts`. Unset for plain terminals and other runners, which
@@ -95,6 +97,26 @@ interface Session extends SessionInfo {
    * not grow the main process without bound.
    */
   buffer: string;
+  /**
+   * The grid the pty has now, which is the grid everything recent in `buffer`
+   * was drawn for. A replay at any other size mangles a full-screen program's
+   * cursor moves (item 129). Unknown for a session restored from the terminal
+   * host, which doesn't keep it.
+   */
+  size?: { cols: number; rows: number };
+}
+
+/** What a window needs to redraw a session it wasn't showing: the output, and the grid it was drawn on. */
+export interface SessionReplay {
+  data: string;
+  cols?: number;
+  rows?: number;
+  /**
+   * The start was cut off. A program that draws its screen once and then
+   * rewrites only the cells that change has its first draw in the part cut
+   * off, and the replay shows only the changes: it needs a redraw.
+   */
+  truncated: boolean;
 }
 
 const BUFFER_LIMIT = 256 * 1024;
@@ -139,8 +161,10 @@ export class Sessions {
   }
 
   /** Replay for a window that opened after the session started. */
-  buffer(id: string): string {
-    return this.sessions.get(id)?.buffer ?? '';
+  buffer(id: string): SessionReplay {
+    const session = this.sessions.get(id);
+    const data = session?.buffer ?? '';
+    return { data, ...session?.size, truncated: capped(data) };
   }
 
   /**
@@ -188,6 +212,8 @@ export class Sessions {
     commandId?: string;
     /** The agent in it reports Working / Input / Done (item 112). */
     statusSource?: StatusSource;
+    /** A plain terminal's shell, from the menu's switch (item 126); the login shell otherwise. */
+    shell?: string;
   }): Promise<SessionInfo> {
     const id = randomUUID();
     // The environment a login shell produces, not the four-entry PATH a GUI
@@ -204,6 +230,7 @@ export class Sessions {
       pull: options.pull,
       runDirectory: options.runDirectory,
       ...(options.commandId ? { commandId: options.commandId, renamed: true } : {}),
+      ...(options.shell && options.shell !== loginShell() ? { shell: options.shell } : {}),
       ...(options.statusSource ? { statusSource: options.statusSource, status: 'working' as const, statusAt: Date.now() } : {}),
       startedAt: Date.now(),
       running: true,
@@ -211,7 +238,7 @@ export class Sessions {
     };
     const spawn = {
       id,
-      file: loginShell(),
+      file: options.shell ?? loginShell(),
       args: ['-l'],
       cols: 120,
       rows: 34,
@@ -223,6 +250,9 @@ export class Sessions {
         // Tells a prompt or a wrapper that it is inside Kovan, the way
         // TERM_PROGRAM does for other terminals.
         TERM_PROGRAM: 'Kovan',
+        // macOS's bash 3.2 otherwise opens every terminal with "The default
+        // interactive shell is now zsh" — chosen on purpose here (item 126).
+        ...(options.shell && path.basename(options.shell) === 'bash' ? { BASH_SILENCE_DEPRECATION_WARNING: '1' } : {}),
         // Which session an agent's status hook writes for (item 112).
         KOVAN_SESSION_ID: id,
         ...(this.options.statusDir ? { KOVAN_STATUS_DIR: this.options.statusDir } : {})
@@ -231,7 +261,9 @@ export class Sessions {
     };
     const pty = this.options.hosts ? await this.options.hosts.spawn(spawn) : localPty(spawn);
 
-    const session: Session = { ...info, hosted: pty.hosted, pty, inOsc: false, buffer: '' };
+    const session: Session = {
+      ...info, hosted: pty.hosted, pty, inOsc: false, buffer: '', size: { cols: spawn.cols, rows: spawn.rows }
+    };
     this.sessions.set(id, session);
     this.attach(session);
 
@@ -274,7 +306,7 @@ export class Sessions {
   /** Follows a session's output and its end, whether just opened or picked up again. */
   private attach(session: Session): void {
     session.pty.onData((data) => {
-      session.buffer = (session.buffer + data).slice(-BUFFER_LIMIT);
+      session.buffer = capBuffer(session.buffer + data);
       const scan = scanForBell(data, session.inOsc);
       session.inOsc = scan.inOsc;
       // Only worth a `changed` broadcast on the transition — the list would
@@ -369,7 +401,7 @@ export class Sessions {
   async busy(id: string): Promise<boolean> {
     const session = this.sessions.get(id);
     if (!session?.running) return false;
-    const shell = path.basename(loginShell()).replace(/^-/, '');
+    const shell = path.basename(session.shell ?? loginShell()).replace(/^-/, '');
     const foreground = (await session.pty.foreground()).replace(/^-/, '');
     return Boolean(foreground) && path.basename(foreground) !== shell;
   }
@@ -417,7 +449,9 @@ export class Sessions {
     const session = this.sessions.get(id);
     if (session?.running) {
       try {
-        session.pty.resize(Math.max(cols, 2), Math.max(rows, 2));
+        const size = { cols: Math.max(cols, 2), rows: Math.max(rows, 2) };
+        session.pty.resize(size.cols, size.rows);
+        session.size = size;
       } catch {
         // The pty can exit between the check and the call.
       }
@@ -464,10 +498,31 @@ export class Sessions {
 }
 
 function strip(session: Session): SessionInfo {
-  const { pty, buffer, inOsc, titleCarry, ...info } = session;
+  const { pty, buffer, inOsc, titleCarry, size, ...info } = session;
   void pty;
   void buffer;
+  void size;
   void inOsc;
   void titleCarry;
   return info;
+}
+
+/**
+ * Keeps the last `BUFFER_LIMIT` characters, starting where a sequence can
+ * start: after a newline, or at an escape. A cut at an arbitrary character
+ * can land inside an escape sequence, and the replay then opens with its tail
+ * printed as text — `27H0` on the screen (item 129).
+ */
+export function capBuffer(text: string): string {
+  if (text.length <= BUFFER_LIMIT) return text;
+  const kept = text.slice(-BUFFER_LIMIT);
+  const line = kept.indexOf('\n');
+  const escape = kept.indexOf('\x1b');
+  const starts = [line >= 0 ? line + 1 : -1, escape].filter((i) => i >= 0 && i < 4096);
+  return starts.length ? kept.slice(Math.min(...starts)) : kept;
+}
+
+/** Whether a replay lost its beginning to the cap. */
+export function capped(text: string): boolean {
+  return text.length >= BUFFER_LIMIT - 4096;
 }

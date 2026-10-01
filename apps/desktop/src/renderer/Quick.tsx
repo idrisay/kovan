@@ -62,7 +62,7 @@ function useElapsed(since?: number): number {
 function LinesIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <path d="M4 6h16M4 12h10M4 18h6" />
+      <path d="M21 5H3" /><path d="M15 12H3" /><path d="M17 19H3" />
     </svg>
   );
 }

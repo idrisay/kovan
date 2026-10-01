@@ -210,6 +210,7 @@ const api = {
     ipcRenderer.invoke('kovan:session-resize', id, cols, rows),
   sessionClose: (id: string) => ipcRenderer.invoke('kovan:session-close', id),
   sessionRename: (id: string, title: string) => ipcRenderer.invoke('kovan:session-rename', id, title),
+  shells: () => ipcRenderer.invoke('kovan:shells'),
   openTerminal: (cwd?: string, subject?: string, title?: string) =>
     ipcRenderer.invoke('kovan:open-terminal', cwd, subject, title),
   onSessionOutput: (listener: (id: string, data: string) => void) => {

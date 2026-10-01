@@ -93,11 +93,23 @@ Reuse these before writing new CSS. A new component goes in this list.
 | `.icon-button` | Icon-only, borderless. Needs `aria-label` **and** `title` | Row actions, rename |
 | `.icon-button.boxed` | Icon-only with a box, for a header's own control | Close ✕ on sheets and terminals |
 
+Icons are Lucide's drawings (item 128), kept inline in `icons.tsx` at a
+1.6 stroke so they take `currentColor`. A new icon is copied from
+lucide-static's SVG, not drawn by hand. GitHub and Jira keep their own marks,
+and the stop square in Quick model jobs stays solid.
+
 Put at most one `.primary` in a row. Separate groups of different weights with
 the existing vertical rule, not with space alone. A detail header's action bar
 holds only what Kovan does — agent runs, then quick model reads; opening the
 item on its service, or a terminal for it, goes in the link row above
 (`RelatedLinks` `places`, item 110), which keeps the bar on one line.
+
+Quick model buttons are opt-in (item 124): Summarize and Review start hidden,
+Condense starts shown, and Settings › Agents › "Buttons on pull requests and
+tickets" turns each on or off (`renderer/quickButtons.ts`). Off hides the
+button and its card, and an agent run stops using what it made; its setup is
+kept. A new optional button joins `QUICK_BUTTONS` instead of getting its own
+setting, and the rule before it shows only when something follows it.
 
 ### Surfaces and containers
 
@@ -338,6 +350,30 @@ is Agents › Running's). Done hides once the session has been on screen
 fetched, then the session. It is portalled like every popover over the
 sidebar, and it replaces the row's `title`.
 
+**Shell for new terminals (item 126).** Sessions' + menu opens with a shell
+switch (`ShellSwitch` in `App.tsx`). The first three shells are a click away,
+and the rest of `/etc/shells` sits behind More…. The choice is the
+`terminal.shell` setting (`renderer/shellChoice.ts`), which Settings › Text &
+terminal also edits. Main lists only installed shells (`main/shells.ts`), with
+the login shell first and named plainly. It spawns only a listed path, and
+anything else falls back to the login shell. Only `kovan:open-terminal` uses
+the choice. Agents and quick commands keep the login shell. A session in
+another shell records it in `SessionInfo.shell`, so its row shows a small tag
+and its hover card shows the path.
+
+### Search everything (item 127)
+
+The box in the middle of the title bar (`Search.tsx`) finds pull requests,
+tickets, Sentry issues, sessions, files and app actions. ⌘K or a click opens
+it in place. ⇥ / ⇧⇥ step through the scope chips, and `>` searches actions
+only. It searches only what is loaded: the snapshot, the sessions and ⌘P's
+file list, which is asked for each time it opens. It never queries a service
+as you type. Matching lives in `searchEverything.ts`. Words match in any
+order, and files match fuzzily as ⌘P does. With nothing typed it shows what
+is blocked on you or awaiting your review, running sessions, recent files and
+the "in an agent" action for what is open. ⌘P stays the file picker. Its
+classes are `tsearch-*`, because `.search` is the sidebar's filter box.
+
 ### Keyboard
 
 **Back / Forward (item 116).** The ← → arrows in the title bar, and ⌘[ / ⌘]
@@ -474,6 +510,32 @@ budget and each check's cost). Keep the poll in single digits; put anything
 heavier in the per-pull-request detail query, which runs when you open one.
 Anything that compares one poll with the last must skip a poll GitHub didn't
 answer (`githubAnswered` in core): its empty lists aren't "nothing open".
+
+Activity's comment count (`commentCount`) is conversation comments plus
+reviews, so an approval raises it too. Don't treat a rise as a comment without
+checking `lastReviewState`, the newest review's state from the same
+`reviews(last: 1)` page (item 130). `reviewDecision` is no substitute: it stays
+empty in a repository that doesn't require reviews, and it doesn't move on a
+second approval. `diffActivity` reports an approving or change-requesting
+review as that, and adds a "New comment" event only for whatever else the
+count rose by.
+
+### Terminals keep their xterm
+
+`Terminal.tsx` keeps one xterm per session in a module-level map, so leaving
+a view only parks its box, coming back moves the box into the new view, and
+the xterm is disposed when the session closes (item 129). Don't go back to
+building an xterm on mount and replaying the output into it. Claude Code draws
+its input box and status line once and then rewrites only the cells that
+change, so a replay of the capped 256 KB buffer has lost that first draw, and
+the bottom of the screen comes back as stray digits. Replay is only for a new
+window:
+
+- It is drawn on the grid the pty has, which `Sessions` records
+  (`SessionReplay.cols`/`rows`).
+- The cap starts the buffer at a newline or an escape (`capBuffer`).
+- When the replay was cut short, the renderer resizes the pty by one row and
+  back, and the program redraws.
 
 ### Safety
 

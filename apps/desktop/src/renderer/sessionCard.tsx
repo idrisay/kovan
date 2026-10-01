@@ -190,6 +190,7 @@ function SessionCard({ session, snapshot }: { session: SessionInfo; snapshot: Sn
       <div className="hover-card-rule" />
       {matched && <div className="hover-card-session">{sessionLabel(session)}</div>}
       <Line label="Agent">{session.runnerName}</Line>
+      {session.shell && <Line label="Shell"><span className="mono">{session.shell}</span></Line>}
       <Line label="Folder"><span className="mono">{session.cwd.replace(home, '~')}</span></Line>
       <Line label="Started">{age(new Date(session.startedAt).toISOString())}</Line>
       <Line label="Now">{state}{session.hosted ? '' : ' · ends when Kovan quits'}</Line>

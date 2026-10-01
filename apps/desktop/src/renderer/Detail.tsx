@@ -25,6 +25,7 @@ import type {
   AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, ReviewThread, Reviewer, RunKind, SentryFrame,
   SentryIssue, SessionInfo, Snapshot
 } from './types';
+import { useQuickButtons } from './quickButtons';
 
 /** A stand-in for a real photo: initials on a colour picked from the name
  *  itself, so the same person is always the same colour without anyone
@@ -989,7 +990,10 @@ export function PullPane({
   // PR's own reviews and checks, even when its title names a ticket.
   const summary = useQuick('pull-summary', `${pull.repo}#${pull.number}`);
   const review = useQuick('pull-review', `${pull.repo}#${pull.number}`);
-  const showSummary = [summary.state, review.state].some((q) => Boolean(q.result || q.running || q.error));
+  // Off until turned on in Settings › Agents (item 124); off hides the card too.
+  const buttons = useQuickButtons();
+  const showSummary = [buttons.summarize && summary.state, buttons.review && review.state]
+    .some((q) => q && Boolean(q.result || q.running || q.error));
 
   const unresolved = detail?.threads.filter((t) => !t.isResolved) ?? [];
   // Whether the left column has anything in it. A PR with no description and
@@ -1026,16 +1030,20 @@ export function PullPane({
     actions: (
       <>
         <RunButtons kinds={kinds} onRun={(kind) => onRun(kind, pull)} />
-        <span className="action-divider" />
-        <QuickButton kind="pull-summary" label="Summarize" runningLabel="Summarizing" state={summary.state} onRun={summary.run} />
-        <QuickButton
-          kind="pull-review"
-          label="Review"
-          runningLabel="Reviewing"
-          state={review.state}
-          onRun={review.run}
-          tooltip="Sends the diff to the model on the button's tag (NVIDIA through nv-review, or any opencode model). It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Can take several minutes."
-        />
+        {(buttons.summarize || buttons.review) && <span className="action-divider" />}
+        {buttons.summarize && (
+          <QuickButton kind="pull-summary" label="Summarize" runningLabel="Summarizing" state={summary.state} onRun={summary.run} />
+        )}
+        {buttons.review && (
+          <QuickButton
+            kind="pull-review"
+            label="Review"
+            runningLabel="Reviewing"
+            state={review.state}
+            onRun={review.run}
+            tooltip="Sends the diff to the model on the button's tag (NVIDIA through nv-review, or any opencode model). It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Can take several minutes."
+          />
+        )}
       </>
     ),
     // The pill already says the headline state; this lists the rest, and
@@ -1066,39 +1074,43 @@ export function PullPane({
             subject={subject} pull={`${pull.repo}#${pull.number}`}
             refreshOn={sessionSignature(sessions, subject)}
           />
-          <QuickCard
-            kind="pull-summary"
-            title={isMerged(pull) ? 'Summary' : "Why it's blocked"}
-            state={summary.state}
-            basisNow={detail ? pullBasis(detail) : undefined}
-            footer="Written by a free quick model from this PR's reviews, threads and checks. It read nothing else and changed nothing."
-            onRun={summary.run}
-            onCancel={summary.cancel}
-            onDismiss={summary.dismiss}
-          />
+          {buttons.summarize && (
+            <QuickCard
+              kind="pull-summary"
+              title={isMerged(pull) ? 'Summary' : "Why it's blocked"}
+              state={summary.state}
+              basisNow={detail ? pullBasis(detail) : undefined}
+              footer="Written by a free quick model from this PR's reviews, threads and checks. It read nothing else and changed nothing."
+              onRun={summary.run}
+              onCancel={summary.cancel}
+              onDismiss={summary.dismiss}
+            />
+          )}
 
-          <QuickCard
-            kind="pull-review"
-            title="Code review"
-            runningNote="A review reads the whole diff: expect a few minutes, more on NVIDIA's free API. You can leave this pane."
-            tag={review.state.result ? reviewModelName(review.state.result.model) : 'review'}
-            badge={<VerdictBadge verdict={review.state.result?.verdict} />}
-            state={review.state}
-            basisNow={detail ? reviewBasis(detail) : undefined}
-            footer={`Read the diff, description and open threads through ${review.state.result && !isNvReviewModel(review.state.result.model) ? 'opencode' : 'nv-review'}, and changed nothing. Saved as ${KIMI_REVIEW_FILE} in this PR's History below.`}
-            onRun={review.run}
-            onCancel={review.cancel}
-            onDismiss={review.dismiss}
-          >
-            {(stale) => review.state.result && (
-              <ReviewDecision
-                subject={`${pull.repo}#${pull.number}`}
-                result={review.state.result}
-                stale={stale}
-                onRefresh={review.run}
-              />
-            )}
-          </QuickCard>
+          {buttons.review && (
+            <QuickCard
+              kind="pull-review"
+              title="Code review"
+              runningNote="A review reads the whole diff: expect a few minutes, more on NVIDIA's free API. You can leave this pane."
+              tag={review.state.result ? reviewModelName(review.state.result.model) : 'review'}
+              badge={<VerdictBadge verdict={review.state.result?.verdict} />}
+              state={review.state}
+              basisNow={detail ? reviewBasis(detail) : undefined}
+              footer={`Read the diff, description and open threads through ${review.state.result && !isNvReviewModel(review.state.result.model) ? 'opencode' : 'nv-review'}, and changed nothing. Saved as ${KIMI_REVIEW_FILE} in this PR's History below.`}
+              onRun={review.run}
+              onCancel={review.cancel}
+              onDismiss={review.dismiss}
+            >
+              {(stale) => review.state.result && (
+                <ReviewDecision
+                  subject={`${pull.repo}#${pull.number}`}
+                  result={review.state.result}
+                  stale={stale}
+                  onRefresh={review.run}
+                />
+              )}
+            </QuickCard>
+          )}
 
           {error && <div className="error boxed">{error}</div>}
           {!detail && !error && <p className="quiet">Loading…</p>}
@@ -1250,11 +1262,14 @@ export function TicketPane({
   // "Condense": the comments before the latest few that ticket.md keeps in full.
   const condense = useQuick('ticket-condense', issue.key);
   const older = olderCommentCount(comments.length);
-  const condensed = condense.state.result;
+  // Turned off in Settings › Agents (item 124): no button, no card, and every
+  // comment shown in full, as if nothing had been condensed.
+  const condenseOn = useQuickButtons().condense;
+  const condensed = condenseOn ? condense.state.result : undefined;
   const covered = Math.min(condensed?.basis['condensed'] ?? 0, older);
   const [showOriginals, setShowOriginals] = useState(false);
   useEffect(() => setShowOriginals(false), [issue.key]);
-  const showCondenseCard = Boolean(condensed || condense.state.running || condense.state.error);
+  const showCondenseCard = condenseOn && Boolean(condensed || condense.state.running || condense.state.error);
 
   const inlineSession = sessions.find((s) => s.id === activeSession && s.subject === issue.key);
   const [showTerminal, setShowTerminal] = useState(true);
@@ -1287,7 +1302,7 @@ export function TicketPane({
     actions: (
       <>
         <RunButtons kinds={['implement']} onRun={(kind) => onRun(kind, issue)} />
-        {older > 0 && (
+        {older > 0 && condenseOn && (
           <>
             <span className="action-divider" />
             <QuickButton

@@ -45,7 +45,16 @@ export interface PullSummary {
   /** Who wrote the most recent of those, and when — so your own comment isn't news to you. */
   lastCommenter?: string;
   lastCommentAt?: string;
+  /**
+   * When the most recent of those is a review, what kind: an approval is
+   * counted with the comments but isn't one (item 130). Unset when it is a
+   * conversation comment.
+   */
+  lastReviewState?: ApiReviewState;
 }
+
+/** A review's `state` as GitHub's GraphQL API spells it. */
+export type ApiReviewState = 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING';
 
 export type PullFlagId =
   | 'merged'
@@ -367,10 +376,10 @@ export interface ApiCommentPage {
   nodes?: ({ author?: { login?: string } | null; createdAt?: string } | null)[] | null;
 }
 
-/** `reviews(last: 1) { totalCount nodes { author submittedAt } }` */
+/** `reviews(last: 1) { totalCount nodes { author submittedAt state } }` */
 export interface ApiReviewPage {
   totalCount?: number;
-  nodes?: ({ author?: { login?: string } | null; submittedAt?: string } | null)[] | null;
+  nodes?: ({ author?: { login?: string } | null; submittedAt?: string; state?: ApiReviewState } | null)[] | null;
 }
 
 /**
@@ -379,18 +388,22 @@ export interface ApiReviewPage {
  * review). Undefined when the query didn't ask — only your own pull requests'
  * search does, because asking costs points (item 92).
  */
-function commentsOf(node: ApiPullNode): Pick<PullSummary, 'commentCount' | 'lastCommenter' | 'lastCommentAt'> {
+function commentsOf(node: ApiPullNode): Pick<PullSummary, 'commentCount' | 'lastCommenter' | 'lastCommentAt' | 'lastReviewState'> {
   if (!node.comments && !node.reviews) return {};
   const newestComment = node.comments?.nodes?.[node.comments.nodes.length - 1];
   const newestReview = node.reviews?.nodes?.[node.reviews.nodes.length - 1];
+  type Said = { author: string; at: string; review?: ApiReviewState };
   const candidates = [
     newestComment?.createdAt ? { author: newestComment.author?.login ?? '', at: newestComment.createdAt } : undefined,
-    newestReview?.submittedAt ? { author: newestReview.author?.login ?? '', at: newestReview.submittedAt } : undefined
-  ].filter((c): c is { author: string; at: string } => Boolean(c));
+    newestReview?.submittedAt
+      ? { author: newestReview.author?.login ?? '', at: newestReview.submittedAt, review: newestReview.state ?? 'COMMENTED' }
+      : undefined
+  ].filter((c): c is Said => Boolean(c));
   const last = candidates.sort((a, b) => a.at.localeCompare(b.at)).pop();
   return {
     commentCount: (node.comments?.totalCount ?? 0) + (node.reviews?.totalCount ?? 0),
-    ...(last ? { lastCommenter: last.author, lastCommentAt: last.at } : {})
+    ...(last ? { lastCommenter: last.author, lastCommentAt: last.at } : {}),
+    ...(last?.review ? { lastReviewState: last.review } : {})
   };
 }
 

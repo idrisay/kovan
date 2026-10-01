@@ -65,87 +65,178 @@ function terminalTheme() {
   };
 }
 
+/** One session's xterm, kept for as long as the session is open. */
+interface Live {
+  term: Xterm;
+  fit: FitAddon;
+  /** What xterm draws into. Moved from view to view, never rebuilt. */
+  box: HTMLDivElement;
+  /** Fits the grid to the view the box is in now, and tells the pty. */
+  sync(): void;
+  dispose(): void;
+}
+
 /**
- * One xterm.js view onto a pty living in the main process.
+ * The xterms, by session, outliving the views that show them (item 129).
  *
- * The buffer is replayed on mount rather than kept here, because the session
- * outlives this component: closing the window destroys the renderer, and the
- * agent carries on. Whatever it printed meanwhile has to be recoverable.
+ * Switching to another view used to dispose a session's xterm, and coming
+ * back built a fresh one at xterm's default 80×24 and replayed the raw output
+ * into it. A full-screen program — Claude Code's input box and status line —
+ * draws with cursor moves relative to the grid it had, so replayed onto a
+ * different grid they landed in the wrong rows, and the bottom of the screen
+ * stayed garbled until a resize made the program redraw. Keeping the xterm
+ * means there is nothing to replay: output keeps arriving while the view is
+ * elsewhere, and coming back only moves the box. A replay is now only for a
+ * window that is new (opened again, or reloaded), and that one is drawn on the
+ * grid the pty had, which the main process remembers.
+ */
+const kept = new Map<string, Live>();
+let watchingClosed = false;
+
+/** Lets go of a session's xterm once the session is closed. */
+function watchClosed(): void {
+  if (watchingClosed) return;
+  watchingClosed = true;
+  window.kovan.onSessions((list) => {
+    const open = new Set(list.map((session) => session.id));
+    for (const [id, live] of kept) if (!open.has(id)) live.dispose();
+  });
+}
+
+function create(sessionId: string, host: HTMLElement, fontSize: number): Live {
+  const box = document.createElement('div');
+  box.className = 'term-box';
+  host.appendChild(box);
+
+  const term = new Xterm({
+    fontFamily: "'IBM Plex Mono', ui-monospace, Menlo, monospace",
+    fontSize,
+    cursorBlink: true,
+    theme: terminalTheme(),
+    scrollback: 10_000,
+    allowProposedApi: true
+  });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  term.open(box);
+
+  // Output that arrives before the replay is in the replay already: the
+  // reply to `sessionBuffer` and the output events travel the same channel,
+  // in order, so everything after the reply is new.
+  let replayed = false;
+
+  const sync = () => {
+    // Not while parked between views, where there is no size to fit to.
+    if (!replayed || !box.isConnected) return;
+    try {
+      // Only when the char grid actually changes. A container nested in
+      // flex layout — the docked panel in a pull request or ticket pane,
+      // not this component's fault but its neighbourhood — can report a
+      // sub-pixel-different box on nearly every frame without the whole
+      // number of cols/rows ever moving; resizing on every one of those
+      // sent a real SIGWINCH to the shell each time; many prompts redraw
+      // their entire line on any SIGWINCH, whether or not the size
+      // actually changed, and that redraw storm is what shows as flicker
+      // and swallows a keystroke typed in between two of them.
+      const proposed = fit.proposeDimensions();
+      if (!proposed || (proposed.cols === term.cols && proposed.rows === term.rows)) {
+        return;
+      }
+      fit.fit();
+      void window.kovan.sessionResize(sessionId, term.cols, term.rows);
+    } catch {
+      // Fitting a detached or zero-size element throws; the observer
+      // calls again once it has a size.
+    }
+  };
+
+  void window.kovan.sessionBuffer(sessionId).then(({ data, cols, rows, truncated }) => {
+    if (!kept.has(sessionId)) return;
+    // Replay on the grid the output was drawn for, then fit; a different
+    // fit resizes the pty, and the program redraws for the new grid. A
+    // session restored from the terminal host has no grid on record, and
+    // the likeliest one is the view's.
+    if (cols && rows) term.resize(cols, rows);
+    else if (box.isConnected) {
+      try { fit.fit(); } catch { /* zero-size; sync tries again */ }
+    }
+    if (data) term.write(data);
+    replayed = true;
+    sync();
+    if (box.isConnected) term.focus();
+    // The replay lost its start, and with it the first draw of whatever a
+    // full-screen program keeps on screen — Claude Code's input box and
+    // status line, which it then only patches cell by cell. A one-row
+    // wobble of the pty is a SIGWINCH, and the program draws it all again.
+    if (truncated && term.rows > 2) {
+      void window.kovan.sessionResize(sessionId, term.cols, term.rows - 1);
+      setTimeout(() => {
+        if (kept.get(sessionId) === live) void window.kovan.sessionResize(sessionId, term.cols, term.rows);
+      }, 120);
+    }
+  });
+
+  const offOutput = window.kovan.onSessionOutput((id, data) => {
+    if (id === sessionId && replayed) term.write(data);
+  });
+  const typed = term.onData((data) => void window.kovan.sessionWrite(sessionId, data));
+
+  // xterm draws on a canvas, not with CSS, so a theme or accent change has
+  // to be handed to it — otherwise a terminal keeps the theme it opened in.
+  const offAppearance = subscribeAppearance(() => {
+    term.options.theme = terminalTheme();
+  });
+
+  const live: Live = {
+    term,
+    fit,
+    box,
+    sync,
+    dispose: () => {
+      kept.delete(sessionId);
+      offOutput();
+      offAppearance();
+      typed.dispose();
+      term.dispose();
+      box.remove();
+    }
+  };
+  kept.set(sessionId, live);
+  return live;
+}
+
+/**
+ * One view onto a pty living in the main process, through the session's kept
+ * xterm (see `kept`). The session outlives this component and the xterm
+ * outlives it too; unmounting only parks the xterm's box.
  */
 export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; fontSize?: number }) {
   const host = useRef<HTMLDivElement>(null);
-  // Read by the font-size effect below, which intentionally does not tear
-  // down and rebuild the terminal on every keystroke of Cmd+= — that would
-  // cost the scroll position and flicker on every step.
-  const live = useRef<{ term: Xterm; fit: FitAddon } | null>(null);
 
   useEffect(() => {
-    if (!host.current) return;
+    const element = host.current;
+    if (!element) return;
+    watchClosed();
 
-    const term = new Xterm({
-      fontFamily: "'IBM Plex Mono', ui-monospace, Menlo, monospace",
-      fontSize,
-      cursorBlink: true,
-      theme: terminalTheme(),
-      scrollback: 10_000,
-      allowProposedApi: true
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(host.current);
-    live.current = { term, fit };
-
-    let disposed = false;
-
-    const sync = () => {
-      try {
-        // Only when the char grid actually changes. A container nested in
-        // flex layout — the docked panel in a pull request or ticket pane,
-        // not this component's fault but its neighbourhood — can report a
-        // sub-pixel-different box on nearly every frame without the whole
-        // number of cols/rows ever moving; resizing on every one of those
-        // sent a real SIGWINCH to the shell each time; many prompts redraw
-        // their entire line on any SIGWINCH, whether or not the size
-        // actually changed, and that redraw storm is what shows as flicker
-        // and swallows a keystroke typed in between two of them.
-        const proposed = fit.proposeDimensions();
-        if (!proposed || (proposed.cols === term.cols && proposed.rows === term.rows)) {
-          return;
-        }
-        fit.fit();
-        void window.kovan.sessionResize(sessionId, term.cols, term.rows);
-      } catch {
-        // Fitting a detached or zero-size element throws; the observer below
-        // will call again once it has a size.
-      }
-    };
-
-    void window.kovan.sessionBuffer(sessionId).then((buffer) => {
-      if (disposed) return;
-      if (buffer) term.write(buffer);
-      sync();
-      term.focus();
-    });
-
-    const offOutput = window.kovan.onSessionOutput((id, data) => {
-      if (id === sessionId) term.write(data);
-    });
-    const typed = term.onData((data) => void window.kovan.sessionWrite(sessionId, data));
-
-    // xterm draws on a canvas, not with CSS, so a theme or accent change has
-    // to be handed to it — otherwise a terminal keeps the theme it opened in.
-    const offAppearance = subscribeAppearance(() => {
-      term.options.theme = terminalTheme();
-    });
+    let live = kept.get(sessionId);
+    if (live) {
+      element.appendChild(live.box);
+      live.sync();
+      // What it printed while parked is in the buffer; paint it now.
+      live.term.refresh(0, live.term.rows - 1);
+      live.term.focus();
+    } else {
+      live = create(sessionId, element, fontSize);
+    }
+    const { term, box, sync } = live;
 
     const observer = new ResizeObserver(sync);
-    observer.observe(host.current);
+    observer.observe(element);
 
     // Files and images in, as VS Code's terminal takes them: a dropped file,
     // a file copied in Finder, or a screenshot on the clipboard all arrive as
     // their path, typed in as a paste. xterm on its own only pastes text, so
     // an image-only clipboard did nothing at all.
-    const element = host.current;
     const pastePaths = (paths: string[]) => {
       const words = paths.filter(Boolean).map(shellPath);
       if (words.length === 0) return false;
@@ -185,23 +276,21 @@ export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; font
     element.addEventListener('paste', onPaste, true);
 
     return () => {
-      disposed = true;
-      live.current = null;
       observer.disconnect();
       element.removeEventListener('dragover', onDragOver);
       element.removeEventListener('drop', onDrop);
       element.removeEventListener('paste', onPaste, true);
-      offOutput();
-      offAppearance();
-      typed.dispose();
-      term.dispose();
+      // Parked, not disposed: the next view of this session picks it up.
+      // Only if it is still here — another view may have taken it meanwhile.
+      if (box.parentElement === element) box.remove();
     };
+    // fontSize is applied by the effect below, not by rebuilding.
   }, [sessionId]);
 
-  // Mutates the live instance rather than rebuilding it — a remount here
+  // Mutates the live instance rather than rebuilding it — a rebuild here
   // would cost the scroll position and flicker on every step of Cmd+=.
   useEffect(() => {
-    const current = live.current;
+    const current = kept.get(sessionId);
     if (!current || current.term.options.fontSize === fontSize) return;
     current.term.options.fontSize = fontSize;
     try {
@@ -209,7 +298,7 @@ export function Terminal({ sessionId, fontSize = 12 }: { sessionId: string; font
       current.fit.fit();
       if (proposed) void window.kovan.sessionResize(sessionId, proposed.cols, proposed.rows);
     } catch {
-      // Same detached/zero-size case `sync` above already tolerates.
+      // Same detached/zero-size case `sync` already tolerates.
     }
   }, [fontSize, sessionId]);
 

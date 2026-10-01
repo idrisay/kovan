@@ -53,6 +53,7 @@ import { PriceCheck } from './priceCheck';
 import { ModelSearch } from './modelSearch';
 import { Usage } from './usage';
 import { RunningAgents } from './running';
+import { SHELL_SETTING, chosenShell, listShells } from './shells';
 import { activityLabel, githubAnswered, ticketKeyInTitle, type ActivityEvent, type PriceCheckRunner, type PriceRule, type QuickKind, type ReviewEvent } from '@kovan/core';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -851,9 +852,11 @@ app.whenReady().then(async () => {
         throw new Error('No folder to open a terminal in');
       }
       const named = title ? { title, subject } : await nameTerminal(target, subject);
-      return sessions.open({ cwd: target, title: named.title, runnerName: 'Shell', subject: named.subject });
+      const shell = chosenShell(host.config.get<string>(SHELL_SETTING, ''));
+      return sessions.open({ cwd: target, title: named.title, runnerName: 'Shell', subject: named.subject, shell });
     }
   );
+  ipcMain.handle('kovan:shells', () => listShells());
 
   sessions.onOutput(({ id, data }) => {
     if (window && !window.isDestroyed()) {

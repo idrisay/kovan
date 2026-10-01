@@ -9,7 +9,7 @@ import type {
 import { Settings } from './Settings';
 import { levelTone, PullPane, SentryPane, TicketPane } from './Detail';
 import { RunSheet } from './RunSheet';
-import { GroupHead, PullRow } from './rows';
+import { GroupHead, PullRow, repoName } from './rows';
 import { WorkspaceView } from './Workspace';
 import { QuickJobRow, QuickJobView, useQuickJobs } from './QuickJobs';
 import { SessionUsageChip, UsageOverview, UsageRow } from './Usage';
@@ -28,7 +28,9 @@ import { startAppearance } from './appearance';
 import { QuickOpen } from './QuickOpen';
 import { ProblemsPopover, ProblemToast, useProblems } from './Problems';
 import { useNavHistory } from './navHistory';
-import type { ActivityEvent } from './types';
+import type { ActivityEvent, ShellOption } from './types';
+import { setShell, useShellChoice } from './shellChoice';
+import { Search, type SearchAction } from './Search';
 
 /** What the detail pane is showing, in words — for its error card and the log (item 83). */
 function paneWhere(selected: Selection): string {
@@ -1023,6 +1025,18 @@ export function App() {
 
   const current = VIEWS.find((v) => v.id === view)!;
 
+  // What the title bar's search offers under Actions (item 127): the views,
+  // Settings, a refresh, a terminal per watched folder, and handing what is
+  // open now to an agent.
+  const searchActions = useMemo<SearchAction[]>(() => [
+    ...(selected.pull ? [{ id: 'review-open', label: `Review ${repoName(selected.pull.repo)} #${selected.pull.number} in an agent`, hint: 'open now', run: () => setRunSheet({ kind: 'review', pull: selected.pull }) }] : []),
+    ...(selected.issue ? [{ id: 'implement-open', label: `Implement ${selected.issue.key} in an agent`, hint: 'open now', run: () => setRunSheet({ kind: 'implement', issue: selected.issue }) }] : []),
+    ...VIEWS.map((v) => ({ id: `view-${v.id}`, label: `Go to ${v.label}`, run: () => setView(v.id) })),
+    { id: 'settings', label: 'Open Settings', run: () => setConnecting(true) },
+    { id: 'refresh', label: 'Refresh everything', hint: 'GitHub, Jira, Sentry', run: refresh },
+    ...targets.map((t) => ({ id: `terminal-${t.path}`, label: `New terminal in ${t.label}`, run: () => openTerminal(t.path) }))
+  ], [selected, targets, refresh, openTerminal]);
+
   const match = useCallback((p: PullSummary) => {
     const q = filter.trim().toLowerCase();
     const textOk = !q ||
@@ -1171,6 +1185,16 @@ export function App() {
         <span className="wordmark">Kovan</span>
         {snapshot.viewer && <span className="viewer">{snapshot.viewer}</span>}
         <span className="spacer" />
+        {!nothingConnected && !starting && (
+          <Search
+            snapshot={snapshot} sessions={sessions} actions={searchActions}
+            onPull={(pull) => openSubject({ pull })}
+            onIssue={(issue) => openSubject({ issue })}
+            onSentry={(sentry) => openSubject({ sentry })}
+            onSession={(id) => { setActiveSession(id); setView('sessions'); }}
+            onFile={(path) => openFromQuick(path)}
+          />
+        )}
         <QuickCommands
           sessions={sessions}
           onRan={(id) => { setActiveSession(id); setView('sessions'); }}
@@ -1516,6 +1540,56 @@ export function App() {
   );
 }
 
+/**
+ * Which shell the folder below opens in (item 126): the three common ones a
+ * click away, the rest of /etc/shells behind More…, and the choice kept for
+ * next time. Hidden when only one shell is installed.
+ */
+function ShellSwitch() {
+  const { shells, chosen } = useShellChoice();
+  const [more, setMore] = useState(false);
+  if (shells.length < 2) return null;
+  // One of each shell up front: a second zsh (macOS's beside Homebrew's) goes under More…
+  const base = (s: ShellOption) => s.path.split('/').pop();
+  const front: ShellOption[] = [];
+  for (const s of shells) {
+    if (front.length < 3 && !front.some((f) => base(f) === base(s))) front.push(s);
+  }
+  const rest = shells.filter((s) => !front.includes(s));
+  const inRest = chosen && rest.includes(chosen);
+  return (
+    <>
+      <p className="menu-head">Shell</p>
+      <div className="segmented shell-switch" role="radiogroup" aria-label="Shell">
+        {front.map((s) => (
+          <button
+            key={s.path} type="button" role="radio" aria-checked={s === chosen}
+            className={s === chosen ? 'seg on' : 'seg'} title={s.path}
+            onClick={() => { setShell(s.path); setMore(false); }}
+          >{s.name}</button>
+        ))}
+        {rest.length > 0 && (
+          <button
+            type="button" aria-expanded={more} className={inRest ? 'seg on' : 'seg'}
+            title={inRest ? chosen.path : 'Other installed shells'}
+            onClick={() => setMore((v) => !v)}
+          >{inRest ? chosen.name : 'More…'}</button>
+        )}
+      </div>
+      {more && rest.map((s) => (
+        <button
+          key={s.path} type="button" role="menuitemradio" aria-checked={s === chosen}
+          className={s === chosen ? 'active' : undefined}
+          onClick={() => { setShell(s.path); setMore(false); }}
+        >
+          {s.name}<span className="menu-note">{s.path}</span>
+        </button>
+      ))}
+      <div className="menu-rule" />
+    </>
+  );
+}
+
 /** Picks a watched folder to open a fresh, subject-less terminal in. */
 function NewSessionMenu({
   targets, onOpen
@@ -1537,6 +1611,7 @@ function NewSessionMenu({
       </button>
       {open && (
         <div className="menu" role="menu" onClick={(e) => e.stopPropagation()}>
+          <ShellSwitch />
           <p className="menu-head">Open a terminal in</p>
           {targets.length === 0 ? (
             <p className="menu-empty">No watched folders yet.</p>
@@ -1616,6 +1691,7 @@ function SessionRow({
             editing={editing} onEdit={setEditing} onRename={onRename}
             className="row-title" plainName
           />
+          {session.shell && <span className="row-shell" title={session.shell}>{session.shell.split('/').pop()}</span>}
           <AgentStateBadge session={session} seen={seen} />
           <SessionUsageChip id={session.id} />
           {!editing && <SessionCloseButton session={session} />}

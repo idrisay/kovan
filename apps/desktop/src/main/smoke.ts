@@ -539,7 +539,7 @@ export async function smokePty(
     renameSticks: renamed?.title === 'renamed by smoke',
     renameKeptSubject: renamed?.subject === subjectBefore,
     running: sessions.list()[0]?.running,
-    bufferBytes: sessions.buffer(session.id).length,
+    bufferBytes: sessions.buffer(session.id).data.length,
     runnersFound: runners.length,
     runnerNames: runners.map((r) => r.name).slice(0, 8),
     targets: (await agents.targets()).map((x) => x.label).slice(0, 4),
@@ -644,6 +644,31 @@ export async function smokeUi(
   // Item 119: mentions and assignments in Activity.
   if (process.env['KOVAN_SMOKE_ITEM119'] && mode === 'seeded') {
     return { item119: await driveItem119(win, process.env['KOVAN_SMOKE_ITEM119']) };
+  }
+
+  // Item 127: search everything in the title bar.
+  if (process.env['KOVAN_SMOKE_ITEM127'] && mode === 'seeded') {
+    return { item127: await driveItem127(win, process.env['KOVAN_SMOKE_ITEM127']) };
+  }
+
+  // Item 131: Jira's logo beside a ticket's title, in both themes.
+  if (process.env['KOVAN_SMOKE_ITEM131'] && mode === 'seeded') {
+    return { item131: await driveItem131(win, process.env['KOVAN_SMOKE_ITEM131']) };
+  }
+
+  // Item 129: a full-screen program's bottom lines survive a trip to another view.
+  if (process.env['KOVAN_SMOKE_ITEM129'] && mode === 'seeded') {
+    return { item129: await driveItem129(win, process.env['KOVAN_SMOKE_ITEM129']) };
+  }
+
+  // Item 126: the shell switch in Sessions' + menu.
+  if (process.env['KOVAN_SMOKE_ITEM126'] && mode === 'seeded') {
+    return { item126: await driveItem126(win, process.env['KOVAN_SMOKE_ITEM126']) };
+  }
+
+  // Item 124: Summarize, Review and Condense, chosen in Settings › Agents.
+  if (process.env['KOVAN_SMOKE_ITEM124'] && mode === 'seeded') {
+    return { item124: await driveItem124(win, process.env['KOVAN_SMOKE_ITEM124']) };
   }
 
   // Item 120: connection problems in the status bar.
@@ -3881,6 +3906,307 @@ async function driveItem116(win: BrowserWindow, prefix: string): Promise<Record<
  * and on comfortable, that the toolbar stays while the pane scrolls.
  * `KOVAN_DENSITY=compact` for the compact run.
  */
+/**
+ * Item 124: the quick-model buttons start hidden, appear the moment they are
+ * ticked in Settings › Agents (behind the sheet), and go again when unticked.
+ */
+/** Item 127: ⌘K, typing, ⇥ scopes, ⏎ to open, `>` for actions — by real key events. */
+async function driveItem127(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(600);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const key = async (keyCode: string, modifiers: ('meta' | 'shift')[] = []) => {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+    await pause(250);
+  };
+  const type = async (text: string) => { await win.webContents.insertText(text); await pause(400); };
+  const groups = () => read(win, `Array.from(document.querySelectorAll('.tsearch-list [role=group]')).map((g) => g.getAttribute('aria-label') + ': ' + Array.from(g.querySelectorAll('.tsearch-row')).map((r) => r.querySelector('.tsearch-key').textContent + ' ' + r.querySelector('.tsearch-title').textContent + ' [' + r.querySelector('.tsearch-meta').textContent + ']').join(' | '))`);
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rows .row')`, 15_000);
+  const report: Record<string, unknown> = {};
+  report['idle'] = await read(win, `document.querySelector('.tsearch input')?.placeholder`);
+  await snap('idle');
+  await key('K', ['meta']);
+  report['openedByCmdK'] = await read(win, `Boolean(document.querySelector('.tsearch.open')) && document.activeElement === document.querySelector('.tsearch input')`);
+  report['empty'] = await groups();
+  await snap('empty');
+  await type('retry');
+  report['retry'] = await groups();
+  report['highlight'] = await read(win, `Array.from(document.querySelectorAll('.tsearch-title mark')).slice(0, 3).map((m) => m.textContent)`);
+  await snap('retry');
+  await key('Tab');
+  report['scopeAfterTab'] = await read(win, `document.querySelector('.tsearch-scope.on')?.textContent`);
+  report['retryPullsOnly'] = await groups();
+  await key('Tab', ['shift']);
+  await key('Enter');
+  await pause(800);
+  report['openedTitle'] = await read(win, `document.querySelector('.detail h2, main h2')?.textContent`);
+  report['closedAfterEnter'] = await read(win, `!document.querySelector('.tsearch.open')`);
+  await key('K', ['meta']);
+  await type('> settings');
+  report['actions'] = await groups();
+  await snap('actions');
+  await key('Enter');
+  await pause(800);
+  report['settingsOpened'] = await read(win, `Boolean(document.querySelector('.settings-list'))`);
+  await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+  if (!(await until(win, `!document.querySelector('.settings-list')`, 2_000))) await key('Escape');
+  await until(win, `!document.querySelector('.settings-list')`, 2_000);
+  await pause(300);
+  await key('K', ['meta']);
+  await type('zzzz nothing');
+  report['noMatch'] = await read(win, `document.querySelector('.tsearch-empty')?.textContent`);
+  await key('Escape');
+  report['closedByEscape'] = await read(win, `!document.querySelector('.tsearch.open')`);
+  return report;
+}
+
+/**
+ * Item 126: picks bash in the + menu's shell switch, opens a terminal, and
+ * checks what actually runs in it — then that the choice stuck, and that
+ * Settings › Text & terminal shows the same one.
+ */
+async function driveItem131(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  report['railFound'] = await until(win, `document.querySelector('.rail-item[data-view="tickets"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="tickets"]')?.click()`);
+  await until(win, `document.querySelector('.rows .row')`, 5_000);
+  await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+  report['iconFound'] = await until(win, `document.querySelector('.detail-place-icon[aria-label="Open on Jira"] svg rect')`, 5_000);
+  for (const theme of ['dark', 'light']) {
+    // The tokens follow the root's data-theme; this is only a look at both.
+    await read(win, `document.documentElement.dataset.theme = ${JSON.stringify(theme)}`);
+    await pause(800);
+    const box = await read(win, `(() => { const r = document.querySelector('.detail-place-icon[aria-label="Open on Jira"]').getBoundingClientRect(); return { x: Math.max(0, Math.round(r.x - 260)), y: Math.max(0, Math.round(r.y - 14)), width: 340, height: Math.round(r.height + 28) }; })()`) as Electron.Rectangle;
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${theme}.png`, (await win.webContents.capturePage(box)).toPNG());
+    console.log(`shot: ${prefix}-${theme}.png`);
+  }
+  return report;
+}
+
+async function driveItem129(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(600);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  report['railFound'] = await until(win, `document.querySelector('.rail-item[data-view="sessions"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  // A folder from the profile's settings.json (written before launch), so
+  // the session is listed in Sessions.
+  const folders = await read(win, `window.kovan.settings().then((s) => s['repos.folders'])`) as string[];
+  const folder = folders[0]!;
+  const opened = await read(win, `window.kovan.openTerminal(${JSON.stringify(folder)}, undefined, 'tui 129')`) as { id: string };
+  await until(win, `document.querySelector('.term .xterm-rows')`, 10_000);
+  // The shell's prompt first: typed into a half-started shell, the line can
+  // run before the profile has finished, and the prompt then lands on top.
+  await until(win, `Array.from(document.querySelectorAll('.term .xterm-rows > div')).some((r) => r.textContent.trim())`, 15_000);
+  await pause(2_500);
+  // Draws like Claude Code: a box at the bottom drawn once, then only the
+  // cells that change rewritten in place — a timer ticking in the status line.
+  const script = path.join(app.getPath('userData'), 'tui129.py');
+  await writeFile(script, [
+    'import shutil, signal, sys, time',
+    'out = sys.stdout.write',
+    'def at(row, col, text): out(f"\\x1b[{row};{col}H{text}")',
+    'def draw(*_):',
+    '    global w, h',
+    '    w, h = shutil.get_terminal_size()',
+    '    out("\\x1b[2J\\x1b[H")',
+    '    for i in range(12): print(f"{i:02d} " + "history " * 8)',
+    '    at(h - 4, 1, "╭" + "─" * (w - 2) + "╮")',
+    '    at(h - 3, 1, "│ > typed here".ljust(w - 1) + "│")',
+    '    at(h - 2, 1, "╰" + "─" * (w - 2) + "╯")',
+    '    at(h - 1, 1, "  status tick 0s   tokens 0")',
+    '    sys.stdout.flush()',
+    // Like Claude Code: a resize draws everything again.
+    'signal.signal(signal.SIGWINCH, draw)',
+    'draw()',
+    // More ticks than the 256 KB a replay keeps, so the box itself is no
+    // longer in the replay: only the ticks are, as after a long Claude turn.
+    'for tick in range(1, 40001):',
+    '    at(h - 1, 15, str(tick % 10)); at(h - 1, 27, str(tick % 7)); at(h - 3, 15, "")',
+    'sys.stdout.flush()',
+    'time.sleep(3600)'
+  ].join('\n'));
+  await read(win, `window.kovan.sessionWrite(${JSON.stringify(opened.id)}, ${JSON.stringify(`clear; python3 '${script}'\r`)})`);
+  await until(win, `Array.from(document.querySelectorAll('.term .xterm-rows > div')).some((r) => r.textContent.includes('typed here'))`, 15_000);
+  await pause(2_500);
+  const screen = () => read(win, `Array.from(document.querySelectorAll('.term .xterm-rows > div')).map((r) => r.textContent.replace(/\\s+$/, '')).filter(Boolean).slice(-5)`);
+  report['before'] = await screen();
+  await snap('before');
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await pause(1_500);
+  report['termGoneWhileAway'] = await read(win, `!document.querySelector('.term .xterm-rows')`);
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  await until(win, `document.querySelector('.term .xterm-rows')`, 5_000);
+  await pause(1_000);
+  report['after'] = await screen();
+  report['same'] = JSON.stringify(report['before']) === JSON.stringify(report['after']);
+  await snap('after');
+  // A new window has no kept xterm and replays the output, which by now has
+  // lost the box to the cap: it has to have the program draw it again.
+  report['replay'] = await read(win, `window.kovan.sessionBuffer(${JSON.stringify(opened.id)}).then((r) => ({ grid: r.cols + 'x' + r.rows, truncated: r.truncated, startsWith: JSON.stringify(r.data.slice(0, 12)) }))`);
+  win.webContents.reload();
+  await until(win, `document.querySelector('#root')?.children.length > 0`, 15_000);
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  await until(win, `document.querySelector('.rail-item[data-view="sessions"]')`, 10_000);
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  await until(win, `document.querySelector('.term .xterm-rows')`, 5_000);
+  await pause(2_000);
+  report['afterReload'] = await screen();
+  // The redraw restarts the counters; everything else must match.
+  const counters = (lines: unknown) => JSON.stringify(lines).replace(/tick \d+|tokens \d+/g, '');
+  report['sameAfterReload'] = counters(report['afterReload']) === counters(report['before']);
+  await snap('after-reload');
+  await read(win, `window.kovan.sessionClose(${JSON.stringify(opened.id)})`);
+  return report;
+}
+
+async function driveItem126(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(800);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  // The watched folder comes from the profile's settings.json, written before
+  // launch: a reload to pick up a new one would drop the seeded data.
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  report['railFound'] = await until(win, `document.querySelector('.rail-item[data-view="sessions"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  report['plusFound'] = await until(win, `document.querySelector('.new-session-host button')`, 5_000);
+  if (!report['plusFound']) return report;
+  const openMenu = async () => {
+    await read(win, `document.querySelector('.new-session-host button').click()`);
+    await until(win, `document.querySelector('.new-session-host .menu')`, 5_000);
+  };
+  const segments = () => read(win, `Array.from(document.querySelectorAll('.shell-switch .seg')).map((b) => b.textContent + (b.classList.contains('on') ? ' ✓' : ''))`);
+
+  await openMenu();
+  report['segmentsAtFirst'] = await segments();
+  await snap('menu-default');
+  await read(win, `Array.from(document.querySelectorAll('.shell-switch .seg')).find((b) => b.textContent === 'More…')?.click()`);
+  await pause(200);
+  report['more'] = await read(win, `Array.from(document.querySelectorAll('.new-session-host .menu > button')).map((b) => b.textContent)`);
+  await snap('menu-more');
+  await read(win, `Array.from(document.querySelectorAll('.shell-switch .seg')).find((b) => b.textContent === 'bash')?.click()`);
+  await pause(300);
+  report['segmentsAfterBash'] = await segments();
+  await read(win, `Array.from(document.querySelectorAll('.new-session-host .menu > button')).find((b) => !b.closest('.shell-switch') && b.textContent.includes('acme-web'))?.click()`);
+  await until(win, `document.querySelector('.row-shell')`, 10_000);
+  await pause(2_500);
+  const sessions = await read(win, `window.kovan.sessions()`) as { id: string; shell?: string }[];
+  report['sessionShell'] = sessions.map((x) => x.shell);
+  report['rowTag'] = await read(win, `document.querySelector('.row-shell')?.textContent`);
+  report['saved'] = await read(win, `window.kovan.settings().then((s) => s['terminal.shell'])`);
+  // What the pty really runs: the shell itself writes its name and version to a file.
+  const out = path.join(app.getPath('userData'), 'shell126.txt');
+  await read(win, `window.kovan.sessionWrite(${JSON.stringify(sessions[0]?.id)}, ${JSON.stringify(`echo "$0 $BASH_VERSION" > '${out}'\r`)})`);
+  await pause(1_500);
+  report['ptyRuns'] = await readFile(out, 'utf8').then((t) => t.trim(), () => 'nothing written');
+  await snap('terminal-bash');
+
+  await openMenu();
+  report['segmentsReopened'] = await segments();
+  await read(win, `document.body.click()`);
+  await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);
+  await until(win, `document.querySelector('.settings-list')`, 5_000);
+  report['textSummary'] = await read(win, `document.querySelector('.settings-row[data-section="text"] .settings-row-summary')?.textContent`);
+  await read(win, `document.querySelector('.settings-row[data-section="text"] .settings-row-head')?.click()`);
+  await pause(500);
+  report['settingValue'] = await read(win, `Array.from(document.querySelectorAll('.settings-row.open label')).find((l) => l.textContent.includes('Shell for new terminals'))?.querySelector('select')?.value`);
+  await snap('settings');
+  return report;
+}
+
+async function driveItem124(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(1_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rows .row')`, 15_000);
+  const report: Record<string, unknown> = {};
+  const headerButtons = () => read(win, `Array.from(document.querySelectorAll('.detail-toolbar-end button, .detail-head .detail-actions button')).map((b) => b.textContent.trim()).filter(Boolean)`);
+  const cards = () => read(win, `Array.from(document.querySelectorAll('.quick-card h3, .quick-card .quick-card-title')).map((h) => h.textContent.trim())`);
+  const openPull = async () => {
+    await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+    await pause(400);
+    await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+    await pause(1_200);
+  };
+  const box = (label: string) => `Array.from(document.querySelectorAll('.settings-row.open .checkbox-row')).find((r) => r.textContent.trim() === ${JSON.stringify(label)})?.querySelector('input')`;
+
+  await openPull();
+  report['offButtons'] = await headerButtons();
+  await snap('pull-default');
+
+  await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);
+  await until(win, `document.querySelector('.settings-list')`, 5_000);
+  await read(win, `document.querySelector('.settings-row[data-section="agents"] .settings-row-head')?.click()`);
+  await pause(500);
+  report['boxesAtFirst'] = await read(win, `Array.from(document.querySelectorAll('.settings-row.open .checkbox-row')).slice(0, 3).map((r) => r.textContent.trim() + ': ' + r.querySelector('input').checked)`);
+  report['quickModelShown'] = await read(win, `Array.from(document.querySelectorAll('.settings-row.open h3')).map((h) => h.textContent)`);
+  report['agentsSummary'] = await read(win, `document.querySelector('.settings-row[data-section="agents"] .settings-row-summary')?.textContent`);
+  await snap('settings-default');
+  await read(win, `${box('Summarize')}?.click()`);
+  await read(win, `${box('Review')}?.click()`);
+  await pause(400);
+  report['buttonsBehindSheet'] = await headerButtons();
+  await snap('settings-ticked');
+  await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+  await pause(600);
+  report['onButtons'] = await headerButtons();
+  await snap('pull-on');
+
+  // Off again, Condense too: every quick button and the quick model settings go.
+  await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);
+  await until(win, `document.querySelector('.settings-list')`, 5_000);
+  if (!(await read(win, `Boolean(document.querySelector('.settings-row.open[data-section="agents"]'))`))) {
+    await read(win, `document.querySelector('.settings-row[data-section="agents"] .settings-row-head')?.click()`);
+    await pause(500);
+  }
+  for (const label of ['Summarize', 'Review', 'Condense earlier comments']) await read(win, `${box(label)}?.click()`);
+  await pause(400);
+  report['quickModelWhenAllOff'] = await read(win, `Array.from(document.querySelectorAll('.settings-row.open h3')).map((h) => h.textContent)`);
+  report['agentsSummaryAllOff'] = await read(win, `document.querySelector('.settings-row[data-section="agents"] .settings-row-summary')?.textContent`);
+  await snap('settings-all-off');
+  await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+  await pause(600);
+  report['offAgainButtons'] = await headerButtons();
+  report['cardsWhenOff'] = await cards();
+  report['saved'] = await read(win, `window.kovan.settings().then((s) => ({ summarize: s['buttons.summarize'], review: s['buttons.review'], condense: s['buttons.condense'] }))`);
+  return report;
+}
+
 async function driveItem118(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const snap = async (name: string) => {
@@ -4186,7 +4512,7 @@ async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: stri
   const again = new Sessions(undefined, { hosts: new PtyHosts(userData) });
   report['restored'] = await again.restore();
   report['restoredSessions'] = again.list().map((s) => ({ title: s.title, running: s.running, hosted: s.hosted, status: s.status, subject: s.subject }));
-  report['restoredBuffer'] = again.buffer(input.id).length;
+  report['restoredBuffer'] = again.buffer(input.id).data.length;
   again.detachAll();
   return report;
 }
@@ -4644,7 +4970,7 @@ async function driveItem91(win: BrowserWindow, prefix: string): Promise<Record<s
   let output = '';
   for (let i = 0; i < 30 && !output.includes('opti2mized'); i++) {
     await pause(300);
-    output = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(optimize.id)})`) as string) ?? '';
+    output = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(optimize.id)}).then((r) => r.data)`) as string) ?? '';
   }
   const ranOptimize = { ran: output.includes('opti2mized'), cwd: optimize.cwd, tagged: Boolean(optimize.commandId),
     menuClosed: !(await read(win, `Boolean(document.querySelector('.qc-menu'))`)) };
@@ -4657,7 +4983,7 @@ async function driveItem91(win: BrowserWindow, prefix: string): Promise<Record<s
   let rerunOut = '';
   for (let i = 0; i < 30 && (rerunOut.match(/opti2mized/g) ?? []).length < 2; i++) {
     await pause(300);
-    rerunOut = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(optimize.id)})`) as string) ?? '';
+    rerunOut = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(optimize.id)}).then((r) => r.data)`) as string) ?? '';
   }
   const rerun = { sessionsBefore: beforeRerun, sessionsAfter: await titles(), outputs: (rerunOut.match(/opti2mized/g) ?? []).length };
 
@@ -4676,7 +5002,7 @@ async function driveItem91(win: BrowserWindow, prefix: string): Promise<Record<s
   let devOut = '';
   for (let i = 0; i < 20 && !devOut.includes('serving-42'); i++) {
     await pause(300);
-    devOut = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(dev.id)})`) as string) ?? '';
+    devOut = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(dev.id)}).then((r) => r.data)`) as string) ?? '';
   }
   const reuse = { before, after, servingOutput: devOut.includes('serving-42'),
     activeIsDev: await read(win, `document.querySelector('.term')?.getAttribute('data-session-id') === ${JSON.stringify(dev.id)}`),
@@ -4975,7 +5301,7 @@ async function driveItem88(win: BrowserWindow, prefix: string): Promise<Record<s
   await doubleTap();
   await until(win, `document.querySelector('.dictation-pill.done')`, 5_000);
   await pause(600);
-  const buffer = await read(win, `window.kovan.sessionBuffer(${JSON.stringify(session)})`) as string;
+  const buffer = await read(win, `window.kovan.sessionBuffer(${JSON.stringify(session)}).then((r) => r.data)`) as string;
   const plain = buffer.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
   const terminal = {
     pill: await read(win, `document.querySelector('.dictation-state')?.textContent`),
