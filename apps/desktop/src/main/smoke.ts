@@ -20,7 +20,8 @@
  * `KOVAN_SHOT=<path>` also writes a PNG of the window.
  */
 
-import { app, clipboard, type BrowserWindow } from 'electron';
+import { app, clipboard, ClipboardItem, type BrowserWindow } from 'electron';
+import { latestDockMenu } from './dockMenu';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -652,6 +653,21 @@ export async function smokeUi(
   }
 
   // Item 131: Jira's logo beside a ticket's title, in both themes.
+  if (process.env['KOVAN_SMOKE_SECURITY'] && mode === 'seeded') {
+    return { security: await driveSecurity(win, process.env['KOVAN_SMOKE_SECURITY']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM136'] && mode === 'seeded') {
+    return { item136: await driveItem136(win, process.env['KOVAN_SMOKE_ITEM136']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM135'] && mode === 'seeded') {
+    return { item135: await driveItem135(win, process.env['KOVAN_SMOKE_ITEM135']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM133'] && mode === 'seeded') {
+    return { item133: await driveItem133(win, process.env['KOVAN_SMOKE_ITEM133']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM132'] && mode === 'seeded') {
+    return { item132: await driveItem132(win, process.env['KOVAN_SMOKE_ITEM132']) };
+  }
   if (process.env['KOVAN_SMOKE_ITEM131'] && mode === 'seeded') {
     return { item131: await driveItem131(win, process.env['KOVAN_SMOKE_ITEM131']) };
   }
@@ -984,10 +1000,10 @@ export async function smokeUi(
     await new Promise((r) => setTimeout(r, 500));
     await read(win, `document.querySelector('.rows .row')?.click()`);
     await until(win, `document.querySelector('.quick-copy')`, 10_000);
-    clipboard.writeText('');
+    await clipboard.writeText('');
     await read(win, `document.querySelector('.quick-copy').click()`);
     await until(win, `document.querySelector('.quick-copy.copied')`, 5_000);
-    report['copied'] = clipboard.readText() === text;
+    report['copied'] = (await clipboard.readText()) === text;
     report['button'] = await read(win, `document.querySelector('.quick-copy').textContent`);
     await read(win, `document.querySelector('.quick-copy').closest('.quick-card').scrollIntoView({ block: 'start' })`);
     await new Promise((r) => setTimeout(r, 300));
@@ -3973,6 +3989,175 @@ async function driveItem127(win: BrowserWindow, prefix: string): Promise<Record<
  * checks what actually runs in it — then that the choice stuck, and that
  * Settings › Text & terminal shows the same one.
  */
+/**
+ * The security review's fixes (2026-10): the window is sandboxed on Electron
+ * 44, a screenshot still pastes after the clipboard API change, and links that
+ * aren't http(s) or mailto never reach the OS. The clipboard is put back after.
+ */
+async function driveSecurity(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const report: Record<string, unknown> = {};
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  report['electron'] = process.versions.electron;
+  // Exists at runtime; Electron's own types leave it out.
+  report['sandboxed'] = (win.webContents as unknown as { getLastWebPreferences(): { sandbox?: boolean } | null }).getLastWebPreferences()?.sandbox;
+  report['bridge'] = await read(win, `typeof window.kovan?.sessionWrite`);
+  report['nodeInWindow'] = await read(win, `typeof require + ' / ' + typeof process`);
+
+  const saved = await clipboard.read().catch(() => []);
+  try {
+    const png = (await win.webContents.capturePage({ x: 0, y: 0, width: 40, height: 40 })).toPNG();
+    await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(png)], { type: 'image/png' }) })]);
+    const file = await read(win, `window.kovan.clipboardImagePath()`) as string;
+    report['paste'] = file ? { file: file.split('/').slice(-2).join('/'), bytes: (await readFile(file)).length, png: png.length } : null;
+  } finally {
+    if (saved.length) await clipboard.write(saved).catch(() => undefined);
+  }
+
+  const before = Date.now();
+  await read(win, `window.kovan.openExternal('file:///System/Applications/Calculator.app')`);
+  await read(win, `window.open('file:///System/Applications/Calculator.app')`);
+  await read(win, `window.kovan.openExternal('vscode://file/etc/hosts')`);
+  await new Promise((r) => setTimeout(r, 800));
+  report['refusedLinksElapsed'] = Date.now() - before;
+  await writeFile(`${prefix}-done.txt`, 'ok');
+  return report;
+}
+
+/** Item 136: GitHub, Jira and Sentry icons in grey, in each toolbar and the rail. */
+async function driveItem136(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  await until(win, `document.querySelector('.rail-item[data-view="sentry"]')`, 15_000);
+  for (const [view, service] of [['pulls', 'GitHub'], ['tickets', 'Jira'], ['sentry', 'Sentry']] as const) {
+    await read(win, `document.querySelector('.rail-item[data-view="${view}"]')?.click()`);
+    await until(win, `document.querySelector('.rows .row')`, 5_000);
+    await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+    const sel = `.detail-place-icon[aria-label="Open on ${service}"]`;
+    report[service] = await until(win, `document.querySelector('${sel} svg')`, 5_000)
+      ? await read(win, `getComputedStyle(document.querySelector('${sel} svg path')).fill`) : null;
+    await pause(500);
+    const box = await read(win, `(() => { const r = document.querySelector('${sel}').getBoundingClientRect(); return { x: Math.max(0, Math.round(r.x - 260)), y: Math.max(0, Math.round(r.y - 14)), width: 380, height: Math.round(r.height + 28) }; })()`) as Electron.Rectangle;
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${service}.png`, (await win.webContents.capturePage(box)).toPNG());
+  }
+  const rail = await read(win, `(() => { const r = document.querySelector('.rail-item[data-view="sentry"]').getBoundingClientRect(); return { x: 0, y: Math.max(0, Math.round(r.y - 140)), width: 70, height: 280 }; })()`) as Electron.Rectangle;
+  await writeFile(`${prefix}-rail.png`, (await win.webContents.capturePage(rail)).toPNG());
+  return report;
+}
+
+/**
+ * Item 135: the Dock menu. Two workspaces are seeded in the profile's
+ * settings.json before launch; the menu's own click handlers are called, the
+ * same ones macOS calls.
+ */
+async function driveItem135(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const menu = latestDockMenu();
+  if (!menu) return { menu: null };
+  await menu.refresh();
+  const describe = () => menu.template().map((i) => i.type === 'separator' ? '---' : `${i.checked ? '✓ ' : ''}${i.label}${i.icon ? ' [icon]' : ''}`);
+  const click = (label: string) => (menu.template().find((i) => i.label === label)?.click as (() => void) | undefined)?.();
+  const state = () => read(win, `({
+    view: document.querySelector('.rail-item.active')?.dataset.view,
+    workspace: document.querySelector('.ws-main')?.innerText.split('\\n')[0],
+    roots: [...document.querySelectorAll('[data-root-row]')].map((r) => r.dataset.rootRow.split('/').pop() + (r.querySelector('.repo-main')?.getAttribute('aria-expanded') === 'true' ? ' (open)' : ''))
+  })`);
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  const report: Record<string, unknown> = {};
+  report['menu'] = describe();
+  const other = menu.template().find((i) => i.type === 'checkbox' && !i.checked)?.label as string;
+  click(other);
+  await until(win, `document.querySelector('.rail-item.active')?.dataset.view === 'workspace' && document.querySelector('[data-root-row]')`, 8_000);
+  await pause(600);
+  report['afterWorkspace'] = await state();
+  report['menuAfter'] = describe();
+  const folder = menu.template().filter((i) => i.click && i.type !== 'checkbox').pop()?.label as string;
+  await read(win, `document.querySelectorAll('.ws-root .repo-main[aria-expanded="true"]').forEach((b) => b.click())`);
+  await pause(300);
+  report['collapsed'] = await state();
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]').click()`);
+  await pause(400);
+  click(folder);
+  await pause(1_200);
+  report['afterFolder'] = { picked: folder, ...(await state() as object) };
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-folder.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-folder.png`);
+  report['afterShot'] = await state();
+  await pause(1_500);
+  report['later'] = await state();
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-later.png`, (await win.webContents.capturePage()).toPNG());
+  return report;
+}
+
+/**
+ * Item 133: a red service chip and the toast's Details, clicked with the real
+ * mouse (sendInputEvent), not `.click()`, must open the problems popover.
+ */
+async function driveItem133(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const mouse = async (selector: string) => {
+    const r = await read(win, `(() => { const r = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return r ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null; })()`) as { x: number; y: number } | null;
+    if (!r) return false;
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: r.x, y: r.y });
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+    await pause(400);
+    return true;
+  };
+  const open = () => read(win, `document.querySelector('.problems-pop')?.innerText.slice(0, 120) ?? null`);
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.statusbar [data-provider]')`, 15_000);
+  const report: Record<string, unknown> = {};
+  const timeout = 'Request to https://sentry.io/api/0/organizations/acme/issues/ timed out after 15000ms';
+  const last = trackProblems([], [{ provider: 'sentry', message: timeout }], [], Date.now());
+  win.webContents.send('kovan:snapshot', { ...fixtureSnapshot(10), connected: ['github', 'jira', 'sentry'], errors: [{ provider: 'sentry', message: timeout }] });
+  win.webContents.send('kovan:problems', { log: last.log, started: [last.log[0]] });
+  await pause(600);
+  report['toast'] = Boolean(await read(win, `document.querySelector('.problem-toast')`));
+  report['detailsClicked'] = await mouse('.problem-toast-actions .link');
+  report['afterDetails'] = await open();
+  await mouse('.detail-pane, main');
+  await pause(300);
+  report['closedByOutside'] = !(await open());
+  report['chipClicked'] = await mouse('.statusbar [data-provider="sentry"]');
+  report['afterChip'] = await open();
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-chip.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-chip.png`);
+  report['chipClickedAgain'] = await mouse('.statusbar [data-provider="sentry"]');
+  report['toggledShut'] = !(await open());
+  return report;
+}
+
+/** The terminal icon (item 132): the rail with Sessions selected. */
+async function driveItem132(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  report['railFound'] = await until(win, `document.querySelector('.rail-item[data-view="sessions"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  report['boxless'] = await read(win, `!document.querySelector('.rail-item[data-view="sessions"] svg rect')`);
+  await pause(800);
+  const box = await read(win, `(() => { const r = document.querySelector('.rail-item[data-view="sessions"]').getBoundingClientRect(); return { x: 0, y: Math.max(0, Math.round(r.y - 120)), width: 260, height: 240 }; })()`) as Electron.Rectangle;
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-rail.png`, (await win.webContents.capturePage(box)).toPNG());
+  console.log(`shot: ${prefix}-rail.png`);
+  return report;
+}
+
 async function driveItem131(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   win.show();
@@ -5315,12 +5500,12 @@ async function driveItem88(win: BrowserWindow, prefix: string): Promise<Record<s
   // 5. Nothing focused: the clipboard.
   await until(win, `!document.querySelector('.dictation-pill')`, 3_000);
   await read(win, `document.activeElement?.blur()`);
-  clipboard.writeText('');
+  await clipboard.writeText('');
   await doubleTap();
   await until(win, `document.querySelector('.dictation-pill .dictation-text')?.textContent?.includes('retry test')`, 5_000);
   await doubleTap();
   await until(win, `document.querySelector('.dictation-pill.done')`, 5_000);
-  const toClipboard = { pill: await read(win, `document.querySelector('.dictation-state')?.textContent`), clipboard: clipboard.readText() };
+  const toClipboard = { pill: await read(win, `document.querySelector('.dictation-state')?.textContent`), clipboard: await clipboard.readText() };
 
   // 6. Settings: switch, languages from the real helper, permissions.
   await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);

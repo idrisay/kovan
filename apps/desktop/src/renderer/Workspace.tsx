@@ -52,8 +52,10 @@ const KIND_MARK: Record<ChangeKind, string> = {
 
 interface Cursor { line: number; column: number; selected: number }
 
-export function WorkspaceView({ onTerminal, visible, openRequest }: {
+export function WorkspaceView({ onTerminal, visible, openRequest, showRequest }: {
   onTerminal: (cwd: string) => void;
+  /** The Dock menu (item 135): switch to this workspace, opened at `folder`. */
+  showRequest?: { id: string; folder?: string; nonce: number };
   /** ⌘P picked a file (item 100): open it, at a line if one was typed. */
   openRequest?: { path: string; line?: number; nonce: number };
   /**
@@ -192,6 +194,31 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
     })();
     return () => { cancelled = true; };
   }, [active]);
+
+  /**
+   * A pick from the Dock menu. Main has already made it the active workspace,
+   * so this only follows: the list again (it may be a workspace this view has
+   * not seen yet), then, once that workspace's folders are in, the folder
+   * opened and scrolled to.
+   */
+  const shownRequest = useRef<number>();
+  useEffect(() => {
+    if (!showRequest || shownRequest.current === showRequest.nonce || showRequest.id === active) return;
+    void window.kovan.workspaces().then(({ list: all }) => { setList(all); setActive(showRequest.id); });
+  }, [showRequest, active]);
+  useEffect(() => {
+    const request = showRequest;
+    if (!request || shownRequest.current === request.nonce || request.id !== active || !roots) return;
+    const folder = request.folder;
+    // Still the previous workspace's folders, the instant after switching.
+    if (folder && !roots.some((r) => r.folder === folder)) return;
+    shownRequest.current = request.nonce;
+    if (!folder) return;
+    setExpanded((previous) => new Set(previous).add(folder));
+    requestAnimationFrame(() => document
+      .querySelector(`[data-root-row="${CSS.escape(folder)}"]`)
+      ?.scrollIntoView({ block: 'start' }));
+  }, [showRequest, active, roots]);
 
   /** Loads a directory once, into the shared cache. */
   const ensure = useCallback((dir: string) => {

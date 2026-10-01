@@ -511,20 +511,27 @@ function standingVerdicts(
  * is back in the reviewer's court, though, so a row that still says "Changes
  * requested" is reporting work that has already been done.
  *
- * Only that one relaxation is applied. Every other decision is GitHub's own,
- * because it is the only side that knows the branch's protection rules — how
- * many approvals are required, and whose count.
+ * Otherwise GitHub's decision stands, because it is the only side that knows
+ * the branch's protection rules — how many approvals are required, and whose
+ * count. Except when it has none: a repository without a "require a review"
+ * rule always answers null (item 134), even with an approval in and reviewers
+ * asked. Then the reviews themselves decide, the way GitHub's own page reads
+ * them, so such a pull request says "Approved" or "Awaiting review" like one
+ * from a protected repository instead of a bare "Open".
  */
 function decisionFromNode(node: ApiPullNode): ReviewDecision {
   const decision = reviewDecisionFromApi(node.reviewDecision);
-  if (decision !== 'changes_requested') {
-    return decision;
-  }
   const verdicts = (node.latestOpinionatedReviews?.nodes ?? [])
     .filter((review): review is { state?: string; author?: { login?: string } | null } =>
       Boolean(review)
     )
     .map((review) => ({ author: review.author?.login ?? '', state: review.state ?? '' }));
+  if (decision === 'none' && node.reviewDecision == null) {
+    return decisionFromVerdicts(verdicts, pendingReviewersOf(node));
+  }
+  if (decision !== 'changes_requested') {
+    return decision;
+  }
   if (verdicts.length === 0) {
     // Either the query didn't ask for them or GitHub didn't say; with nothing
     // to reason from, its own decision stands.
@@ -554,10 +561,15 @@ export function reviewDecisionFrom(
       latestByUser.set(sameLogin(review.user?.login), review.state);
     }
   }
-  const standing = standingVerdicts(
-    [...latestByUser].map(([author, state]) => ({ author, state })),
-    pendingReviewers
-  );
+  return decisionFromVerdicts([...latestByUser].map(([author, state]) => ({ author, state })), pendingReviewers);
+}
+
+/** Each reviewer's latest verdict, plus who is still asked, as one decision. */
+function decisionFromVerdicts(
+  verdicts: readonly { author: string; state: string }[],
+  pendingReviewers: readonly string[]
+): ReviewDecision {
+  const standing = standingVerdicts(verdicts, pendingReviewers);
   if (standing.includes('CHANGES_REQUESTED')) {
     return 'changes_requested';
   }
@@ -570,7 +582,7 @@ export function reviewDecisionFrom(
   // Nothing stands: either someone has been asked and not answered yet, or
   // every verdict on record has been superseded by a fresh request. Both are
   // the pull request waiting on a reviewer.
-  return latestByUser.size > 0 || pendingReviewers.length > 0 ? 'review_required' : 'none';
+  return verdicts.length > 0 || pendingReviewers.length > 0 ? 'review_required' : 'none';
 }
 
 export interface CheckRunLike {

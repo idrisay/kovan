@@ -8,6 +8,7 @@
  */
 
 import { app, shell } from 'electron';
+import { openLink } from './external';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -478,7 +479,7 @@ export class Agents {
     if (!site || !/^https?:\/\//i.test(site)) throw new Error('This run has no site to open.');
     const readOr = (file: string) => readFile(path.join(directory, file), 'utf8').catch(() => '');
     const url = runPageUrl({ site, pages: await readOr('pages.txt'), report: await readOr('report.md'), ...(shot ? { shot } : {}) });
-    await shell.openExternal(url);
+    await openLink(url, (m) => this.host.log.warn(m));
   }
 
   /**

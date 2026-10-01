@@ -624,7 +624,9 @@ function StatusBar({
                 id === 'github' && snapshot.githubBudget ? describeGitHubBudget(snapshot.githubBudget) : undefined,
                 'Connection problems, now and earlier'
               ].filter(Boolean).join('\n\n')}
-              onClick={(e) => { const el = e.currentTarget; setProblemsAnchor((a) => (a ? undefined : el)); }}
+              // Stopped, like every menu button: otherwise the popover's own
+              // click-outside listener sees this click and shuts it (item 133).
+              onClick={(e) => { e.stopPropagation(); const el = e.currentTarget; setProblemsAnchor((a) => (a ? undefined : el)); }}
             >
               <span className={`dot ${failed.has(id) ? 'fail' : 'pass'}`} />
               {STATUSBAR_PROVIDER[id] ?? id}
@@ -760,6 +762,12 @@ export function App() {
   const [fontSize] = useTerminalFontSize();
   const idleCount = idleAgents(useRunningAgents()).length;
   const [agentsPane, setAgentsPane] = useState<AgentsPaneId>('agents');
+  // The Dock menu (item 135): main has already made it the active workspace.
+  const [showWorkspace, setShowWorkspace] = useState<{ id: string; folder?: string; nonce: number }>();
+  useEffect(() => window.kovan.onOpenWorkspace((id, folder) => {
+    setView('workspace');
+    setShowWorkspace({ id, ...(folder ? { folder } : {}), nonce: Date.now() });
+  }), []);
   useEffect(() => window.kovan.onShowAgents(() => {
     setView('agents');
     setAgentsPane('agents');
@@ -1275,7 +1283,7 @@ export function App() {
               aside and main as the body's own flex items. */}
           {workspaceSeen && (
             <div className={view === 'workspace' ? 'keep-alive' : 'keep-alive hidden'}>
-              <WorkspaceView onTerminal={openTerminal} visible={view === 'workspace'} openRequest={openRequest} />
+              <WorkspaceView onTerminal={openTerminal} visible={view === 'workspace'} openRequest={openRequest} showRequest={showWorkspace} />
             </div>
           )}
 

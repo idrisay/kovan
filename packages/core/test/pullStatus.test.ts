@@ -140,6 +140,51 @@ describe('re-requested reviews', () => {
   });
 });
 
+describe('repositories without a review rule (item 134)', () => {
+  // GitHub answers reviewDecision: null there, whatever the reviews say.
+  const base = {
+    number: 14,
+    title: 'x',
+    url: 'u',
+    isDraft: false,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    additions: 0,
+    deletions: 0,
+    reviewDecision: null
+  };
+  const asked = (...logins: string[]) => ({ nodes: logins.map((login) => ({ requestedReviewer: { login } })) });
+  const said = (...reviews: [string, string][]) => ({
+    nodes: reviews.map(([login, state]) => ({ state, author: { login } }))
+  });
+
+  it('reads one approval as approved, even with others still asked', () => {
+    const summary = summaryFromApi({ ...base, latestOpinionatedReviews: said(['erin-dev', 'APPROVED']), reviewRequests: asked('bob-dev', 'alice-dev') });
+    expect(summary.reviewDecision).toBe('approved');
+    expect(primaryFlag(summary).label).toBe('Approved');
+  });
+
+  it('reads reviewers asked with no answer yet as awaiting review', () => {
+    const summary = summaryFromApi({ ...base, latestOpinionatedReviews: said(), reviewRequests: asked('bob-dev') });
+    expect(primaryFlag(summary).label).toBe('Awaiting review');
+  });
+
+  it('reads a standing objection as changes requested', () => {
+    const summary = summaryFromApi({ ...base, latestOpinionatedReviews: said(['a', 'APPROVED'], ['b', 'CHANGES_REQUESTED']) });
+    expect(summary.reviewDecision).toBe('changes_requested');
+  });
+
+  it('stays plain open when nobody is asked and nobody has reviewed', () => {
+    const summary = summaryFromApi({ ...base, latestOpinionatedReviews: said(), reviewRequests: asked() });
+    expect(primaryFlag(summary).label).toBe('Open');
+  });
+
+  it('keeps a protected repository\'s own answer', () => {
+    const summary = summaryFromApi({ ...base, reviewDecision: 'REVIEW_REQUIRED', latestOpinionatedReviews: said(['a', 'APPROVED']) });
+    expect(summary.reviewDecision).toBe('review_required');
+  });
+});
+
 describe('check roll-up', () => {
   it('lets one failure fail the set', () => {
     expect(rollUpChecks(['success', 'failure', 'pending'])).toBe('failure');

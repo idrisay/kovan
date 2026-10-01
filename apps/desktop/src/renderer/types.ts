@@ -168,6 +168,7 @@ export interface KovanApi {
   runningAgentsForce(key: string): Promise<{ key: string; stopped: boolean; left: number }>;
   onRunningAgents(listener: (report: AgentsReport) => void): () => void;
   /** The idle reminder was clicked. */
+  onOpenWorkspace(listener: (id: string, folder?: string) => void): () => void;
   onShowAgents(listener: () => void): () => void;
 
   runners(): Promise<Runner[]>;

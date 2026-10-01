@@ -95,8 +95,10 @@ Reuse these before writing new CSS. A new component goes in this list.
 
 Icons are Lucide's drawings (item 128), kept inline in `icons.tsx` at a
 1.6 stroke so they take `currentColor`. A new icon is copied from
-lucide-static's SVG, not drawn by hand. GitHub and Jira keep their own marks,
-and the stop square in Quick model jobs stays solid.
+lucide-static's SVG, not drawn by hand. GitHub, Jira and Sentry keep their
+own marks, all in the same grey (`currentColor`, item 136). The terminal keeps
+Kovan's unboxed `>_` (item 132), and the stop square in Quick model jobs stays
+solid.
 
 Put at most one `.primary` in a row. Separate groups of different weights with
 the existing vertical rule, not with space alone. A detail header's action bar
@@ -450,6 +452,12 @@ visible focus state.
    the window keeps it running. Quitting leaves the sessions running in the
    terminal host (item 114); it asks first only for sessions that run inside
    Kovan because no host could start.
+   Right-clicking the Dock icon lists the workspaces, with the active one
+   ticked, then the active workspace's folders, the way VS Code lists recent
+   folders (item 135, `main/dockMenu.ts`). A pick opens the Workspace view on
+   it. The menu is rebuilt when the `workspaces` or `workspace.active`
+   settings change. A pick made while no window is open waits in main until
+   the new window asks for it.
 8. **Everything in the main process keeps working with no window open.**
    Poller, sessions, quick jobs and notifications live in `src/main`. The
    renderer only asks and listens.
@@ -552,6 +560,19 @@ window:
   `~/.local/bin`. A GUI-launched app's own PATH is not enough.
 - Headless model runs start in an empty temp folder, with only the tools
   they need allowed (for example web search and fetch only).
+- **The window is sandboxed, on a supported Electron.** It shows other
+  people's text all day, so a Chromium bug there must stay there
+  (`sandbox: true`, security review 2026-10). The preload is built as
+  CommonJS (`index.cjs`) because a sandboxed preload can't be an ES module,
+  and it may only use `contextBridge`, `ipcRenderer` and `webUtils`. Keep
+  Electron within the three supported majors.
+- **Links open through `openLink` (`main/external.ts`), never
+  `shell.openExternal` directly.** Only `https`, `http` and `mailto` reach the
+  OS; `file:` and custom schemes can launch things. A fixed URL of our own
+  (System Settings panes) is the one exception.
+- **Paths are file names, not patterns.** Git commands that take paths from
+  a list run with `--literal-pathspecs`: a file called `:!x` would otherwise
+  mean "everything except x".
 
 ### Preferences vs settings
 

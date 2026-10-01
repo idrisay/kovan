@@ -26,6 +26,12 @@ export default defineConfig({
       }
     }
   },
-  preload: { plugins: [externalizeDepsPlugin(bundleWorkspace)] },
+  // CommonJS, because the window is sandboxed (security review, 2026-10) and
+  // a sandboxed preload cannot be an ES module. `.cjs`, because the package
+  // says "module" and a `.js` file would be read as one.
+  preload: {
+    plugins: [externalizeDepsPlugin(bundleWorkspace)],
+    build: { rollupOptions: { output: { format: 'cjs', entryFileNames: '[name].cjs' } } }
+  },
   renderer: { plugins: [react()] }
 });

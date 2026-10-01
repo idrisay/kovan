@@ -68,6 +68,16 @@ const api = {
     ipcRenderer.on('kovan:running-agents', handler);
     return () => ipcRenderer.removeListener('kovan:running-agents', handler);
   },
+  /** The Dock menu picked a workspace, or a folder in one (item 135). */
+  onOpenWorkspace: (listener: (id: string, folder?: string) => void) => {
+    const handler = (_event: unknown, id: string, folder?: string) => listener(id, folder);
+    ipcRenderer.on('kovan:open-workspace', handler);
+    // One picked while no window was open waits in main until now.
+    void ipcRenderer.invoke('kovan:open-workspace-pending').then((p?: { id: string; folder?: string }) => {
+      if (p) listener(p.id, p.folder);
+    });
+    return () => ipcRenderer.removeListener('kovan:open-workspace', handler);
+  },
   onShowAgents: (listener: () => void) => {
     const handler = () => listener();
     ipcRenderer.on('kovan:show-agents', handler);

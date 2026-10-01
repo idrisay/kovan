@@ -48,6 +48,8 @@ import { ProblemLog } from './problems';
 import { Agents } from './agents';
 import type { TestEnvironmentSave, TestSelection } from './testEnvironments';
 import { Workspaces } from './workspace';
+import { DockMenu } from './dockMenu';
+import { openLink } from './external';
 import { QuickModel } from './quick';
 import { PriceCheck } from './priceCheck';
 import { ModelSearch } from './modelSearch';
@@ -183,6 +185,24 @@ const running = new RunningAgents(host, sessions, () => {
   window?.webContents.send('kovan:show-agents');
 });
 const workspaces = new Workspaces(host);
+/**
+ * A pick from the Dock menu while no window was open: the new window's
+ * renderer asks for it once it is listening (item 135), since a message sent
+ * now would arrive before anything could hear it.
+ */
+let pendingWorkspaceOpen: { id: string; folder?: string } | undefined;
+const dockMenu = new DockMenu(() => workspaces.list(), () => workspaces.activeId(), (id, folder) => {
+  void (async () => {
+    await workspaces.activate(id);
+    const fresh = !window || window.isDestroyed();
+    createWindow();
+    if (fresh) pendingWorkspaceOpen = { id, ...(folder ? { folder } : {}) };
+    else window?.webContents.send('kovan:open-workspace', id, folder);
+  })();
+});
+host.config.onChange((key) => {
+  if (key === 'workspaces' || key === 'workspace.active') void dockMenu.refresh();
+});
 
 /**
  * One pull request's full detail. Shared by the detail pane and the quick
@@ -362,18 +382,22 @@ function createWindow(): void {
     // the first paint agree rather than flashing the wrong one.
     backgroundColor: launchBackground(),
     webPreferences: {
-      preload: path.join(dirname, '../preload/index.mjs'),
+      preload: path.join(dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      // The window shows other people's pull requests and tickets; a
+      // Chromium bug there must not reach the rest of the Mac (security
+      // review, 2026-10). The preload only needs contextBridge, ipcRenderer
+      // and webUtils, which a sandboxed preload has.
+      sandbox: true
     }
   });
 
   window.once('ready-to-show', () => window?.show());
 
   if (process.env['KOVAN_SMOKE']) {
-    window.webContents.on('console-message', (_event, _level, message) => {
-      console.log('[renderer]', message);
+    window.webContents.on('console-message', (event) => {
+      console.log('[renderer]', event.message);
     });
   }
 
@@ -389,7 +413,7 @@ function createWindow(): void {
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    void openLink(url, (m) => host.log.warn(m));
     return { action: 'deny' };
   });
 
@@ -427,14 +451,15 @@ function createWindow(): void {
  * location silently orphans the old registration. Re-asserting it costs
  * nothing and makes a reinstall self-healing.
  *
- * `openAsHidden` keeps a login launch quiet: Kovan starts polling with its
- * Dock icon and menu bar glyph, but no window jumps up at login.
+ * A login launch stays quiet: Kovan starts polling with its Dock icon and
+ * menu bar glyph, but no window jumps up (`wasOpenedAtLogin`, at startup).
+ * Electron 44 dropped `openAsHidden`, which macOS no longer honoured anyway.
  */
 function applyLoginItem(): void {
   const wanted = host.config.get('launchAtLogin', false);
   const current = app.getLoginItemSettings();
   if (current.openAtLogin !== wanted) {
-    app.setLoginItemSettings({ openAtLogin: wanted, openAsHidden: true });
+    app.setLoginItemSettings({ openAtLogin: wanted });
   }
 }
 
@@ -489,6 +514,8 @@ app.whenReady().then(async () => {
   // menu-bar-only (LSUIElement), which left Cmd+Tab and the Dock with nothing
   // to switch to and made opening it from Finder look like it did nothing.
 
+  void dockMenu.refresh();
+
   tray = new KovanTray({
     open: () => createWindow(),
     refresh: () => void poller.refresh(true),
@@ -540,7 +567,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('kovan:refresh', () => poller.refresh(true));
   ipcMain.handle('kovan:refresh-provider', (_event, id: PolledProvider) => poller.refreshProvider(id));
-  ipcMain.handle('kovan:open-external', (_event, url: string) => shell.openExternal(url));
+  ipcMain.handle('kovan:open-external', (_event, url: unknown) => openLink(url, (m) => host.log.warn(m)));
   ipcMain.handle('kovan:credential-fields', () => CREDENTIAL_FIELDS);
   ipcMain.handle('kovan:missing-fields', (_event, id: ProviderId) => credentials.missingFields(id));
   ipcMain.handle('kovan:settings', () => host.config.all());
@@ -651,14 +678,19 @@ app.whenReady().then(async () => {
   // A screenshot on the clipboard, pasted into a terminal: saved as a file and
   // its path typed in, which is how Claude Code takes an image in any
   // terminal (VS Code's drop does the same with the dropped file's path).
-  ipcMain.handle('kovan:clipboard-write', (_event, text: string) => { clipboard.writeText(String(text)); });
+  ipcMain.handle('kovan:clipboard-write', (_event, text: string) => clipboard.writeText(String(text)));
   ipcMain.handle('kovan:clipboard-image', async () => {
-    const image = clipboard.readImage();
-    if (image.isEmpty()) return '';
+    // Electron's clipboard is the W3C one since 40-something: items by MIME
+    // type, read asynchronously. A macOS screenshot offers image/png.
+    const items = await clipboard.read().catch(() => []);
+    const item = items.find((i) => i.types.includes('image/png'));
+    if (!item) return '';
+    const png = Buffer.from(await (await item.getType('image/png')).arrayBuffer());
+    if (png.length === 0) return '';
     const dir = path.join(tmpdir(), 'kovan-paste');
     await mkdir(dir, { recursive: true });
     const file = path.join(dir, `pasted-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
-    await writeFile(file, image.toPNG());
+    await writeFile(file, png);
     return file;
   });
   ipcMain.handle('kovan:models-search', (_event, command: string) => modelSearch.search(command));
@@ -784,6 +816,11 @@ app.whenReady().then(async () => {
     const active = workspaces.list().find((w) => w.id === workspaces.activeId());
     if (!active || active.folders.length === 0) return { workspace: null, files: [] };
     return { workspace: active.name, files: await fileIndex.files(active.folders, force === true) };
+  });
+  ipcMain.handle('kovan:open-workspace-pending', () => {
+    const pending = pendingWorkspaceOpen;
+    pendingWorkspaceOpen = undefined;
+    return pending;
   });
   ipcMain.handle('kovan:workspace-create', () => workspaces.create(window));
   ipcMain.handle('kovan:workspace-activate', (_event, id: string) => workspaces.activate(id));

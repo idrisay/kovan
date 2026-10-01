@@ -6,7 +6,8 @@
  * (Lucide's own default is 2), with small icons keeping a heavier stroke. Not
  * an icon font and not emoji: these have to take `currentColor` so the rail's
  * selected state tints them, and they have to stay crisp at 19px. A new icon
- * is copied from lucide-static's SVG; GitHub and Jira keep their own marks (Jira's from simple-icons, CC0).
+ * is copied from lucide-static's SVG; GitHub, Jira and Sentry keep their own
+ * marks, in grey (Jira's and Sentry's from simple-icons, CC0; item 136).
  */
 
 const stroke = {
@@ -61,22 +62,26 @@ export function TicketIcon({ size = 19 }: Props) {
   );
 }
 
+/**
+ * Sentry's own mark (simple-icons' `sentry`, CC0), in grey like GitHub and
+ * Jira (item 136). It was Lucide's warning triangle, which says "warning",
+ * not "Sentry". Its strokes are close to the 1.6 line, so it sits with the
+ * rail's line icons.
+ */
 export function SentryIcon({ size = 19 }: Props) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
-      <path d="M12 9v4" />
-      <path d="M12 17h.01" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M13.91 2.505c-.873-1.448-2.972-1.448-3.844 0L6.904 7.92a15.478 15.478 0 0 1 8.53 12.811h-2.221A13.301 13.301 0 0 0 5.784 9.814l-2.926 5.06a7.65 7.65 0 0 1 4.435 5.848H2.194a.365.365 0 0 1-.298-.534l1.413-2.402a5.16 5.16 0 0 0-1.614-.913L.296 19.275a2.182 2.182 0 0 0 .812 2.999 2.24 2.24 0 0 0 1.086.288h6.983a9.322 9.322 0 0 0-3.845-8.318l1.11-1.922a11.47 11.47 0 0 1 4.95 10.24h5.915a17.242 17.242 0 0 0-7.885-15.28l2.244-3.845a.37.37 0 0 1 .504-.13c.255.14 9.75 16.708 9.928 16.9a.365.365 0 0 1-.327.543h-2.287c.029.612.029 1.223 0 1.831h2.297a2.206 2.206 0 0 0 1.922-3.31z" />
     </svg>
   );
 }
 
+/** Kovan's own prompt mark, kept over Lucide's boxed `square-terminal` (item 132). */
 export function TerminalIcon({ size = 19 }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
-      <path d="m7 11 2-2-2-2" />
-      <path d="M11 13h4" />
-      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+      <path d="M5 16.5 9.6 12 5 7.5" />
+      <path d="M12 17h7" />
     </svg>
   );
 }
@@ -431,20 +436,14 @@ export function GitHubIcon({ size = 14 }: Props) {
 }
 
 /**
- * Jira's logo as Atlassian shows it now (item 131): the stacked mark in white
- * on a blue tile. The mark is simple-icons' `jira` (CC0) scaled into the tile.
- * In brand colour, not `currentColor`: the tile is what makes it read as
- * Jira at 13px; the old diamond, in grey, read as nothing in particular.
+ * Jira's current mark (simple-icons' `jira`, CC0) on its own, in the same grey
+ * as the GitHub icon (item 136, set A). Item 131's blue tile stood out from
+ * everything else in the toolbar.
  */
 export function JiraIcon({ size = 14 }: Props) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
-      <rect width="16" height="16" rx="3.5" fill="#1868DB" />
-      <path
-        transform="translate(2.75 2.75) scale(0.4375)"
-        fill="#fff"
-        d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0Z"
-      />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0Z" />
     </svg>
   );
 }

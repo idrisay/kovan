@@ -351,8 +351,10 @@ export class Workspaces {
     const unstaged: string[] = [];
     const untracked: string[] = [];
 
+    // `''` and `.` name the repository itself: an untracked row like that
+    // would send the whole clone to the Trash.
     const guard = (file: string) => {
-      if (path.isAbsolute(file) || file.split('/').includes('..')) {
+      if (!file || path.normalize(file) === '.' || path.isAbsolute(file) || file.split('/').includes('..')) {
         throw new Error('Invalid path');
       }
     };
