@@ -17,7 +17,8 @@
     "build": "npm run build --workspace @kovan/desktop",
     "clean": "tsc --build --clean",
     "smoke": "npm run smoke --workspace @kovan/desktop",
-    "import": "node scripts/import-from-devhub.mjs"
+    "import": "node scripts/import-from-devhub.mjs",
+    "release": "node scripts/package-release.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
