@@ -654,6 +654,9 @@ export async function smokeUi(
   }
 
   // Item 131: Jira's logo beside a ticket's title, in both themes.
+  if (process.env['KOVAN_SMOKE_ITEM139'] && mode === 'seeded') {
+    return { item139: await driveItem139(win, process.env['KOVAN_SMOKE_ITEM139']) };
+  }
   if (process.env['KOVAN_SMOKE_LINUX'] && mode === 'seeded') {
     return { linux: await driveLinux(win, process.env['KOVAN_SMOKE_LINUX']) };
   }
@@ -3993,6 +3996,43 @@ async function driveItem127(win: BrowserWindow, prefix: string): Promise<Record<
  * checks what actually runs in it — then that the choice stuck, and that
  * Settings › Text & terminal shows the same one.
  */
+/**
+ * Item 139: a ticket with its agent terminal docked to the right, taking most
+ * of a wide window. The ticket's own width, not the window's, must decide
+ * whether the side column (token usage, sessions, history) sits beside the
+ * text or under it.
+ */
+async function driveItem139(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.setSize(1600, 1000);
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  await until(win, `document.querySelector('.rail-item[data-view="tickets"]')`, 15_000);
+  await read(win, `localStorage.setItem('kovan.terminal-dock', 'right'); localStorage.setItem('kovan.terminal-width', '1000')`);
+  await read(win, `document.querySelector('.rail-item[data-view="tickets"]').click()`);
+  await until(win, `document.querySelector('.rows .row')`, 5_000);
+  await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+  await until(win, `document.querySelector('.detail-place-icon')`, 8_000);
+  const layout = () => read(win, `(() => {
+    const scroll = document.querySelector('.detail-scroll'), main = document.querySelector('.detail-main'), side = document.querySelector('.detail-side');
+    const r = (e) => e ? Math.round(e.getBoundingClientRect().width) : null;
+    return { pane: r(document.querySelector('.pane')), ticket: r(scroll), main: r(main), side: r(side),
+      sideBySide: Boolean(main && side && side.getBoundingClientRect().left > main.getBoundingClientRect().right - 1),
+      terminal: r(document.querySelector('.detail-terminal')) };
+  })()`);
+  report['before'] = await layout();
+  // The toolbar's >_ opens a terminal for this ticket, docked in it.
+  await read(win, `document.querySelector('.detail-place-icon[aria-label="Open a terminal for this"]')?.click()`);
+  report['dockedRight'] = await until(win, `document.querySelector('.detail-terminal.dock-right')`, 10_000);
+  await pause(800);
+  report['docked'] = await layout();
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-docked.png`, (await win.webContents.capturePage()).toPNG());
+  return report;
+}
+
 /**
  * Kovan on Linux: Ctrl in place of ⌘ (but a terminal keeps Ctrl+K), the
  * desktop's own frame, open-at-login as an autostart entry, and the terminal

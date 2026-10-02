@@ -678,7 +678,14 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
 .detail-shell { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .detail-shell:has(.detail-terminal.dock-left),
 .detail-shell:has(.detail-terminal.dock-right) { flex-direction: row; }
-.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; order: 2; }
+.detail-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; order: 2;
+  /* The ticket or pull request is measured on its own (item 139): with a
+     terminal docked beside it, `.pane` is the ticket *and* the terminal, and
+     the side column stayed beside a main column squeezed to nothing. The
+     nearest container named `pane` wins, so this one answers. */
+  container: pane / inline-size;
+}
 /*
  * `.detail-terminal` is only the outer edge the panel docks against and
  * resizes along — its own direction flips with the dock so the resize handle
@@ -694,7 +701,12 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
 .detail-terminal.dock-top,
 .detail-terminal.dock-bottom { flex-direction: column; width: 100%; }
 .detail-terminal.dock-left,
-.detail-terminal.dock-right { flex-direction: row; height: 100%; min-width: 0; }
+.detail-terminal.dock-right {
+  flex-direction: row; height: 100%; min-width: 0;
+  /* Never more than leaves the ticket a readable column (item 139), whatever
+     width was saved and however the window was resized since. */
+  max-width: calc(100% - 380px);
+}
 .detail-terminal.dock-top,
 .detail-terminal.dock-left { order: 1; }
 .detail-terminal.dock-bottom { border-top: 1px solid var(--hair-strong); }

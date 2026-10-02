@@ -121,7 +121,10 @@ setting, and the rule before it shows only when something follows it.
   from inside a pane is portalled to `<body>` (`createPortal`, as
   `RunViewer` does): `.pane` is a CSS container, which traps anything
   `position: fixed` inside it — the backdrop then covers only the pane and a
-  docked terminal paints over it (item 98). No z-index fixes that.
+  docked terminal paints over it (item 98). No z-index fixes that. A ticket's
+  or pull request's `.detail-scroll` is a container too (named `pane`, so the
+  layout answers to the ticket's own width beside a docked terminal, item
+  139), and traps the same way.
 - **Menu** (`.menu`): drop-down from a button. Every menu uses
   `useMenuDismiss` (`menuDismiss.ts`): it closes on an outside click, on
   Escape, and when another menu opens, so two are never open at once. Rows
