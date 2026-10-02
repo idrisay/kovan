@@ -47,7 +47,7 @@ case "$2" in
     fi ;;
   codex)
     if [ -n "$3" ]; then
-      next=$(printf '%s' "$3" | /usr/bin/base64 -D 2>/dev/null)
+      next=$(printf '%s' "$3" | /usr/bin/base64 --decode 2>/dev/null)
       [ -n "$next" ] && /bin/sh -c "$next \\"\\$1\\"" sh "$4" >/dev/null 2>&1 &
     fi ;;
 esac

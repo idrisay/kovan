@@ -13,6 +13,8 @@ const api = {
   snapshot: () => ipcRenderer.invoke('kovan:snapshot'),
   refresh: () => ipcRenderer.invoke('kovan:refresh'),
   refreshProvider: (id: string) => ipcRenderer.invoke('kovan:refresh-provider', id),
+  /** 'darwin' or 'linux': shortcuts, labels and the title bar follow it. */
+  platform: process.platform,
   openExternal: (url: string) => ipcRenderer.invoke('kovan:open-external', url),
   credentialFields: () => ipcRenderer.invoke('kovan:credential-fields'),
   missingFields: (id: string) => ipcRenderer.invoke('kovan:missing-fields', id),

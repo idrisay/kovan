@@ -53,7 +53,7 @@ case "$payload" in
   *'"rate_limits"'*) printf '%s' "$payload" > "$1.$$" && mv -f "$1.$$" "$1" ;;
 esac
 [ -n "$2" ] || exit 0
-next=$(printf '%s' "$2" | /usr/bin/base64 -D 2>/dev/null)
+next=$(printf '%s' "$2" | /usr/bin/base64 --decode 2>/dev/null)
 [ -n "$next" ] || exit 0
 printf '%s' "$payload" | /bin/sh -c "$next"
 `;

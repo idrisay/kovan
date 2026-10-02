@@ -545,6 +545,32 @@ window:
 - When the replay was cut short, the renderer resizes the pty by one row and
   back, and the program redraws.
 
+### macOS and Linux
+
+Kovan is built for macOS first and also runs on Linux (x64 and arm64,
+AppImage and .deb). Where they differ, the code asks `process.platform` in
+main and `isMac` (`renderer/platform.ts`) in the window. Nothing else forks.
+
+- **Shortcuts:** ⌘ on macOS is Ctrl on Linux. Use `isAppShortcut(event)`,
+  never `event.metaKey`, and `keyLabel('K')` for any label. On Linux a
+  terminal keeps its Ctrl keys (Ctrl+K cuts the line there), so app shortcuts
+  don't fire while an `.xterm` has focus.
+- **Window:** macOS gets our own title bar with inset traffic lights; Linux
+  keeps the desktop's frame (`data-platform='linux'` drops the inset) and
+  hides Electron's menu bar until Alt.
+- **Private files go in private folders.** Linux's `/tmp` is shared between
+  users. The terminal host's socket and pasted screenshots use
+  `XDG_RUNTIME_DIR` there; anything else in temp uses `mkdtemp`.
+- **Commands:** write the form both systems accept (`base64 --decode`,
+  `ps -ww`), and don't hard-code `/usr/sbin`: lsof is on PATH on Linux.
+- **macOS only:** dictation (a Swift helper and Apple's recogniser; its
+  Settings pane is hidden on Linux) and the Dock menu. Open at login is a
+  login item on macOS and `~/.config/autostart/kovan.desktop` on Linux, which
+  starts Kovan with `--hidden`.
+- **Checking Linux from a Mac:** `scripts/linux/run.sh` builds in Docker and
+  runs the smoke tests on a virtual display; `pack` writes the packages.
+  `KOVAN_SMOKE_LINUX` covers the differences above.
+
 ### Safety
 
 - **Secrets go in and never come out.** Tokens and passwords are written through

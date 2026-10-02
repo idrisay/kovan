@@ -10,6 +10,7 @@
  * It searches only what is already loaded (see `searchEverything.ts`). The
  * file list is the one ⌘P uses, asked for when the box opens.
  */
+import { isAppShortcut, keyLabel } from './platform';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { JiraIssue, PullSummary, SentryIssue } from '@kovan/core';
 import { SCOPES, nextScope, search, type Candidate, type Hit, type ScopeId } from './searchEverything';
@@ -68,9 +69,10 @@ export function Search({ snapshot, sessions, actions, onPull, onIssue, onSentry,
   }, []);
 
   // ⌘K from anywhere — captured, so a focused terminal can't take it first.
+  // On Linux it's Ctrl+K, and a terminal keeps that one (see platform.ts).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'k') return;
+      if (!isAppShortcut(event) || event.key.toLowerCase() !== 'k') return;
       event.preventDefault();
       event.stopPropagation();
       setOpen(true);
@@ -210,7 +212,7 @@ export function Search({ snapshot, sessions, actions, onPull, onIssue, onSentry,
           aria-label="Search everything" aria-expanded={open} aria-controls="search-results" role="combobox"
           onFocus={() => setOpen(true)} onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onKeyDown={onKey}
         />
-        {!open && <kbd>⌘K</kbd>}
+        {!open && <kbd>{keyLabel('K')}</kbd>}
       </label>
       {open && (
         <div className="tsearch-drop" id="search-results">

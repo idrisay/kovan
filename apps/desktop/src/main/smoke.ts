@@ -22,7 +22,8 @@
 
 import { app, clipboard, ClipboardItem, type BrowserWindow } from 'electron';
 import { latestDockMenu } from './dockMenu';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
+import * as os from 'node:os';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Agents } from './agents';
@@ -653,6 +654,9 @@ export async function smokeUi(
   }
 
   // Item 131: Jira's logo beside a ticket's title, in both themes.
+  if (process.env['KOVAN_SMOKE_LINUX'] && mode === 'seeded') {
+    return { linux: await driveLinux(win, process.env['KOVAN_SMOKE_LINUX']) };
+  }
   if (process.env['KOVAN_SMOKE_SECURITY'] && mode === 'seeded') {
     return { security: await driveSecurity(win, process.env['KOVAN_SMOKE_SECURITY']) };
   }
@@ -3989,6 +3993,61 @@ async function driveItem127(win: BrowserWindow, prefix: string): Promise<Record<
  * checks what actually runs in it — then that the choice stuck, and that
  * Settings › Text & terminal shows the same one.
  */
+/**
+ * Kovan on Linux: Ctrl in place of ⌘ (but a terminal keeps Ctrl+K), the
+ * desktop's own frame, open-at-login as an autostart entry, and the terminal
+ * host's socket in the private runtime folder.
+ */
+async function driveLinux(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+  };
+  const ctrl = async (key: string) => {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: key, modifiers: ['control'] });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key, modifiers: ['control'] });
+    await pause(400);
+  };
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  report['platform'] = await read(win, `document.documentElement.dataset.platform`);
+  report['labels'] = await read(win, `[...document.querySelectorAll('kbd')].map((k) => k.textContent)`);
+  report['titlebarPadding'] = await read(win, `getComputedStyle(document.querySelector('.titlebar')).paddingLeft`);
+  report['menuBarHidden'] = win.isMenuBarAutoHide();
+  await read(win, `document.activeElement?.blur()`);
+  await ctrl('K');
+  report['ctrlKOpensSearch'] = await read(win, `Boolean(document.querySelector('.tsearch.open'))`);
+  await shot('search');
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+  await pause(300);
+
+  // In a terminal, Ctrl+K is the shell's (cut to end of line).
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  const folders = await read(win, `window.kovan.settings().then((s) => s['repos.folders'])`) as string[];
+  await read(win, `window.kovan.openTerminal(${JSON.stringify(folders[0])}, undefined, 'linux check')`);
+  await until(win, `document.querySelector('.xterm-helper-textarea')`, 10_000);
+  await read(win, `document.querySelector('.xterm-helper-textarea').focus()`);
+  await pause(1_500);
+  await ctrl('K');
+  report['ctrlKInTerminalOpensSearch'] = await read(win, `Boolean(document.querySelector('.tsearch.open'))`);
+  await shot('terminal');
+
+  await read(win, `window.kovan.setSetting('launchAtLogin', true)`);
+  await pause(500);
+  const entry = path.join(process.env['XDG_CONFIG_HOME'] || path.join(os.homedir(), '.config'), 'autostart', 'kovan.desktop');
+  report['autostart'] = existsSync(entry) ? (await readFile(entry, 'utf8')).split('\n').find((l) => l.startsWith('Exec=')) : null;
+  await read(win, `window.kovan.setSetting('launchAtLogin', false)`);
+  await pause(500);
+  report['autostartRemoved'] = !existsSync(entry);
+  const runtime = process.env['XDG_RUNTIME_DIR'];
+  report['socketInRuntimeDir'] = runtime ? readdirSync(runtime).filter((n) => n.startsWith('kovan-pty-')) : 'no XDG_RUNTIME_DIR';
+  return report;
+}
+
 /**
  * The security review's fixes (2026-10): the window is sandboxed on Electron
  * 44, a screenshot still pastes after the clipboard API change, and links that

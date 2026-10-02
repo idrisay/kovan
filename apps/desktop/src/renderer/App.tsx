@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { isAppShortcut, keyLabel } from './platform';
 import { createPortal } from 'react-dom';
 import { useMenuDismiss } from './menuDismiss';
 import { DEFAULT_PULL_SORT, describeGitHubBudget, formatAge, isBlocked, moveBy, moveItem, PULL_SORTS, sortPulls, withSelected, type PullSort } from '@kovan/core';
@@ -691,7 +692,7 @@ export function App() {
   // with no filter.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (!isAppShortcut(event)) return;
       if (event.key.toLowerCase() !== 'f') return;
       if (event.target instanceof Element && event.target.closest('.cm-editor')) return;
       if (!document.getElementById('q')) return;
@@ -715,7 +716,7 @@ export function App() {
   const [openRequest, setOpenRequest] = useState<{ path: string; line?: number; nonce: number }>();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (!isAppShortcut(event)) return;
       if (event.key.toLowerCase() !== 'p') return;
       // While it's open, ⌘P is the picker's own "next row".
       if (document.querySelector('.quick-open')) return;
@@ -799,7 +800,7 @@ export function App() {
   const nav = useNavHistory(place, placeKey, goTo, placeRefines);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (!isAppShortcut(event)) return;
       if (event.key !== '[' && event.key !== ']') return;
       // The code editor's own ⌘[ / ⌘] indent and outdent.
       if (event.target instanceof Element && event.target.closest('.cm-editor')) return;
@@ -1179,13 +1180,13 @@ export function App() {
         <nav className="history-nav" aria-label="History">
           <button
             type="button" className="icon-button" disabled={!nav.canBack} onClick={nav.back}
-            aria-label="Back" title={nav.previous ? `Back to ${placeLabel(nav.previous, sessions)} (⌘[)` : 'Back (⌘[)'}
+            aria-label="Back" title={nav.previous ? `Back to ${placeLabel(nav.previous, sessions)} (${keyLabel('[')})` : `Back (${keyLabel('[')})`}
           >
             <BackIcon />
           </button>
           <button
             type="button" className="icon-button" disabled={!nav.canForward} onClick={nav.forward}
-            aria-label="Forward" title={nav.next ? `Forward to ${placeLabel(nav.next, sessions)} (⌘])` : 'Forward (⌘])'}
+            aria-label="Forward" title={nav.next ? `Forward to ${placeLabel(nav.next, sessions)} (${keyLabel(']')})` : `Forward (${keyLabel(']')})`}
           >
             <ForwardIcon />
           </button>
@@ -1342,7 +1343,7 @@ export function App() {
                       id="q" type="text" placeholder="Filter"
                       value={filter} onChange={(e) => setFilter(e.target.value)}
                     />
-                    {filter === '' && <kbd>⌘F</kbd>}
+                    {filter === '' && <kbd>{keyLabel('F')}</kbd>}
                   </div>
                 </div>
 

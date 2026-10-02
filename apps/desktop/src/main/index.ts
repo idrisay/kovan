@@ -50,6 +50,7 @@ import type { TestEnvironmentSave, TestSelection } from './testEnvironments';
 import { Workspaces } from './workspace';
 import { DockMenu } from './dockMenu';
 import { openLink } from './external';
+import { HIDDEN_FLAG, setLinuxAutostart } from './autostart';
 import { QuickModel } from './quick';
 import { PriceCheck } from './priceCheck';
 import { ModelSearch } from './modelSearch';
@@ -377,7 +378,12 @@ function createWindow(): void {
     minWidth: 720,
     minHeight: 480,
     show: false,
-    titleBarStyle: 'hiddenInset',
+    // macOS: the title bar is ours, with the traffic lights inset into it.
+    // Linux keeps the desktop's own frame; its menu bar (Electron's default
+    // one, for copy, paste and reload) stays hidden until Alt is pressed.
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const }
+      : { autoHideMenuBar: true, icon: path.join(app.isPackaged ? process.resourcesPath : path.join(dirname, '../../resources'), 'icon.png') }),
     // Matches the rail on each side of the appearance switch, so the frame and
     // the first paint agree rather than flashing the wrong one.
     backgroundColor: launchBackground(),
@@ -425,7 +431,9 @@ function createWindow(): void {
   // the input level and repoint them at the terminal's own font size, which
   // is the thing people actually meant to be resizing.
   window.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown' || !input.meta || input.alt || input.control) return;
+    // ⌘ on macOS, Ctrl on Linux, as everywhere else in Kovan.
+    const mod = process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta;
+    if (input.type !== 'keyDown' || !mod || input.alt) return;
     if (input.key === '=' || input.key === '+') {
       event.preventDefault();
       window?.webContents.send('kovan:font-size-step', 1);
@@ -457,6 +465,10 @@ function createWindow(): void {
  */
 function applyLoginItem(): void {
   const wanted = host.config.get('launchAtLogin', false);
+  if (process.platform === 'linux') {
+    void setLinuxAutostart(wanted).catch((error) => host.log.warn(`Open at login: ${String(error)}`));
+    return;
+  }
   const current = app.getLoginItemSettings();
   if (current.openAtLogin !== wanted) {
     app.setLoginItemSettings({ openAtLogin: wanted });
@@ -687,8 +699,10 @@ app.whenReady().then(async () => {
     if (!item) return '';
     const png = Buffer.from(await (await item.getType('image/png')).arrayBuffer());
     if (png.length === 0) return '';
-    const dir = path.join(tmpdir(), 'kovan-paste');
-    await mkdir(dir, { recursive: true });
+    // A fixed name, so it must be in a folder only this user can write: on
+    // Linux `/tmp` is shared, and someone else could make `kovan-paste` first.
+    const dir = path.join(process.platform !== 'darwin' && process.env['XDG_RUNTIME_DIR'] ? process.env['XDG_RUNTIME_DIR'] : tmpdir(), 'kovan-paste');
+    await mkdir(dir, { recursive: true, mode: 0o700 });
     const file = path.join(dir, `pasted-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
     await writeFile(file, png);
     return file;
@@ -962,7 +976,7 @@ app.whenReady().then(async () => {
 
   // Opened from Finder, Spotlight or the Dock: show the window. Only a login
   // launch stays in the background.
-  if (!app.getLoginItemSettings().wasOpenedAtLogin) createWindow();
+  if (!app.getLoginItemSettings().wasOpenedAtLogin && !process.argv.includes(HIDDEN_FLAG)) createWindow();
 });
 
 async function seedWorkspace(folder: string): Promise<void> {

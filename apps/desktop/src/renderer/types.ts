@@ -115,6 +115,7 @@ export interface KovanApi {
   snapshot(): Promise<Snapshot>;
   refresh(): Promise<Snapshot>;
   refreshProvider(id: PolledProvider): Promise<Snapshot>;
+  platform: string;
   openExternal(url: string): Promise<void>;
   credentialFields(): Promise<Record<string, { key: string; label: string; placeholder?: string; secret?: boolean }[]>>;
   missingFields(id: ProviderId): Promise<string[]>;

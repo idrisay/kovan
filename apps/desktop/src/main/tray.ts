@@ -27,16 +27,21 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
  * automatically, which is what every Retina Mac actually displays.
  */
 function icon(): NativeImage {
+  // macOS tints a template image to the menu bar; Linux panels don't, and are
+  // mostly dark, so they get the same glyph drawn light.
+  const name = process.platform === 'darwin' ? 'trayTemplate.png' : 'trayLinux.png';
   const file = app.isPackaged
-    ? path.join(process.resourcesPath, 'trayTemplate.png')
-    : path.join(dirname, '../../resources/trayTemplate.png');
+    ? path.join(process.resourcesPath, name)
+    : path.join(dirname, '../../resources', name);
   const image = nativeImage.createFromPath(file);
   if (image.isEmpty()) {
     // Never leave the menu bar with no hit target: an invisible tray icon is
     // an app the user cannot reach at all.
-    return nativeImage.createFromNamedImage('NSApplicationIcon', [0, 0, 0]).resize({ width: 16 });
+    return process.platform === 'darwin'
+      ? nativeImage.createFromNamedImage('NSApplicationIcon', [0, 0, 0]).resize({ width: 16 })
+      : image;
   }
-  image.setTemplateImage(true);
+  if (process.platform === 'darwin') image.setTemplateImage(true);
   if (process.env['KOVAN_SMOKE']) {
     const { width, height } = image.getSize();
     console.log(`tray glyph loaded from ${file} (${width}x${height}, template=${image.isTemplateImage()})`);

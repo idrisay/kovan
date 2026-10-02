@@ -23,6 +23,18 @@ import { spawn as spawnLocal } from 'node-pty';
 
 const PROTOCOL = 1;
 
+/**
+ * Where the terminal host's socket lives. macOS's temp folder is already the
+ * user's own (`/var/folders/…`, mode 700). Linux's `/tmp` is shared by every
+ * user, so there it goes in the per-user runtime folder (`/run/user/<uid>`,
+ * mode 700) when the session has one.
+ */
+function socketDir(): string {
+  const runtime = process.env['XDG_RUNTIME_DIR'];
+  if (process.platform !== 'darwin' && runtime && existsSync(runtime)) return runtime;
+  return os.tmpdir();
+}
+
 export interface Pty {
   readonly pid: number;
   /** Whether it lives in the terminal host, and so outlives Kovan. */
@@ -186,21 +198,21 @@ export class PtyHosts {
       const nodePty = path.join(path.dirname(fileURLToPath(import.meta.resolve('node-pty'))), '..', 'package.json');
       build = createHash('sha1').update(readFileSync(this.script)).update(existsSync(nodePty) ? readFileSync(nodePty) : '').digest('hex').slice(0, 8);
     } catch { /* one host for all */ }
-    return path.join(os.tmpdir(), `${this.prefix}${build}.sock`);
+    return path.join(socketDir(), `${this.prefix}${build}.sock`);
   }
 
   /** Every session a host of this profile still has — running or finished while Kovan was away. */
   async restore(): Promise<RestoredPty[]> {
     let names: string[] = [];
-    try { names = readdirSync(os.tmpdir()).filter((n) => n.startsWith(this.prefix) && n.endsWith('.sock')); } catch { return []; }
+    try { names = readdirSync(socketDir()).filter((n) => n.startsWith(this.prefix) && n.endsWith('.sock')); } catch { return []; }
     const restored: RestoredPty[] = [];
     for (const name of names) {
-      const connection = await HostConnection.open(path.join(os.tmpdir(), name));
+      const connection = await HostConnection.open(path.join(socketDir(), name));
       if (!connection) continue;
       const hello = await connection.hello();
       if (!hello || hello.protocol !== PROTOCOL) { connection.close(); continue; }
       this.connections.push(connection);
-      if (path.join(os.tmpdir(), name) === this.socketPath) this.own = connection;
+      if (path.join(socketDir(), name) === this.socketPath) this.own = connection;
       for (const s of hello.sessions) {
         restored.push({ pty: connection.pty(s.id, s.pid), meta: s.meta, running: s.running, exitCode: s.exitCode, buffer: s.buffer });
       }

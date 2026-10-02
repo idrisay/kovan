@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
+import { isMac, keyLabel } from './platform';
 import { ACTIVITY_SETTINGS, ActivitySettings } from './Activity';
 import { DictationSettings } from './Dictation';
 import {
@@ -499,7 +500,8 @@ type SectionId = 'appearance' | 'text' | 'notifications' | 'dictation' | 'agents
  * mounts when it opens, so nothing a section loads (models, prices, speech
  * setup) runs just because Settings was opened.
  */
-const SECTIONS: { id: SectionId; title: string; icon: string; ownHeading?: boolean }[] = [
+type Section = { id: SectionId; title: string; icon: string; ownHeading?: boolean };
+const SECTIONS: Section[] = ([
   { id: 'appearance', title: 'Appearance', icon: '◐' },
   { id: 'text', title: 'Text & terminal', icon: 'Aa' },
   { id: 'notifications', title: 'Notifications', icon: '◔' },
@@ -508,7 +510,8 @@ const SECTIONS: { id: SectionId; title: string; icon: string; ownHeading?: boole
   { id: 'agents', title: 'Agents', icon: '▸' },
   { id: 'connections', title: 'Connections', icon: '⎇' },
   { id: 'environments', title: 'Environments', icon: '⌂', ownHeading: true }
-];
+  // Dictation listens through a Swift helper and Apple's recogniser: macOS only.
+] as Section[]).filter((s) => isMac || s.id !== 'dictation');
 
 /** The names search looks through — each setting's label as it appears in
  *  the section, plus words people use for it. */
@@ -739,7 +742,7 @@ export function Settings({
               <span>Tabs, session header and status bar text size</span>
               <ChromeSizeControl />
             </label>
-            <p className="settings-note">⌘+ and ⌘− resize whichever of these you last clicked in: the sidebar, the ticket or pull request, a terminal, or its tabs, header and the status bar. Terminal colours are under Appearance.</p>
+            <p className="settings-note">{keyLabel('+')} and {keyLabel('−')} resize whichever of these you last clicked in: the sidebar, the ticket or pull request, a terminal, or its tabs, header and the status bar. Terminal colours are under Appearance.</p>
           </>
         );
       case 'notifications':

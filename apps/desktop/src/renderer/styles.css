@@ -292,6 +292,12 @@ button { font: inherit; cursor: pointer; }
   -webkit-app-region: drag;
 }
 .titlebar button, .titlebar input { -webkit-app-region: no-drag; }
+/* Linux keeps the desktop's own window frame: no traffic lights to clear,
+   and nothing to drag by — the frame above already does that. */
+:root[data-platform='linux'] .titlebar { padding-left: 14px; -webkit-app-region: no-drag; }
+/* macOS shows scrollbars only while scrolling; Linux's Chromium draws classic
+   ones with arrow buttons, even on an empty pane. Thin, and in the theme. */
+:root[data-platform='linux'] * { scrollbar-width: thin; scrollbar-color: var(--hair-strong) transparent; }
 /* Back / Forward (item 116), right of the traffic lights like VS Code's. */
 .history-nav { display: flex; align-items: center; gap: 2px; margin-left: -6px; }
 .history-nav .icon-button { width: 26px; height: 26px; color: var(--meta); }

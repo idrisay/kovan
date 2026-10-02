@@ -84,7 +84,9 @@ export const WORKING_MS = 90_000;
  * — `lstart` is spelled in the user's locale otherwise. `lstart` rather than
  * `etime`: it is the same every scan, so a process keeps one key.
  */
-export const PS_ARGS = ['-A', '-o', 'pid=,ppid=,lstart=,time=,rss=,tty=,command='];
+// `-ww`: never cut the command line to a terminal's width. macOS's ps doesn't
+// when its output is a pipe; Linux's procps can, and the agent is found by it.
+export const PS_ARGS = ['-A', '-ww', '-o', 'pid=,ppid=,lstart=,time=,rss=,tty=,command='];
 
 export function parsePs(stdout: string): ProcessRow[] {
   const rows: ProcessRow[] = [];

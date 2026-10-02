@@ -18,6 +18,7 @@
  * as one over an empty directory.
  */
 
+import { keyLabel } from './platform';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { changeMarks, moveBy, moveItem, type ChangeMark } from '@kovan/core';
 import { useMenuDismiss } from './menuDismiss';
@@ -1441,7 +1442,7 @@ function TabBody({
               )}
               <span className="spacer" />
               {dirty ? (
-                <button className="save" onClick={onSave}>Save <kbd>⌘S</kbd></button>
+                <button className="save" onClick={onSave}>Save <kbd>{keyLabel('S')}</kbd></button>
               ) : (
                 <span className="saved">saved</span>
               )}

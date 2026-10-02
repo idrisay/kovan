@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { quote, resolve, shellLine, writePrompt, looksLikeAgent, type Runner } from '../src/runner';
@@ -63,8 +63,8 @@ describe('the security rule', () => {
 
   it('writes prompt files readable only by their owner', async () => {
     const file = await writePrompt('secret-ish');
-    const { stdout } = await run('stat', ['-f', '%Lp', file]);
-    expect(stdout.trim()).toBe('600');
+    // fs.stat, not `stat -f`: that flag is BSD's, and Linux's stat reads it differently.
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
   });
 
   it('refuses a command name that could escape into the script', async () => {

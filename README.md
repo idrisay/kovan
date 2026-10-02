@@ -258,6 +258,14 @@ Only one Kovan runs at a time — a single-instance lock means a `dev` build
 exits immediately while the installed one is running. Quit it from the menu bar
 first.
 
+### Linux
+
+`scripts/linux/run.sh pack` builds the AppImage and .deb in Docker (Debian
+bookworm) into `apps/desktop/release-linux/`; `KOVAN_ARCH=x64` builds for
+x64, emulated on an Apple silicon Mac. `scripts/linux/run.sh smoke seeded
+KOVAN_SMOKE_LINUX` runs the app under Xvfb. The arm64 AppImage's launcher
+needs `libz.so` (zlib's development package), so arm64 ships as .deb.
+
 ### Open at login
 
 On by default, toggled from the tray menu. The login item is re-asserted on

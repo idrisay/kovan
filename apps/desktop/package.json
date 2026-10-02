@@ -100,7 +100,21 @@
         "NSUserNotificationAlertStyle": "banner",
         "NSMicrophoneUsageDescription": "Kovan listens only while you dictate: double-tap ⌘ to start, and again to stop.",
         "NSSpeechRecognitionUsageDescription": "Kovan turns what you dictate into text on this Mac."
-      }
+      },
+      "extraResources": [
+        {
+          "from": "resources/trayTemplate.png",
+          "to": "trayTemplate.png"
+        },
+        {
+          "from": "resources/trayTemplate@2x.png",
+          "to": "trayTemplate@2x.png"
+        },
+        {
+          "from": "resources/bin/kovan-dictate",
+          "to": "bin/kovan-dictate"
+        }
+      ]
     },
     "electronVersion": "44.5.1",
     "asarUnpack": [
@@ -108,24 +122,56 @@
       "out/main/ptyHost.mjs"
     ],
     "npmRebuild": true,
-    "extraResources": [
-      {
-        "from": "resources/trayTemplate.png",
-        "to": "trayTemplate.png"
-      },
-      {
-        "from": "resources/trayTemplate@2x.png",
-        "to": "trayTemplate@2x.png"
-      },
-      {
-        "from": "resources/bin/kovan-dictate",
-        "to": "bin/kovan-dictate"
-      }
-    ]
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "Development",
+      "icon": "resources/icon.png",
+      "executableName": "kovan",
+      "synopsis": "What is blocked on you, handed to a coding agent",
+      "maintainer": "idrisay <idrisaydev@gmail.com>",
+      "extraResources": [
+        {
+          "from": "resources/trayLinux.png",
+          "to": "trayLinux.png"
+        },
+        {
+          "from": "resources/icon.png",
+          "to": "icon.png"
+        }
+      ],
+      "artifactName": "Kovan-${version}-${arch}.${ext}"
+    },
+    "deb": {
+      "depends": [
+        "libsecret-1-0",
+        "libnotify4",
+        "libxss1",
+        "libnss3",
+        "libgbm1",
+        "libasound2 | libasound2t64"
+      ],
+      "packageName": "kovan"
+    }
   },
   "description": "Tells you what is blocked on you, and hands it to a coding agent.",
   "author": {
     "name": "idrisay",
     "email": "idrisaydev@gmail.com"
-  }
+  },
+  "homepage": "https://kovan.idrisay.ch"
 }
