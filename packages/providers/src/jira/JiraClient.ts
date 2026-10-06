@@ -82,6 +82,19 @@ export class JiraClient {
     return this.withInlineAttachments(this.normalise(raw), raw, signal);
   }
 
+  /**
+   * Just an issue's status, for the ticket chip in a pull request's header
+   * (item 142) when the ticket isn't one of the loaded ones: one small
+   * request, none of `getIssue()`'s image fetches.
+   */
+  async getIssueStatus(key: string, signal?: CancelSignal): Promise<{ status: string; statusCategory: string }> {
+    const raw = await this.http.json<RawIssue>(this.api(`/issue/${encodeURIComponent(key)}?fields=status`), {
+      headers: this.headers,
+      signal
+    });
+    return { status: raw.fields.status?.name ?? '', statusCategory: raw.fields.status?.statusCategory?.key ?? 'undefined' };
+  }
+
   async search(jql: string, limit = 30, signal?: CancelSignal): Promise<JiraIssue[]> {
     const response = await this.http.json<{ issues: RawIssue[] }>(this.api('/search/jql'), {
       method: 'POST',

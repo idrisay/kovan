@@ -88,6 +88,7 @@ Reuse these before writing new CSS. A new component goes in this list.
 | `.primary.outline` | Starts an agent that only **reads and reports** | Check it shipped, Review |
 | `.quick` (dashed blue) | Not an agent: a quick model turning text Kovan already has into shorter text | Summarize, nv-review |
 | `.ghost` | Everything else: secondary actions, Settings actions | Add a row |
+| `.detail-related-link` (clay chip) | A related item that opens in Kovan. A ticket chip carries its Jira status after a divider: dot + status, coloured by category (to do neutral, in progress blue, done green), dashed while it loads | ACME-2236 │ ● In Review |
 | `.detail-place` | Where the item lives elsewhere, in a detail header's link row beside the related chips | GitHub / Jira / Sentry (with its mark), Terminal |
 | `.link` | Inline, low-weight action inside text or a table row | Remove, Reset, Cancel, Save as default |
 | `.icon-button` | Icon-only, borderless. Needs `aria-label` **and** `title` | Row actions, rename |

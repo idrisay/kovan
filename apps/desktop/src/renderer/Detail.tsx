@@ -79,7 +79,7 @@ interface HeadParts {
   /** The details line, one span each. */
   meta: React.ReactNode;
   /** Related tickets or pull requests: chips that open them in Kovan. */
-  links: { label: string; onClick: () => void }[];
+  links: LinkChip[];
   service: { label: string; icon: JSX.Element; url: string };
   onTerminal: () => void;
   actions: React.ReactNode;
@@ -103,17 +103,77 @@ function PlaceIcons({ service, onTerminal }: Pick<HeadParts, 'service' | 'onTerm
   );
 }
 
+interface LinkChip {
+  label: string;
+  onClick: () => void;
+  /** A ticket's Jira status (item 142): `null` while it is being looked up. */
+  status?: TicketStatus | null;
+}
+
+interface TicketStatus {
+  status: string;
+  statusCategory: string;
+}
+
 function LinkChips({ links }: Pick<HeadParts, 'links'>) {
   return (
     <>
       {links.map((link, i) => (
-        <button key={i} type="button" className="detail-related-link" title={`Open ${link.label}`} onClick={link.onClick}>
+        <button
+          key={i} type="button" className="detail-related-link"
+          title={link.status ? `Open ${link.label} · ${link.status.status}` : `Open ${link.label}`} onClick={link.onClick}
+        >
           <OpenLinkIcon size={11} />
           {link.label}
+          {link.status !== undefined && (
+            <>
+              <span className="detail-related-sep-inline" aria-hidden="true" />
+              <span className={`detail-related-status ${link.status?.statusCategory ?? 'loading'}`}>
+                <span className="detail-related-dot" />
+                <span className="detail-related-status-text">{link.status?.status ?? '…'}</span>
+              </span>
+            </>
+          )}
         </button>
       ))}
     </>
   );
+}
+
+/**
+ * Statuses looked up for tickets that aren't among the loaded ones, kept for a
+ * few minutes so flicking between pull requests doesn't ask Jira each time.
+ */
+const statusCache = new Map<string, { at: number; value: TicketStatus }>();
+const STATUS_TTL = 5 * 60_000;
+
+/**
+ * A ticket's status for the header chip: the loaded ticket's own when there is
+ * one, else one small lookup. `undefined` when there is no key or the lookup
+ * failed (the chip then shows just the key, as before); `null` while loading.
+ */
+function useTicketStatus(key: string, loaded?: JiraIssue): TicketStatus | null | undefined {
+  const cached = statusCache.get(key);
+  const fresh = cached && Date.now() - cached.at < STATUS_TTL ? cached.value : undefined;
+  const [fetched, setFetched] = useState<{ key: string; value?: TicketStatus }>();
+  useEffect(() => {
+    if (!key || loaded || fresh) return;
+    let live = true;
+    window.kovan.ticketStatus(key).then(
+      (value) => {
+        statusCache.set(key, { at: Date.now(), value });
+        if (live) setFetched({ key, value });
+      },
+      () => live && setFetched({ key })
+    );
+    return () => {
+      live = false;
+    };
+  }, [key, Boolean(loaded), Boolean(fresh)]);
+  if (!key) return undefined;
+  if (loaded) return { status: loaded.status, statusCategory: loaded.statusCategory };
+  if (fresh) return fresh;
+  return fetched?.key === key ? fetched.value : null;
 }
 
 /**
@@ -962,10 +1022,12 @@ export function PullPane({
   const chipKey = ticketKey || ticketKeyInTitle((pull.headRef ?? detail?.headRef ?? '').toUpperCase());
   const chipTicket = chipKey ? findSubject(chipKey, snapshot)?.issue : undefined;
   const jiraBase = snapshot.tickets[0]?.url.replace(/[A-Z][A-Z0-9]+-\d+$/, '');
-  const ticketChip = chipTicket
-    ? { label: chipTicket.key, onClick: () => onOpenSubject({ issue: chipTicket }) }
+  // Its Jira status rides along inside the chip (item 142).
+  const chipStatus = useTicketStatus(chipKey && (chipTicket || jiraBase) ? chipKey : '', chipTicket);
+  const ticketChip: LinkChip | undefined = chipTicket
+    ? { label: chipTicket.key, onClick: () => onOpenSubject({ issue: chipTicket }), status: chipStatus }
     : chipKey && jiraBase
-      ? { label: chipKey, onClick: () => void window.kovan.openExternal(`${jiraBase}${chipKey}`) }
+      ? { label: chipKey, onClick: () => void window.kovan.openExternal(`${jiraBase}${chipKey}`), status: chipStatus }
       : undefined;
 
   // Only the session App.tsx currently has in mind, and only when it is

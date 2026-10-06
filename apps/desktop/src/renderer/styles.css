@@ -792,6 +792,23 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
   font-family: var(--mono); font-size: 11px;
 }
 .detail-related-link:hover { background: color-mix(in srgb, var(--clay) 14%, transparent); color: var(--clay-bright); }
+/* The ticket's Jira status inside its chip (item 142): a thin divider, then
+   a dot and the status in the colour of its category — to do neutral, in
+   progress blue, done green. A dashed dot while it is being looked up. */
+.detail-related-sep-inline { width: 1px; height: 11px; background: color-mix(in srgb, var(--clay) 30%, transparent); }
+.detail-related-status {
+  --status: var(--muted);
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--status); font-family: var(--sans); font-size: 11.5px; font-weight: 500;
+  min-width: 0; white-space: nowrap;
+}
+/* A long status ("Ready for QA Deploy") ends in … rather than widening the toolbar. */
+.detail-related-status-text { max-width: 14em; overflow: hidden; text-overflow: ellipsis; }
+.detail-related-status.indeterminate { --status: var(--waiting); }
+.detail-related-status.done { --status: var(--pass); }
+.detail-related-status.loading { --status: var(--dim); }
+.detail-related-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--status); }
+.detail-related-status.loading .detail-related-dot { background: transparent; border: 1px dashed var(--status); }
 /* The places beside the chips (item 110): the service it came from, and a
    terminal. Quieter than the chips — a way out, not a related item. */
 .detail-related { align-items: center; }

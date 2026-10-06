@@ -332,6 +332,20 @@ async function loadTicket(key: string) {
   return new JiraClient(detailHttp, site, email, token).getIssue(key);
 }
 
+async function loadTicketStatus(key: string) {
+  if (process.env['KOVAN_SMOKE'] && process.env['KOVAN_USER_DATA']) {
+    const { status, statusCategory } = ticketFixture(key);
+    return { status, statusCategory };
+  }
+  const token = await host.secrets.get('jira');
+  const site = host.config.get('jira.baseUrl', '');
+  const email = host.config.get('jira.email', '');
+  if (!token || !site || !email) {
+    throw new Error('Jira is not connected');
+  }
+  return new JiraClient(detailHttp, site, email, token).getIssueStatus(key);
+}
+
 /**
  * What a plain terminal is called, when nothing opening it named it: the
  * repository and branch it sits on, and the ticket when the branch names one
@@ -627,6 +641,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:reviewers-request', (_event, repo: string, number: number, people: string[], teams: string[]) =>
     requestReviewers(repo, number, people, teams));
   ipcMain.handle('kovan:ticket-detail', (_event, key: string) => loadTicket(key));
+  ipcMain.handle('kovan:ticket-status', (_event, key: string) => loadTicketStatus(key));
 
   // --- Quick model ----------------------------------------------------------
   quick.onChange((kind, subject, state) => {

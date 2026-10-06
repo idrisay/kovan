@@ -131,6 +131,8 @@ export interface KovanApi {
   reviewerCandidates(repo: string): Promise<{ people: { login: string; count: number }[]; teams: { slug: string; name: string }[] }>;
   requestReviewers(repo: string, number: number, people: string[], teams: string[]): Promise<void>;
   ticketDetail(key: string): Promise<JiraIssue>;
+  /** Just a ticket's status: one small request, for the PR header's ticket chip. */
+  ticketStatus(key: string): Promise<{ status: string; statusCategory: string }>;
   /** Widens the merged window to `limit` and returns the republished snapshot. */
   loadMoreMerged(limit: number): Promise<Snapshot>;
 

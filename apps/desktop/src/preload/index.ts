@@ -39,6 +39,7 @@ const api = {
   requestReviewers: (repo: string, number: number, people: string[], teams: string[]) =>
     ipcRenderer.invoke('kovan:reviewers-request', repo, number, people, teams),
   ticketDetail: (key: string) => ipcRenderer.invoke('kovan:ticket-detail', key),
+  ticketStatus: (key: string) => ipcRenderer.invoke('kovan:ticket-status', key),
 
   // Quick model
   quickState: (kind: string, subject: string) => ipcRenderer.invoke('kovan:quick-state', kind, subject),
