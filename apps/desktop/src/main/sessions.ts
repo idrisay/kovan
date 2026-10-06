@@ -26,6 +26,7 @@ import {
   loginShell,
   shellEnvironment,
   shellLine,
+  typeableLine,
   type AgentRun,
   type Runner,
   type RunKind
@@ -353,10 +354,12 @@ export class Sessions {
     env: Record<string, string>;
     statusSource?: StatusSource;
   }): Promise<SessionInfo | { error: string }> {
-    const line =
+    const full =
       options.runner.invocation === 'loginShell'
         ? undefined
         : await shellLine(options.runner, options.prompt);
+    // Short enough to survive being typed into a shell that is still starting.
+    const line = full ? await typeableLine(full) : undefined;
 
     if (options.runner.invocation !== 'loginShell' && !line) {
       // The single most likely setup failure, and it deserves a real message

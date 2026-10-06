@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFile, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { quote, resolve, shellLine, writePrompt, looksLikeAgent, type Runner } from '../src/runner';
+import { MAX_TYPED_LINE, quote, resolve, shellLine, typeableLine, writePrompt, writeSettingsFile, looksLikeAgent, type Runner } from '../src/runner';
 
 const run = promisify(execFile);
 
@@ -105,5 +105,30 @@ describe('agent name heuristics', () => {
     // Matching on "cursor" alone used to drag these in.
     expect(looksLikeAgent('_zsh_highlight_cursor_moved')).toBe(false);
     expect(looksLikeAgent('_claude_completion')).toBe(false);
+  });
+});
+
+describe('typing the launch line (item 141)', () => {
+  it('types a short line as it is', async () => {
+    expect(await typeableLine("claude '--model' 'sonnet'")).toBe("claude '--model' 'sonnet'");
+  });
+
+  it('runs a long line from a private script, through the same shell', async () => {
+    const long = `printf '%s' ${quote('x'.repeat(2000))}`;
+    const typed = await typeableLine(long);
+    expect(typed.length).toBeLessThan(MAX_TYPED_LINE);
+    const file = /^\. '(.+)'$/.exec(typed)?.[1];
+    expect(file).toBeDefined();
+    expect((await stat(file!)).mode & 0o777).toBe(0o600);
+    // Sourcing it runs exactly the original line.
+    const { stdout } = await run('/bin/zsh', ['-c', typed]);
+    expect(stdout).toBe('x'.repeat(2000));
+  });
+
+  it('keeps Claude settings in a private file, so the line stays short', async () => {
+    const settings = { statusLine: { type: 'command', command: 'x'.repeat(1500) } };
+    const file = await writeSettingsFile(settings);
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(settings);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
   });
 });

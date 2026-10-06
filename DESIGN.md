@@ -584,6 +584,11 @@ main and `isMac` (`renderer/platform.ts`) in the window. Nothing else forks.
   only word ever interpolated into a shell line is a command name that has
   passed `isSafeCommandName`. Prompts go through a file (`"$(< file)"`) or
   stdin, never argv to a shell.
+- **Keep a typed launch line short.** A shell that hasn't started reading yet
+  keeps typed input in the terminal's own buffer, and macOS holds only 1,024
+  characters there: a longer line loses its Enter and the agent never starts
+  (item 141). Big arguments go in files (`--settings <file>`), and
+  `typeableLine` types anything over 900 characters as `. <script>`.
 - **Resolve commands through `shellEnvironment`.** It probes an *interactive*
   login shell, because that's where `.zshrc` puts PATH entries such as
   `~/.local/bin`. A GUI-launched app's own PATH is not enough.
