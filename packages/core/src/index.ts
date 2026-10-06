@@ -39,6 +39,7 @@ export * from './promptSettings';
 export * from './prompts';
 export * from './testAccounts';
 export * from './quick';
+export * from './reviewTools';
 export * from './usage';
 export * from './activity';
 export * from './priceCheck';

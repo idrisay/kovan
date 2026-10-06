@@ -1,9 +1,9 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   formatAge, isMerged, olderCommentCount, primaryFlag, pullBasis, pullFlags, reviewBasis, ticketBasis, ticketKeyInTitle,
-  KIMI_REVIEW_FILE,
-  isNvReviewModel,
-  reviewModelName,
+  reviewFileName,
+  reviewToolLabel,
+  reviewToolVia,
   TICKET_RECENT_COMMENTS
 } from '@kovan/core';
 import { repoName, States, TONE } from './rows';
@@ -1103,7 +1103,7 @@ export function PullPane({
             runningLabel="Reviewing"
             state={review.state}
             onRun={review.run}
-            tooltip="Sends the diff to the model on the button's tag (NVIDIA through nv-review, or any opencode model). It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Can take several minutes."
+            tooltip="Sends the pull request to the reviewer on the button's tag: nv-review, one you added in Settings › Agents › Reviewers, or any opencode model. It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Can take several minutes."
           />
         )}
       </>
@@ -1154,11 +1154,13 @@ export function PullPane({
               kind="pull-review"
               title="Code review"
               runningNote="A review reads the whole diff: expect a few minutes, more on NVIDIA's free API. You can leave this pane."
-              tag={review.state.result ? reviewModelName(review.state.result.model) : 'review'}
+              tag={review.state.result ? reviewToolLabel(review.state.result.model) : 'review'}
               badge={<VerdictBadge verdict={review.state.result?.verdict} />}
               state={review.state}
               basisNow={detail ? reviewBasis(detail) : undefined}
-              footer={`Read the diff, description and open threads through ${review.state.result && !isNvReviewModel(review.state.result.model) ? 'opencode' : 'nv-review'}, and changed nothing. Saved as ${KIMI_REVIEW_FILE} in this PR's History below.`}
+              footer={review.state.result
+                ? `Read the diff, description and open threads through ${reviewToolVia(review.state.result.model)}, and changed nothing. Saved as ${reviewFileName(review.state.result.model)} in this PR's History below.`
+                : 'Read the diff, description and open threads, and changed nothing.'}
               onRun={review.run}
               onCancel={review.cancel}
               onDismiss={review.dismiss}

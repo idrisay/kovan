@@ -102,6 +102,12 @@ const api = {
   knownModels: () => ipcRenderer.invoke('kovan:known-models'),
   modelsSearch: (command: string) => ipcRenderer.invoke('kovan:models-search', command),
   ticketStatuses: () => ipcRenderer.invoke('kovan:ticket-statuses'),
+  reviewTools: () => ipcRenderer.invoke('kovan:review-tools'),
+  reviewToolSave: (tool: unknown) => ipcRenderer.invoke('kovan:review-tool-save', tool),
+  reviewToolRemove: (id: string) => ipcRenderer.invoke('kovan:review-tool-remove', id),
+  reviewToolCandidates: () => ipcRenderer.invoke('kovan:review-tool-candidates'),
+  reviewToolCheck: (command: string) => ipcRenderer.invoke('kovan:review-tool-check', command),
+  reviewToolTest: (tool: unknown) => ipcRenderer.invoke('kovan:review-tool-test', tool),
   clipboardImagePath: () => ipcRenderer.invoke('kovan:clipboard-image'),
   copyText: (text: string) => ipcRenderer.invoke('kovan:clipboard-write', text),
   // Electron 32 took `File.path` away; this is its replacement, and it has

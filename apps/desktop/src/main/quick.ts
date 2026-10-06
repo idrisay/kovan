@@ -21,11 +21,14 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import {
   CONDENSE_INSTRUCTION,
-  KIMI_REVIEW_FILE,
   KIMI_REVIEW_TIMEOUT_SECONDS,
   NV_REVIEW_DEFAULT_MODEL,
-  NV_REVIEW_SUFFIX,
-  isNvReviewModel,
+  NV_REVIEW_TOOL_ID,
+  parseReviewToolModel,
+  reviewFileName,
+  reviewToolLabel,
+  reviewToolModel,
+  reviewToolVia,
   PULL_SUMMARY_INSTRUCTION,
   QUICK_DEFAULT_MODEL,
   QUICK_DEFAULT_TIMEOUT_SECONDS,
@@ -37,7 +40,6 @@ import {
   pullReviewPrompt,
   pullSummaryInput,
   reviewBasis,
-  reviewModelName,
   reviewSubmissionBody,
   splitVerdict,
   ticketBasis,
@@ -51,10 +53,11 @@ import {
   type ReviewEvent
 } from '@kovan/core';
 import {
-  QUICK_OPENCODE_CONFIG, RunStore, loginShell, parseQuickOutput, quickArgs, shellEnvironment, subjectSlug,
+  QUICK_OPENCODE_CONFIG, RunStore, parseQuickOutput, quickArgs, shellEnvironment, subjectSlug,
   type QuickOutput
 } from '@kovan/agent';
 import type { DesktopHost } from './host';
+import type { ReviewTools } from './reviewTools';
 
 export interface QuickState {
   result?: QuickResult;
@@ -97,7 +100,8 @@ export class QuickModel {
 
   constructor(
     private readonly host: DesktopHost,
-    private readonly sources: QuickSources
+    private readonly sources: QuickSources,
+    private readonly reviewTools: ReviewTools
   ) {
     this.dir = path.join(host.files.stateDir(), 'quick');
     this.runs = new RunStore(RunStore.rootFor(host.files.stateDir()));
@@ -122,24 +126,31 @@ export class QuickModel {
   }
 
   /**
-   * What the button's tag shows and its picker edits. The review runs either
-   * through `nv-review` (`moonshotai/kimi-k3 (nv-review)`, see
-   * `NV_REVIEW_SUFFIX`) or on any opencode model, like Summarize.
+   * What the button's tag shows and its picker edits. The review runs through
+   * one of your reviewers — `moonshotai/kimi-k3 (nv-review)`, `sonnet
+   * (claude)`, see `reviewToolModel` — or on any opencode model, like
+   * Summarize. `review.runner` holds which: a reviewer's id, or `opencode`.
    */
   modelFor(kind: QuickKind): string {
     if (kind !== 'pull-review') return this.model(kind);
-    if (this.host.config.get<string>('review.runner', 'nv-review') === 'opencode') {
+    const runner = this.host.config.get<string>('review.runner', NV_REVIEW_TOOL_ID);
+    if (runner === 'opencode') {
       return this.host.config.get<Partial<Record<QuickKind, string>>>('quick.models', {})['pull-review'] || QUICK_DEFAULT_MODEL;
     }
-    return `${this.reviewModel()}${NV_REVIEW_SUFFIX}`;
+    const tool = this.reviewTools.find(runner) ?? this.reviewTools.find(NV_REVIEW_TOOL_ID)!;
+    return reviewToolModel(tool.id, tool.id === NV_REVIEW_TOOL_ID ? this.reviewModel() : tool.model);
   }
 
   async setModelFor(kind: QuickKind, model: string): Promise<void> {
     const value = model.trim();
     if (!value) return;
-    if (kind === 'pull-review' && isNvReviewModel(value)) {
-      await this.host.config.set('review.runner', 'nv-review');
-      await this.host.config.set('review.nvModel', value.slice(0, -NV_REVIEW_SUFFIX.length).trim());
+    const picked = kind === 'pull-review' ? parseReviewToolModel(value) : undefined;
+    if (picked) {
+      const tool = this.reviewTools.find(picked.id);
+      if (!tool) return;
+      await this.host.config.set('review.runner', tool.id);
+      if (tool.id === NV_REVIEW_TOOL_ID) await this.host.config.set('review.nvModel', picked.model ?? '');
+      else if (picked.model !== tool.model) await this.reviewTools.save({ ...tool, model: picked.model });
       return;
     }
     if (kind === 'pull-review') await this.host.config.set('review.runner', 'opencode');
@@ -377,11 +388,23 @@ export class QuickModel {
     const hash = subject.lastIndexOf('#');
     const [repo, number] = [subject.slice(0, hash), Number(subject.slice(hash + 1))];
     const [detail, diff] = await Promise.all([this.sources.pull(repo, number), this.sources.diff(repo, number)]);
-    const prompt = pullReviewPrompt(detail, diff);
-    live.job = { ...live.job, input: this.forLog(prompt) };
-    void this.recordJob(live.job);
-
-    const answer = isNvReviewModel(model) ? await this.nvReview(prompt, live) : await this.opencodeReview(model, prompt, live);
+    const picked = parseReviewToolModel(model);
+    const tool = picked && this.reviewTools.find(picked.id);
+    if (picked && !tool) throw new Error(`The reviewer ${picked.id} was removed. Pick another on the Review button.`);
+    let prompt: string;
+    let answer: string;
+    if (tool) {
+      // The model as picked on the button, for this one run.
+      const control = { onChild: (child: ChildProcess) => (live.child = child), cancelled: () => live.job.status === 'cancelled' };
+      live.job = { ...live.job, input: this.forLog(pullReviewPrompt(detail, diff, { checkout: tool.kind === 'agent' })) };
+      void this.recordJob(live.job);
+      ({ answer, prompt } = await this.reviewTools.review({ ...tool, model: picked!.model }, detail, diff, control));
+    } else {
+      prompt = pullReviewPrompt(detail, diff);
+      live.job = { ...live.job, input: this.forLog(prompt) };
+      void this.recordJob(live.job);
+      answer = await this.opencodeReview(model, prompt, live);
+    }
     const { text, verdict } = splitVerdict(answer);
     live.job = { ...live.job, answer, refused: [] };
 
@@ -393,14 +416,14 @@ export class QuickModel {
       kind: 'review',
       prompt
     });
-    const file = path.join(run.directory, KIMI_REVIEW_FILE);
+    const file = path.join(run.directory, reviewFileName(model));
     const recommends = verdict === 'approve' ? 'Approve' : verdict === 'request_changes' ? 'Request changes' : 'no verdict given';
     await writeFile(
       file,
-      `# ${reviewModelName(model)} review of ${subject}\n\n_${model}, ${new Date().toISOString()}. Recommends: ${recommends}._\n\n${text}\n`,
+      `# ${reviewToolLabel(model)} review of ${subject}\n\n_${model}, ${new Date().toISOString()}. Recommends: ${recommends}._\n\n${text}\n`,
       'utf8'
     );
-    this.host.log.info(`nv-review saved to ${file}`);
+    this.host.log.info(`${reviewToolVia(model)} review saved to ${file}`);
     return { kind, subject, text, model, createdAt: new Date().toISOString(), basis: reviewBasis(detail), verdict };
   }
 
@@ -425,8 +448,9 @@ export class QuickModel {
       if (changed) {
         return { ok: false, error: 'New changes were pushed since this review ran. Refresh the review before submitting it.' };
       }
-      const via = isNvReviewModel(result.model) ? 'nv-review' : 'opencode';
-      const posted = await this.sources.submitReview(repo, number, event, reviewSubmissionBody(result.text, reviewModelName(result.model), via));
+      const posted = await this.sources.submitReview(
+        repo, number, event, reviewSubmissionBody(result.text, reviewToolLabel(result.model), reviewToolVia(result.model))
+      );
       saved['pull-review'] = { ...result, submitted: { event, at: new Date().toISOString(), url: posted.url } };
       await this.save(subject, saved);
       this.host.log.info(`review on ${subject} submitted as ${event}`);
@@ -459,49 +483,8 @@ export class QuickModel {
       'The attached file is a code review request. Do exactly what it asks, in the format it asks for.',
       live, KIMI_REVIEW_TIMEOUT_SECONDS * 1000
     );
-    if (!output.text) throw new Error(output.error || `${reviewModelName(model)} returned nothing.`);
+    if (!output.text) throw new Error(output.error || `${reviewToolLabel(model)} returned nothing.`);
     return output.text.trim();
-  }
-
-  /**
-   * Your `nv-review` shell function, prompt on stdin. It is a function in
-   * `.zshrc`, so only an interactive shell can see it; the script is a fixed
-   * word of ours and the prompt never passes through the parser.
-   */
-  private async nvReview(prompt: string, live: Live): Promise<string> {
-    const env = { ...(await shellEnvironment.environment()), NV_MODEL: this.reviewModel() };
-    const cwd = await mkdtemp(path.join(tmpdir(), 'kovan-review-'));
-    try {
-      return await new Promise<string>((resolve, reject) => {
-        const child = spawn(loginShell(), ['-i', '-c', 'nv-review'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
-        live.child = child;
-        let out = '';
-        let err = '';
-        child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')));
-        child.stderr.on('data', (chunk: Buffer) => (err += chunk.toString('utf8')));
-        const timer = setTimeout(() => {
-          child.kill('SIGTERM');
-          reject(new Error(`${reviewModelName(this.reviewModel())} did not answer within ${KIMI_REVIEW_TIMEOUT_SECONDS / 60} minutes.`));
-        }, KIMI_REVIEW_TIMEOUT_SECONDS * 1000);
-        child.on('error', (e) => {
-          clearTimeout(timer);
-          reject(e);
-        });
-        child.on('close', (code) => {
-          clearTimeout(timer);
-          if (live.job.status === 'cancelled') return reject(new Error('Cancelled.'));
-          // An interactive zsh prints rc noise to stderr; nv-review's own
-          // messages are the lines it prefixes with its name.
-          const own = err.split('\n').filter((line) => line.startsWith('nv-review:')).join('\n');
-          if (code !== 0) return reject(new Error(own || err.trim().split('\n').pop() || `nv-review exited ${code}`));
-          if (!out.trim() || out.trim() === '(empty response)') return reject(new Error(own || `${reviewModelName(this.reviewModel())} returned nothing.`));
-          resolve(out.trim());
-        });
-        child.stdin.end(prompt, 'utf8');
-      });
-    } finally {
-      await rm(cwd, { recursive: true, force: true });
-    }
   }
 
   /**

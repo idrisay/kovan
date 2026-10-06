@@ -8,6 +8,7 @@ import type {
   SessionInfo, Snapshot
 } from './types';
 import { Settings } from './Settings';
+import { OPEN_SETTINGS } from './Reviewers';
 import { levelTone, PullPane, SentryPane, TicketPane } from './Detail';
 import { RunSheet } from './RunSheet';
 import { GroupHead, PullRow, repoName } from './rows';
@@ -734,6 +735,17 @@ export function App() {
   }, []);
 
   const [connecting, setConnecting] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<string>();
+  // Settings opened at a section from elsewhere: the Review picker's "Add a
+  // reviewer…" opens Agents (item 143).
+  useEffect(() => {
+    const open = (event: Event) => {
+      setSettingsSection((event as CustomEvent<string | undefined>).detail);
+      setConnecting(true);
+    };
+    window.addEventListener(OPEN_SETTINGS, open);
+    return () => window.removeEventListener(OPEN_SETTINGS, open);
+  }, []);
   const [selected, setSelected] = useState<Selection>({});
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   // Until main has answered once, an empty list means "not asked yet", not
@@ -1535,8 +1547,9 @@ export function App() {
 
       {connecting && (
         <Settings
-          onClose={() => setConnecting(false)}
+          onClose={() => { setConnecting(false); setSettingsSection(undefined); }}
           connected={snapshot.connected}
+          section={settingsSection}
         />
       )}
       {runSheet && (

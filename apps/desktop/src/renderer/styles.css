@@ -2169,6 +2169,53 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .menu .quick-model-other .ghost { width: auto; align-self: flex-end; padding: 4px 10px; font-size: 11.5px; }
 .menu .quick-model-other .ghost:disabled { opacity: 0.45; }
 .menu button.quick-model-type { color: var(--secondary); }
+.menu button.quick-model-add { color: var(--clay); }
+/* A reviewer's kind in the picker: agents read the repo and take longer. */
+.quick-model-kind { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* Settings › Agents › Reviewers (item 143). */
+.reviewer-list { display: flex; flex-direction: column; border: 1px solid var(--hair-strong); border-radius: 8px; margin: 10px 0; }
+.reviewer-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 9px 12px; align-items: center; }
+.reviewer-row + .reviewer-row { border-top: 1px solid var(--hair); }
+.reviewer-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.reviewer-name { font-family: var(--mono); font-size: 12.5px; color: var(--title); overflow-wrap: anywhere; }
+.reviewer-sub { font-size: 11.5px; color: var(--meta); }
+.reviewer-sub .ok { color: var(--pass); }
+.reviewer-sub .warn { color: var(--running); }
+.reviewer-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.reviewer-actions .settings-note { margin: 0; }
+.reviewer-row .reviewer-checks { grid-column: 1 / -1; }
+.reviewer-add { align-self: flex-start; }
+.reviewer-form {
+  display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding: 12px 14px;
+  border: 1px solid var(--hair-strong); border-radius: 8px; background: var(--wash);
+}
+.reviewer-form .settings-note { margin: 0; }
+.reviewer-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.reviewer-kind {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
+  padding: 8px 10px; border-radius: 7px; border: 1px solid var(--hair-strong); background: var(--card); color: var(--meta); font-size: 11.5px;
+}
+.reviewer-kind strong { color: var(--title); font-size: 12.5px; font-weight: 600; }
+.reviewer-kind.on { border-color: var(--clay); background: color-mix(in srgb, var(--clay) 8%, var(--card)); }
+.reviewer-found { display: flex; flex-direction: column; gap: 4px; }
+.provider .reviewer-found .checkbox-row { margin: 0; justify-content: flex-start; cursor: pointer; }
+/* Settings' inputs fill their row; a radio must not. */
+.provider .reviewer-found input[type='radio'] { width: auto; flex: none; margin: 0; padding: 0; accent-color: var(--clay); }
+.reviewer-found .checkbox-row code { font-family: var(--mono); color: var(--title); margin-right: 4px; }
+.reviewer-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.reviewer-chips .ghost { padding: 3px 9px; font-family: var(--mono); font-size: 11.5px; }
+.reviewer-cmdline {
+  margin: 0; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--hair); background: var(--rail);
+  font-family: var(--mono); font-size: 11.5px; color: var(--secondary); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.reviewer-buttons { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.reviewer-checks { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.reviewer-checks li { display: flex; gap: 8px; align-items: baseline; color: var(--secondary); }
+.reviewer-checks li.ok > span:first-child { color: var(--pass); }
+.reviewer-checks li.fail > span:first-child { color: var(--blocked-bright); }
+.reviewer-check-note { color: var(--meta); }
+.reviewer-checks li.fail .reviewer-check-note { color: var(--blocked-bright); }
 .quick-model-other input:focus, .quick-model-field select:focus { outline: none; border-color: color-mix(in srgb, var(--clay) 50%, transparent); }
 .quick-model-field select { padding: 5px 8px; }
 .quick-model-menu .menu-empty { margin: 2px 9px 0; }

@@ -699,6 +699,11 @@ export async function smokeUi(
     return { item120: await driveItem120(win, process.env['KOVAN_SMOKE_ITEM120']) };
   }
 
+  // Item 143: adding a reviewer, testing it, and picking it on the Review button.
+  if (process.env['KOVAN_SMOKE_ITEM143'] && mode === 'seeded') {
+    return { item143: await driveItem143(win, process.env['KOVAN_SMOKE_ITEM143']) };
+  }
+
   // Item 118: the detail header, per density.
   if (process.env['KOVAN_SMOKE_ITEM118'] && mode === 'seeded') {
     return { item118: await driveItem118(win, process.env['KOVAN_SMOKE_ITEM118']) };
@@ -4488,6 +4493,112 @@ async function driveItem124(win: BrowserWindow, prefix: string): Promise<Record<
   report['offAgainButtons'] = await headerButtons();
   report['cardsWhenOff'] = await cards();
   report['saved'] = await read(win, `window.kovan.settings().then((s) => ({ summarize: s['buttons.summarize'], review: s['buttons.review'], condense: s['buttons.condense'] }))`);
+  return report;
+}
+
+async function driveItem143(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(1_200);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const type = (selector: string, value: string) => read(win, `(() => {
+    const input = document.querySelector(${JSON.stringify(selector)});
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    set.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('blur', { bubbles: true })); input.focus(); input.blur(); return true; })()`);
+  const button = (text: string) => `Array.from(document.querySelectorAll('.settings-row.open button')).find((b) => b.textContent.trim().startsWith(${JSON.stringify(text)}))`;
+  win.show();
+  win.focus();
+  await read(win, `window.kovan.setSetting('buttons.review', true)`);
+  await read(win, `window.kovan.setSetting('review.tools', [])`);
+  await read(win, `window.kovan.setSetting('review.runner', 'nv-review')`);
+  win.webContents.reload();
+  await pause(2_500);
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  await until(win, `document.querySelector('.rows .row')`, 15_000);
+  const report: Record<string, unknown> = {};
+
+  // Settings › Agents: nv-review is already a row.
+  await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);
+  await until(win, `document.querySelector('.settings-list')`, 5_000);
+  await read(win, `document.querySelector('.settings-row[data-section="agents"] .settings-row-head')?.click()`);
+  await until(win, `document.querySelector('.reviewer-row')`, 5_000);
+  await read(win, `document.querySelector('.reviewer-list').scrollIntoView({ block: 'start' })`);
+  report['rowsAtFirst'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-row')).map((r) => r.innerText.replace(/\\s+/g, ' '))`);
+  await snap('list');
+
+  // Add an agent: Claude Code, sonnet; test; save.
+  await read(win, `${button('+ Add reviewer')}?.click()`);
+  await until(win, `document.querySelector('.reviewer-found input[type=radio]')`, 5_000);
+  report['agentsFound'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-found .checkbox-row')).map((r) => r.innerText.trim())`);
+  await read(win, `Array.from(document.querySelectorAll('.reviewer-found .checkbox-row')).find((r) => r.innerText.startsWith('claude '))?.querySelector('input').click()`);
+  await type('.reviewer-form input[list="reviewer-models"]', 'sonnet');
+  await pause(300);
+  report['cmdline'] = await read(win, `document.querySelector('.reviewer-cmdline')?.textContent`);
+  await read(win, `Array.from(document.querySelectorAll('.reviewer-form button')).find((b) => b.textContent.trim() === 'Test')?.click()`);
+  await until(win, `document.querySelector('.reviewer-form .reviewer-checks')`, 10_000);
+  report['agentTest'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-form .reviewer-checks li')).map((l) => l.innerText.replace(/\\s+/g, ' '))`);
+  await read(win, `document.querySelector('.reviewer-form').scrollIntoView({ block: 'start' })`);
+  await snap('add-agent');
+  await read(win, `${button('Save reviewer')}?.click()`);
+  await until(win, `document.querySelectorAll('.reviewer-row').length === 2`, 5_000);
+
+  // Add a command, check that the shell finds it, save without testing.
+  await read(win, `${button('+ Add reviewer')}?.click()`);
+  await until(win, `document.querySelector('.reviewer-kind')`, 5_000);
+  await read(win, `Array.from(document.querySelectorAll('.reviewer-kind')).find((b) => b.textContent.startsWith('Command'))?.click()`);
+  await pause(300);
+  await type('.reviewer-form input[placeholder="gemini-review"]', 'gemini-review');
+  await type('.reviewer-form input[list="reviewer-models"]', 'gemini-3-pro');
+  await type('.reviewer-form input[placeholder="REVIEW_MODEL"]', 'GEMINI_MODEL');
+  await until(win, `document.querySelector('.reviewer-form .settings-note.ok')`, 5_000).catch(() => undefined);
+  report['commandFound'] = await read(win, `document.querySelector('.reviewer-form .settings-note.ok, .reviewer-form .settings-note.error')?.textContent`);
+  report['commandLine'] = await read(win, `document.querySelector('.reviewer-cmdline')?.textContent`);
+  await read(win, `document.querySelector('.reviewer-form').scrollIntoView({ block: 'start' })`);
+  await snap('add-command');
+  await read(win, `${button('Save reviewer')}?.click()`);
+  await until(win, `document.querySelectorAll('.reviewer-row').length === 3`, 5_000);
+  report['rowsAfter'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-row')).map((r) => r.innerText.replace(/\\s+/g, ' '))`);
+  report['saved'] = await read(win, `window.kovan.settings().then((s) => s['review.tools'].map((t) => [t.id, t.kind, t.model ?? '', t.test?.ok ?? 'untested'].join(' ')))`);
+  await read(win, `document.querySelector('.reviewer-list').scrollIntoView({ block: 'start' })`);
+  await snap('list-after');
+
+  // The Review button's picker: the reviewers group, then pick Claude Code.
+  await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+  await pause(500);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await pause(400);
+  await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.quick-split')).some((s) => s.textContent.includes('Review'))`, 8_000);
+  const reviewTag = `Array.from(document.querySelectorAll('.quick-split')).find((s) => s.querySelector('.quick-run').textContent.includes('Review')).querySelector('.quick-model')`;
+  report['tagBefore'] = await read(win, `${reviewTag}.textContent`);
+  await read(win, `${reviewTag}.click()`);
+  await until(win, `document.querySelector('.quick-model-menu select')`, 5_000);
+  await read(win, `(() => { const s = document.querySelector('.quick-model-menu select'); s.value = '~reviewers'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await pause(500);
+  report['pickerRows'] = await read(win, `Array.from(document.querySelectorAll('.quick-model-list button')).map((b) => b.innerText.replace(/\\s+/g, ' '))`);
+  report['addRow'] = await read(win, `Boolean(document.querySelector('.quick-model-add'))`);
+  await snap('picker');
+  await read(win, `Array.from(document.querySelectorAll('.quick-model-list button')).find((b) => b.innerText.includes('claude'))?.click()`);
+  await pause(600);
+  report['tagAfter'] = await read(win, `${reviewTag}.textContent`);
+  report['runner'] = await read(win, `window.kovan.settings().then((s) => s['review.runner'])`);
+  report['model'] = await read(win, `window.kovan.quickModel('pull-review')`);
+  await snap('picked');
+
+  // "Add a reviewer…" opens Settings at Agents.
+  await read(win, `${reviewTag}.click()`);
+  await until(win, `document.querySelector('.quick-model-add')`, 5_000);
+  await read(win, `document.querySelector('.quick-model-add').click()`);
+  await until(win, `document.querySelector('.settings-row.open[data-section="agents"]')`, 5_000).catch(() => undefined);
+  report['addOpensAgents'] = await read(win, `Boolean(document.querySelector('.settings-row.open[data-section="agents"]'))`);
+  await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+  // Back to how the user had it.
+  await read(win, `window.kovan.setSetting('review.runner', 'nv-review')`);
   return report;
 }
 

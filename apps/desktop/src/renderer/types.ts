@@ -1,5 +1,5 @@
 import type {
-  ActivityEvent, GitHubBudget, QuickCommand, JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport
+  ActivityEvent, GitHubBudget, QuickCommand, JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport, ReviewTool, AgentFamily
 } from '@kovan/core';
 import type { PullDetail, ReviewComment, ReviewThread, Reviewer } from '@kovan/providers';
 import type { AgentRun, RunFile, Runner, RunKind } from '@kovan/agent';
@@ -182,6 +182,17 @@ export interface KovanApi {
   modelsSearch(command: string): Promise<ModelList | { error: string }>;
   /** Every status of the loaded tickets' Jira projects, To Do → Done. */
   ticketStatuses(): Promise<{ name: string; category: string }[]>;
+  /** Reviewers for the Review button (item 143): nv-review first. */
+  reviewTools(): Promise<ReviewTool[]>;
+  reviewToolSave(tool: Partial<ReviewTool>): Promise<{ ok: boolean; error?: string; tools: ReviewTool[] }>;
+  /** Removes one; nv-review stays. */
+  reviewToolRemove(id: string): Promise<ReviewTool[]>;
+  /** Agents and commands found on this machine and not added yet. */
+  reviewToolCandidates(): Promise<{ command: string; kind: 'agent' | 'command'; family?: AgentFamily; how: string }[]>;
+  /** Whether the shell can find a command now: 'function', 'command', 'none'… */
+  reviewToolCheck(command: string): Promise<string>;
+  /** Runs the planted-bug test pull request through it. */
+  reviewToolTest(tool: Partial<ReviewTool>): Promise<{ ok: boolean; checks: { label: string; ok: boolean; note?: string }[] }>;
   /** The clipboard's image saved as a PNG; '' when it holds none. */
   clipboardImagePath(): Promise<string>;
   /** Puts text on the clipboard, through main so it works whatever has focus. */

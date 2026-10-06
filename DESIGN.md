@@ -86,7 +86,7 @@ Reuse these before writing new CSS. A new component goes in this list.
 |---|---|---|
 | `.primary` | Starts an agent that **writes** (changes code, opens a PR) | Unblock in an agent, Work on this |
 | `.primary.outline` | Starts an agent that only **reads and reports** | Check it shipped, Review |
-| `.quick` (dashed blue) | Not an agent: a quick model turning text Kovan already has into shorter text | Summarize, nv-review |
+| `.quick` (dashed blue) | Not an interactive agent: a quick model or a reviewer turning text Kovan already has into shorter text | Summarize, Review |
 | `.ghost` | Everything else: secondary actions, Settings actions | Add a row |
 | `.detail-related-link` (clay chip) | A related item that opens in Kovan. A ticket chip carries its Jira status after a divider: dot + status, coloured by category (to do neutral, in progress blue, done green), dashed while it loads | ACME-2236 │ ● In Review |
 | `.detail-place` | Where the item lives elsewhere, in a detail header's link row beside the related chips | GitHub / Jira / Sentry (with its mark), Terminal |
@@ -113,6 +113,19 @@ tickets" turns each on or off (`renderer/quickButtons.ts`). Off hides the
 button and its card, and an agent run stops using what it made; its setup is
 kept. A new optional button joins `QUICK_BUTTONS` instead of getting its own
 setting, and the rule before it shows only when something follows it.
+
+Review sends the pull request to a **reviewer** (item 143), kept in Settings ›
+Agents › Reviewers (`renderer/Reviewers.tsx`, `main/reviewTools.ts`, pure parts
+in `@kovan/core` `reviewTools.ts`). A reviewer is a **command** (prompt on
+stdin, model in an env var it names, like nv-review) or an **agent** (Claude
+Code or Codex, headless and read-only, in a throwaway worktree at the PR's
+head), and the Review button's picker lists them under "Your reviewers". All
+of them get `pullReviewPrompt` and may end with a VERDICT line; Kovan keeps
+the timeout, saving, and posting only after you confirm. The button stores
+one string: `<model> (<reviewer id>)`, the format nv-review always used.
+Every reviewer has a Test: a made-up PR with one planted bug, which says
+which step failed. nv-review is always the first row and can't be removed.
+"Review in an agent" (a full session in a terminal) is separate and stays.
 
 ### Surfaces and containers
 
@@ -595,6 +608,11 @@ main and `isMac` (`renderer/platform.ts`) in the window. Nothing else forks.
   `~/.local/bin`. A GUI-launched app's own PATH is not enough.
 - Headless model runs start in an empty temp folder, with only the tools
   they need allowed (for example web search and fetch only).
+- **An agent reviewer reads and does nothing else.** Claude Code runs with
+  `--permission-mode dontAsk --allowedTools Read Grep Glob`, Codex with
+  `exec --sandbox read-only`, in a detached worktree of your clone that is
+  removed afterwards; your own checkout is never touched. A new agent family
+  gets its read-only flags in `agentReviewArgs` before it can be a reviewer.
 - **The window is sandboxed, on a supported Electron.** It shows other
   people's text all day, so a Chromium bug there must stay there
   (`sandbox: true`, security review 2026-10). The preload is built as

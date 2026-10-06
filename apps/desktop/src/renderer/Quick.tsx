@@ -12,14 +12,16 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useMenuDismiss } from './menuDismiss';
 import {
-  NV_REVIEW_DEFAULT_MODEL, NV_REVIEW_SUFFIX, REVIEW_EVENT_LABEL, describeChange, formatAge, isNvReviewModel, priceFor, reviewModelName,
-  type PriceRule, type QuickBasis, type QuickKind, type QuickResult, type ReviewEvent, type ReviewVerdict
+  NV_REVIEW_DEFAULT_MODEL, NV_REVIEW_SUFFIX, NV_REVIEW_TOOL_ID, REVIEW_EVENT_LABEL, describeChange, formatAge, isNvReviewModel,
+  parseReviewToolModel, priceFor, reviewToolLabel, reviewToolModel,
+  type PriceRule, type ReviewTool, type QuickBasis, type QuickKind, type QuickResult, type ReviewEvent, type ReviewVerdict
 } from '@kovan/core';
 import { Prose } from './Prose';
 import { CheckIcon, ChevronIcon, CloseIcon, CopyIcon } from './icons';
 import { useFold } from './folds';
 import { useUsage } from './Usage';
 import type { QuickState } from './types';
+import { openSettings } from './Reviewers';
 
 export function useQuick(kind: QuickKind, subject: string) {
   const [state, setState] = useState<QuickState>({});
@@ -87,9 +89,9 @@ function useQuickModel(kind: QuickKind): [string, (model: string) => Promise<voi
   return [model, set];
 }
 
-/** `opencode/muse-spark-1.3-contributor-free` → `muse-spark-1.3`; nv-review's → `Kimi K3`. */
+/** `opencode/muse-spark-1.3-contributor-free` → `muse-spark-1.3`; nv-review's → `Kimi K3`; a reviewer's → `claude · sonnet`. */
 export function shortModelName(kind: QuickKind, model: string): string {
-  if (kind === 'pull-review' && isNvReviewModel(model)) return reviewModelName(model);
+  if (kind === 'pull-review' && parseReviewToolModel(model)) return reviewToolLabel(model);
   return (model.split('/').pop() ?? model).replace(/-(contributor-)?free$/, '');
 }
 
@@ -97,6 +99,8 @@ export function shortModelName(kind: QuickKind, model: string): string {
 function costLabel(kind: QuickKind, model: string, prices: PriceRule[]): { text: string; free: boolean } | undefined {
   // nv-review goes through NVIDIA's free API whatever the model.
   if ((kind === 'pull-review' && isNvReviewModel(model)) || /free/i.test(model)) return { text: 'FREE', free: true };
+  // Your own reviewers: what they cost is up to them, and Kovan doesn't know.
+  if (kind === 'pull-review' && parseReviewToolModel(model)) return undefined;
   const price = priceFor(model, prices);
   if (!price) return undefined;
   if (price.input === 0 && price.output === 0) return { text: 'FREE', free: true };
@@ -155,6 +159,7 @@ export function QuickButton({
         <QuickModelPicker
           kind={kind} label={label} model={model} alignRight={alignRight}
           onPick={(next) => { void setModel(next); setPicking(false); }}
+          onClose={() => setPicking(false)}
         />
       )}
     </span>
@@ -164,19 +169,27 @@ export function QuickButton({
 /** NVIDIA models worth offering for nv-review; any other can be typed in. */
 const NV_SUGGESTIONS = [NV_REVIEW_DEFAULT_MODEL, 'nvidia/nemotron-3-super-120b-a12b'];
 const NV_PROVIDER = 'nv-review';
+/** The picker's group for reviewers you added in Settings (item 143). */
+const REVIEWERS_PROVIDER = '~reviewers';
 
 /**
  * The tag's popover: a provider, then one of its models, or any name typed
  * in. Providers are opencode's (`opencode models`, asked when the popover
  * first opens) and, for the review, NVIDIA through your `nv-review` function.
  */
-function QuickModelPicker({ kind, label, model, alignRight, onPick }: {
-  kind: QuickKind; label: string; model: string; alignRight: boolean; onPick: (model: string) => void;
+function QuickModelPicker({ kind, label, model, alignRight, onPick, onClose }: {
+  kind: QuickKind; label: string; model: string; alignRight: boolean; onPick: (model: string) => void; onClose: () => void;
 }) {
   const review = kind === 'pull-review';
   const [available, setAvailable] = useState<string[]>();
-  const [provider, setProvider] = useState(() => (isNvReviewModel(model) ? NV_PROVIDER : model.split('/')[0] ?? ''));
+  const [reviewers, setReviewers] = useState<ReviewTool[]>([]);
+  const [provider, setProvider] = useState(() => {
+    const picked = parseReviewToolModel(model);
+    if (picked) return picked.id === NV_REVIEW_TOOL_ID ? NV_PROVIDER : REVIEWERS_PROVIDER;
+    return model.split('/')[0] ?? '';
+  });
   const nv = provider === NV_PROVIDER;
+  const own = provider === REVIEWERS_PROVIDER;
   // "Type another model…" is a row until clicked, then a field. A bare field
   // at the bottom of the list, with a "Use" beside it, read as a mystery box.
   const [typing, setTyping] = useState(false);
@@ -184,14 +197,18 @@ function QuickModelPicker({ kind, label, model, alignRight, onPick }: {
 
   useEffect(() => {
     void window.kovan.quickModelsAvailable().then(setAvailable);
-  }, []);
+    if (review) void window.kovan.reviewTools().then((tools) => setReviewers(tools.filter((t) => t.id !== NV_REVIEW_TOOL_ID)));
+  }, [review]);
 
   const opencodeProviders = [...new Set((available ?? []).map((m) => m.split('/')[0]!))].sort();
-  const providers = review ? [NV_PROVIDER, ...opencodeProviders] : opencodeProviders;
-  const suggestions = nv
+  const providers = review ? [NV_PROVIDER, REVIEWERS_PROVIDER, ...opencodeProviders] : opencodeProviders;
+  const suggestions = own
+    ? reviewers.map((t) => reviewToolModel(t.id, t.model))
+    : nv
     ? [...new Set([...NV_SUGGESTIONS, ...(isNvReviewModel(model) ? [model.slice(0, -NV_REVIEW_SUFFIX.length)] : [])])].map((m) => `${m}${NV_REVIEW_SUFFIX}`)
     : (available ?? []).filter((m) => m.startsWith(`${provider}/`));
-  const shown = (m: string) => (nv ? m.slice(0, -NV_REVIEW_SUFFIX.length) : m.slice(m.indexOf('/') + 1));
+  const shown = (m: string) => (own ? reviewToolLabel(m) : nv ? m.slice(0, -NV_REVIEW_SUFFIX.length) : m.slice(m.indexOf('/') + 1));
+  const kindOf = (m: string) => reviewers.find((t) => t.id === parseReviewToolModel(m)?.id)?.kind;
   const submit = () => {
     const value = typed.trim();
     if (!value) return;
@@ -207,7 +224,7 @@ function QuickModelPicker({ kind, label, model, alignRight, onPick }: {
           {!available && !nv && <option value={provider}>Loading…</option>}
           {available && !providers.includes(provider) && <option value={provider}>{provider || 'Choose…'}</option>}
           {providers.map((p) => (
-            <option key={p} value={p}>{p === NV_PROVIDER ? 'NVIDIA · nv-review' : p}</option>
+            <option key={p} value={p}>{p === NV_PROVIDER ? 'NVIDIA · nv-review' : p === REVIEWERS_PROVIDER ? 'Your reviewers' : p}</option>
           ))}
         </select>
       </label>
@@ -215,14 +232,21 @@ function QuickModelPicker({ kind, label, model, alignRight, onPick }: {
         {suggestions.map((m) => (
           <button key={m} type="button" role="option" aria-selected={m === model} className={m === model ? 'active' : ''} onClick={() => onPick(m)}>
             <span className="quick-model-id">{shown(m)}</span>
-            {(nv || /free/i.test(m)) && <span className="quick-tag">FREE</span>}
+            {(nv || (!own && /free/i.test(m))) && <span className="quick-tag">FREE</span>}
+            {own && <span className="quick-model-kind">{kindOf(m) === 'agent' ? 'agent' : 'command'}</span>}
           </button>
         ))}
-        {!nv && available && suggestions.length === 0 && <p className="menu-empty">No models listed for this provider.</p>}
-        {!nv && !available && <p className="menu-empty">Asking opencode for its models…</p>}
+        {own && suggestions.length === 0 && <p className="menu-empty">No reviewers added yet.</p>}
+        {!nv && !own && available && suggestions.length === 0 && <p className="menu-empty">No models listed for this provider.</p>}
+        {!nv && !own && !available && <p className="menu-empty">Asking opencode for its models…</p>}
       </div>
       <div className="menu-rule" />
-      {typing ? (
+      {review && (
+        <button type="button" className="quick-model-type quick-model-add" onClick={() => { onClose(); openSettings('agents'); }}>
+          + Add a reviewer…
+        </button>
+      )}
+      {own ? null : typing ? (
         <form className="quick-model-other" onSubmit={(e) => { e.preventDefault(); submit(); }}>
           <input
             type="text" autoFocus value={typed} onChange={(e) => setTyped(e.target.value)}
@@ -487,7 +511,7 @@ export function ReviewDecision({
         <div className={confirming === 'REQUEST_CHANGES' ? 'review-confirm changes' : 'review-confirm'}>
           <span>
             Post this review on <span className="mono">{subject}</span> as <b>{REVIEW_EVENT_LABEL[confirming].toLowerCase()}</b>?
-            {' '}GitHub shows it under your name. The body is the review above, with a note saying {reviewModelName(result.model)} wrote it.
+            {' '}GitHub shows it under your name. The body is the review above, with a note saying {reviewToolLabel(result.model)} wrote it.
           </span>
           <div className="review-decision-row">
             <button type="button" className="review-event on" disabled={busy} onClick={() => void post()}>

@@ -22,7 +22,7 @@ import { createHost } from './host';
 import { logFilePath, logRendererError } from './logFile';
 import { Poller, type PolledProvider, type Snapshot } from './poller';
 import type { ProviderId, SpeechProviderId, ThemeId } from '@kovan/core';
-import { DEFAULT_SETTINGS, resolveTheme, themeInfo } from '@kovan/core';
+import { DEFAULT_SETTINGS, resolveTheme, themeInfo, type ReviewTool } from '@kovan/core';
 import type { ChangeKind } from '@kovan/git';
 import { KovanTray } from './tray';
 import { Activity } from './notify';
@@ -42,6 +42,7 @@ import {
   sentryTicketFixture, ticketFixture
 } from './smoke';
 import { Sessions } from './sessions';
+import { ReviewTools } from './reviewTools';
 import { PtyHosts } from './ptyClient';
 import { AgentStatus } from './agentStatus';
 import { ProblemLog } from './problems';
@@ -176,9 +177,16 @@ const sessions = new Sessions((text) => {
 const quickCommands = new QuickCommands(host, sessions);
 const detailHttp = new HttpClient(host.log);
 const credentials = new Credentials(host);
+// Reviewers (item 143). `agents` is declared below; these only run on a click.
+const reviewTools: ReviewTools = new ReviewTools(
+  host,
+  () => agents.runners(),
+  async (repo: string): Promise<string | undefined> =>
+    (await agents.targets()).find((t: { label: string }) => t.label.toLowerCase() === repo.toLowerCase())?.path
+);
 const quick = new QuickModel(host, {
   pull: loadPullDetail, ticket: loadTicket, diff: loadPullDiff, submitReview: postPullReview
-});
+}, reviewTools);
 const usage = new Usage(host, sessions, () => quick.listJobs());
 const agents = new Agents(host, sessions, quick);
 const running = new RunningAgents(host, sessions, () => {
@@ -702,6 +710,15 @@ app.whenReady().then(async () => {
   const modelSearch = new ModelSearch(host, () => quick.available(true));
   ipcMain.handle('kovan:known-models', () => modelSearch.lists());
   ipcMain.handle('kovan:ticket-statuses', () => loadTicketStatuses().catch(() => []));
+  ipcMain.handle('kovan:review-tools', () => reviewTools.list());
+  ipcMain.handle('kovan:review-tool-save', (_event, tool: Partial<ReviewTool>) => reviewTools.save(tool ?? {}));
+  ipcMain.handle('kovan:review-tool-remove', (_event, id: string) => reviewTools.remove(String(id)));
+  ipcMain.handle('kovan:review-tool-candidates', () => reviewTools.candidates());
+  ipcMain.handle('kovan:review-tool-check', (_event, command: string) => reviewTools.check(String(command)));
+  ipcMain.handle('kovan:review-tool-test', async (_event, tool: Partial<ReviewTool>) => {
+    const checked = reviewTools.sanitize(tool ?? {});
+    return checked ? reviewTools.test(checked) : { ok: false, checks: [{ label: 'Set up', ok: false, note: 'This reviewer can\'t run: check its command and kind.' }] };
+  });
   // A screenshot on the clipboard, pasted into a terminal: saved as a file and
   // its path typed in, which is how Claude Code takes an image in any
   // terminal (VS Code's drop does the same with the dropped file's path).

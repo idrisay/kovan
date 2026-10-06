@@ -3,7 +3,7 @@ import { isMac, keyLabel } from './platform';
 import { ACTIVITY_SETTINGS, ActivitySettings } from './Activity';
 import { DictationSettings } from './Dictation';
 import {
-  DEFAULT_IDLE_MINUTES, DEFAULT_PRICES, NV_REVIEW_DEFAULT_MODEL, PRICE_CHECK_RUNNERS, QUICK_DEFAULT_MODEL,
+  DEFAULT_IDLE_MINUTES, DEFAULT_PRICES, PRICE_CHECK_RUNNERS, QUICK_DEFAULT_MODEL,
   QUICK_DEFAULT_TIMEOUT_SECONDS, applyPriceProposals,
   type Price, type PriceCheckRunner, type PriceProposal, type PriceRule, type ProviderId
 } from '@kovan/core';
@@ -17,6 +17,7 @@ import { QUICK_BUTTONS, setQuickButton, useQuickButtons } from './quickButtons';
 import { setShell, useShellChoice } from './shellChoice';
 import { ACCENTS, THEMES, speechProvider } from '@kovan/core';
 import { ChevronIcon, CloseIcon, SearchIcon } from './icons';
+import { ReviewersSettings } from './Reviewers';
 
 interface Field {
   key: string;
@@ -121,7 +122,6 @@ function QuickButtonSettings() {
 function QuickModelSettings() {
   const [model, setModel] = useState('');
   const [timeout, setTimeoutSeconds] = useState(String(QUICK_DEFAULT_TIMEOUT_SECONDS));
-  const [nvModel, setNvModel] = useState('');
   const [test, setTest] = useState<{ running?: boolean; ok?: boolean; text?: string }>({});
 
   useEffect(() => {
@@ -129,7 +129,6 @@ function QuickModelSettings() {
       setModel(typeof settings['quick.model'] === 'string' ? settings['quick.model'] : '');
       const seconds = settings['quick.timeoutSeconds'];
       if (typeof seconds === 'number') setTimeoutSeconds(String(seconds));
-      setNvModel(typeof settings['review.nvModel'] === 'string' ? settings['review.nvModel'] : '');
     });
   }, []);
 
@@ -151,10 +150,8 @@ function QuickModelSettings() {
         returns text, with every tool call refused. Agent runs never use it.
       </p>
       <p className="settings-note">
-        "Review with nv-review" on a pull request is separate: it sends the diff through your
-        <code> nv-review </code> shell function (NVIDIA's free API, key in ~/.config/nvidia/key), gives up after
-        20 minutes, and saves the review as kimi-k3-review.md in the PR's History. The review recommends approve or
-        request changes; nothing reaches GitHub until you pick one and confirm.
+        Review on a pull request can use this too, or one of the reviewers below. Whichever writes it, the review
+        recommends approve or request changes, and nothing reaches GitHub until you pick one and confirm.
       </p>
       <label>
         <span>Model (opencode)</span>
@@ -180,20 +177,6 @@ function QuickModelSettings() {
           }}
         />
       </label>
-      <label>
-        <span>nv-review model (NVIDIA)</span>
-        <input
-          type="text"
-          placeholder={NV_REVIEW_DEFAULT_MODEL}
-          value={nvModel}
-          onChange={(e) => setNvModel(e.target.value)}
-          onBlur={() => void window.kovan.setSetting('review.nvModel', nvModel.trim())}
-        />
-      </label>
-      <p className="settings-note">
-        Passed to nv-review as <code>NV_MODEL</code>. Try <code>nvidia/nemotron-3-super-120b-a12b</code> while Kimi K3 is
-        overloaded.
-      </p>
       <div className="quick-test-row">
         <button type="button" className="ghost" disabled={test.running} onClick={() => void runTest()}>
           {test.running ? 'Testing…' : 'Test'}
@@ -532,9 +515,12 @@ const SEARCH_INDEX: Record<SectionId, string[]> = {
 
 export function Settings({
   onClose,
-  connected
+  connected,
+  section
 }: {
   onClose: () => void;
+  /** A section to open with, e.g. 'agents' from the Review picker's "Add a reviewer…". */
+  section?: string;
   connected: ProviderId[];
 }) {
   const [fields, setFields] = useState<Record<string, Field[]>>({});
@@ -543,7 +529,7 @@ export function Settings({
   const [notify, setNotify] = useState(true);
   const [saving, setSaving] = useState('');
   /** Which section is open; one at a time, none at first. */
-  const [open, setOpen] = useState<SectionId>();
+  const [open, setOpen] = useState<SectionId | undefined>(section as SectionId | undefined);
   const [query, setQuery] = useState('');
   /** Every setting as saved, for the one-line summaries. Re-read when a
    *  section closes, so a summary shows what was just changed. */
@@ -767,6 +753,7 @@ export function Settings({
             <QuickButtonSettings />
             {/* Its setup only matters while one of them is on. */}
             {(buttons.summarize || buttons.review || buttons.condense) && <QuickModelSettings />}
+            {buttons.review && <ReviewersSettings />}
             <RunningAgentSettings />
             <TokenPriceSettings />
           </>
