@@ -219,6 +219,35 @@ async function toggle($: $, file: string) {
   if (was !== file) await loadDiff($, file)
 }
 
+/**
+ * Open in Kovan (item 148): the file's diff in Kovan's Workspace view. The
+ * pane can't reach Kovan's window, so it writes a request into the folder
+ * Kovan watches (KOVAN_OPEN_DIR) and shows Kovan's one-line reply.
+ */
+async function openInKovan($: $, file: string) {
+  const dir = await $.env.get('KOVAN_OPEN_DIR')
+  if (!dir) return
+  const root = await gitRoot($)
+  if (!root) {
+    $.ui.toast('Not in a git repository, so Kovan has no diff to open.')
+    return
+  }
+  const id = `${await $.clock.now()}-${Math.random().toString(36).slice(2, 8)}`
+  await $.fs.write(`${dir}/${id}.json`, JSON.stringify({ repo: root, file: `${root}/${relativeTo(root, file)}` }))
+  const reply = `${dir}/${id}.reply`
+  for (let i = 0; i < 20; i++) {
+    await $.clock.sleep(150)
+    if (!(await $.fs.exists(reply))) continue
+    try {
+      $.ui.toast((JSON.parse(await $.fs.read(reply)) as { message?: string }).message ?? 'Kovan answered.')
+    } catch {
+      $.ui.toast('Kovan answered, but the reply was unreadable.')
+    }
+    return
+  }
+  $.ui.toast("Kovan didn't answer. Is it running?")
+}
+
 /** Run checks: the project's own typecheck, test and lint scripts, one after another. */
 async function runChecks($: $) {
   const root = (await gitRoot($)) ?? (await $.session.cwd())
@@ -348,8 +377,8 @@ export const register: Register = (on) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button, Code } = $.ui.resolve(e)
     const cols = Math.max(24, e.props.bodyColumns)
-    const [goal, goalKey, steps, changed, openPath, view, ran, u, now, scripts] = await Promise.all([
-      $.env.get('KOVAN_GOAL'), $.env.get('KOVAN_GOAL_KEY'),
+    const [goal, goalKey, openDir, steps, changed, openPath, view, ran, u, now, scripts] = await Promise.all([
+      $.env.get('KOVAN_GOAL'), $.env.get('KOVAN_GOAL_KEY'), $.env.get('KOVAN_OPEN_DIR'),
       read($, plan), read($, files), read($, open), read($, diff), read($, checks), read($, usage),
       $.clock.now(), hasScripts($)
     ])
@@ -402,6 +431,9 @@ export const register: Register = (on) => {
             )}
             {openPath === f.path && view.path === f.path && view.text ? <Code source={view.text} format="diff" path={f.rel} wrap="truncate-end" /> : null}
             {openPath === f.path && view.path === f.path && view.note ? <Text dimColor>{`  ${view.note}`}</Text> : null}
+            {openPath === f.path && openDir
+              ? <Box marginLeft={2}><Button key={`kovan:${f.path}`} plain label="Open in Kovan" onPress={() => { void openInKovan($, f.path) }} /></Box>
+              : null}
           </Box>
         ))}
         <Text> </Text>

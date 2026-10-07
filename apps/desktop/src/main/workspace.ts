@@ -539,6 +539,15 @@ export class Workspaces {
    * workspace — not only the active one, because a tab can outlive a switch
    * and closing the file the user is reading would be worse than allowing it.
    */
+  /** `inside` for main's own callers: the resolved path, or undefined when it is outside every workspace. */
+  async contains(candidate: string): Promise<string | undefined> {
+    try {
+      return await this.inside(candidate);
+    } catch {
+      return undefined;
+    }
+  }
+
   private async inside(candidate: string): Promise<string> {
     const folders = this.list().flatMap((w) => w.folders);
     if (folders.length === 0) {

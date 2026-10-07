@@ -82,6 +82,16 @@ const api = {
     });
     return () => ipcRenderer.removeListener('kovan:open-workspace', handler);
   },
+  /** The pane beside Claude asked to open a file's diff (item 148). */
+  onOpenDiff: (listener: (target: { repo: string; file: string; side: 'staged' | 'unstaged' | 'untracked' }) => void) => {
+    const handler = (_event: unknown, target: { repo: string; file: string; side: 'staged' | 'unstaged' | 'untracked' }) => listener(target);
+    ipcRenderer.on('kovan:open-diff', handler);
+    // One asked for while no window was open waits in main until now.
+    void ipcRenderer.invoke('kovan:open-diff-pending').then((p?: { repo: string; file: string; side: 'staged' | 'unstaged' | 'untracked' }) => {
+      if (p) listener(p);
+    });
+    return () => ipcRenderer.removeListener('kovan:open-diff', handler);
+  },
   onShowAgents: (listener: () => void) => {
     const handler = () => listener();
     ipcRenderer.on('kovan:show-agents', handler);

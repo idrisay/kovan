@@ -12,6 +12,11 @@ import { fileURLToPath } from 'node:url';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** Where the pane's "Open in Kovan" requests land (item 148). */
+export function claudeModOpenDir(): string {
+  return path.join(app.getPath('userData'), 'open');
+}
+
 export function claudeModDir(): string | undefined {
   const dir = app.isPackaged
     ? path.join(process.resourcesPath, 'claude-mod', 'kovan')

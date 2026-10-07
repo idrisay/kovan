@@ -174,6 +174,8 @@ export interface KovanApi {
   onRunningAgents(listener: (report: AgentsReport) => void): () => void;
   /** The idle reminder was clicked. */
   onOpenWorkspace(listener: (id: string, folder?: string) => void): () => void;
+  /** "Open in Kovan" from the pane beside Claude: a file's diff (item 148). */
+  onOpenDiff(listener: (target: { repo: string; file: string; side: 'staged' | 'unstaged' | 'untracked' }) => void): () => void;
   onShowAgents(listener: () => void): () => void;
 
   runners(): Promise<Runner[]>;

@@ -397,6 +397,15 @@ pane beside Claude, from top to bottom:
 - Checks: the tests, typechecks and lints the agent ran, from its own Bash calls. Run checks runs the project's `typecheck`, `test` and `lint` scripts, only when pressed.
 - One small dim line: `Model · Context · Session · Weekly` with reset times.
 
+Under an open diff, **Open in Kovan** (item 148) shows that diff in the
+Workspace view and brings the window forward. The pane can't reach the
+window, so it writes `<id>.json` (`{ repo, file }`, absolute) into
+`userData/open` (`KOVAN_OPEN_DIR`). `main/openRequests.ts` reads it, deletes
+it, and answers in `<id>.reply` with one line the pane shows as a toast.
+`parseOpenRequest` refuses anything outside its repository, and main opens
+only a repository inside a workspace, the rule every workspace read follows.
+Requests older than a minute, or left from before Kovan started, are
+dropped, not acted on.
 It opens by itself on a terminal of 144+ columns and with `/kovan` at any
 width. The mod has its own tests (`claude plugin test <dir>`) and must pass
 `claude plugin validate <dir>`.

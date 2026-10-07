@@ -36,6 +36,7 @@ import { useNavHistory } from './navHistory';
 import type { ActivityEvent, ShellOption } from './types';
 import { setShell, useShellChoice } from './shellChoice';
 import { Search, type SearchAction } from './Search';
+import type { OpenRequest } from './Workspace';
 import {
   FailedPinRow, forgetClosedSessions, NothingPinned, PinnedOnlyButton, PinToggle, usePinnedKeys, usePinnedOnly, usePins,
   useKeptPins, useRowMenu, type RowMenuItem
@@ -724,7 +725,7 @@ export function App() {
   // ⌘P, go to file (item 100). Anywhere in the app, as in VS Code: the file
   // opens in the Workspace view, which is switched to.
   const [quickOpen, setQuickOpen] = useState(false);
-  const [openRequest, setOpenRequest] = useState<{ path: string; line?: number; nonce: number }>();
+  const [openRequest, setOpenRequest] = useState<OpenRequest>();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!isAppShortcut(event)) return;
@@ -790,6 +791,11 @@ export function App() {
   useEffect(() => window.kovan.onOpenWorkspace((id, folder) => {
     setView('workspace');
     setShowWorkspace({ id, ...(folder ? { folder } : {}), nonce: Date.now() });
+  }), []);
+  // "Open in Kovan" from the pane beside Claude (item 148).
+  useEffect(() => window.kovan.onOpenDiff((target) => {
+    setView('workspace');
+    setOpenRequest({ path: `${target.repo}/${target.file}`, diff: target, nonce: Date.now() });
   }), []);
   useEffect(() => window.kovan.onShowAgents(() => {
     setView('agents');

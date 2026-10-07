@@ -705,6 +705,11 @@ export async function smokeUi(
     return { item120: await driveItem120(win, process.env['KOVAN_SMOKE_ITEM120']) };
   }
 
+  // Item 148: Open in Kovan from the pane beside Claude.
+  if (process.env['KOVAN_SMOKE_ITEM148'] && mode === 'seeded') {
+    return { item148: await driveItem148(win, process.env['KOVAN_SMOKE_ITEM148']) };
+  }
+
   // Item 145: pin in place.
   if (process.env['KOVAN_SMOKE_ITEM145'] && mode === 'seeded') {
     return { item145: await driveItem145(win, process.env['KOVAN_SMOKE_ITEM145']) };
@@ -4509,6 +4514,61 @@ async function driveItem124(win: BrowserWindow, prefix: string): Promise<Record<
   report['offAgainButtons'] = await headerButtons();
   report['cardsWhenOff'] = await cards();
   report['saved'] = await read(win, `window.kovan.settings().then((s) => ({ summarize: s['buttons.summarize'], review: s['buttons.review'], condense: s['buttons.condense'] }))`);
+  return report;
+}
+
+async function driveItem148(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, writeFileSync, existsSync: exists, readFileSync } = await import('node:fs');
+  const report: Record<string, unknown> = {};
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="workspace"]')`, 15_000);
+
+  // A repository in a Kovan workspace, with one edited file and one new one.
+  const repo = mkdtempSync(path.join(os.tmpdir(), 'kovan-148-'));
+  const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+  git('init', '-q');
+  writeFileSync(path.join(repo, 'a.ts'), 'export const a = 1\n');
+  writeFileSync(path.join(repo, 'clean.ts'), 'export const c = 3\n');
+  git('add', '.');
+  git('-c', 'user.email=smoke@kovan', '-c', 'user.name=smoke', 'commit', '-qm', 'init');
+  writeFileSync(path.join(repo, 'a.ts'), 'export const a = 2\n');
+  writeFileSync(path.join(repo, 'b.ts'), 'export const b = 1\n');
+  await read(win, `window.kovan.setSetting('workspaces', [{ id: 'w148', name: 'Smoke', folders: [${JSON.stringify(repo)}] }])`);
+  await read(win, `window.kovan.setSetting('workspace.active', 'w148')`);
+
+  const dir = path.join(app.getPath('userData'), 'open');
+  const ask = async (name: string, body: unknown) => {
+    writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(body));
+    const reply = path.join(dir, `${name}.reply`);
+    for (let i = 0; i < 50 && !exists(reply); i++) await pause(100);
+    return exists(reply) ? JSON.parse(readFileSync(reply, 'utf8')) as { ok: boolean; message: string } : 'no reply';
+  };
+  const tabs = () => read(win, `Array.from(document.querySelectorAll('.tabs [role="tab"], .tabs .tab')).map((t) => t.innerText.replace(/\\s+/g, ' ').trim())`);
+  const snap = async (name: string) => {
+    await pause(900);
+    win.webContents.invalidate();
+    await pause(300);
+    await win.webContents.capturePage();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+
+  report['edited'] = await ask('r1', { repo, file: path.join(repo, 'a.ts') });
+  await pause(1_200);
+  report['view'] = await read(win, `document.querySelector('.rail-item.active')?.getAttribute('data-view')`);
+  report['tabsAfterEdited'] = await tabs();
+  await snap('edited');
+  report['new'] = await ask('r2', { repo, file: path.join(repo, 'b.ts') });
+  await pause(1_200);
+  report['tabsAfterNew'] = await tabs();
+  await snap('new');
+  report['clean'] = await ask('r3', { repo, file: path.join(repo, 'clean.ts') });
+  const outside = mkdtempSync(path.join(os.tmpdir(), 'kovan-148-out-'));
+  report['outside'] = await ask('r4', { repo: outside, file: path.join(outside, 'x.ts') });
+  report['climbing'] = await ask('r5', { repo, file: `${repo}/../../etc/passwd` });
   return report;
 }
 

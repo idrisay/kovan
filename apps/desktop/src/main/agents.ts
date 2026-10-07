@@ -39,7 +39,7 @@ import {
 import { isAppFrame, resolveFrame } from '@kovan/core/node';
 import { AgentLimitsReader } from './agentLimits';
 import { AgentStatus } from './agentStatus';
-import { claudeModDir } from './claudeMod';
+import { claudeModDir, claudeModOpenDir } from './claudeMod';
 import { RunStore, available, writeSettingsFile, type RunKind, type Runner } from '@kovan/agent';
 import { findClones, runTargets, type RunTarget } from '@kovan/git';
 import { HttpClient, JiraClient, SentryClient, type RawSentryFrame } from '@kovan/providers';
@@ -353,7 +353,9 @@ export class Agents {
       ...status.args,
       ...modArgs(base.command, claudeModDir())
     ];
-    const goalEnv = modArgs(base.command, claudeModDir()).length ? modEnv(modGoal(subject)) : {};
+    const goalEnv = modArgs(base.command, claudeModDir()).length
+      ? { ...modEnv(modGoal(subject)), KOVAN_OPEN_DIR: claudeModOpenDir() }
+      : {};
     const result = await this.sessions.run({
       runner: extraArgs.length ? { ...base, leadingArgs: [...base.leadingArgs, ...extraArgs] } : base,
       prompt,

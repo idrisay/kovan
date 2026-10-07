@@ -49,6 +49,8 @@ import { ProblemLog } from './problems';
 import { Agents } from './agents';
 import type { TestEnvironmentSave, TestSelection } from './testEnvironments';
 import { Workspaces } from './workspace';
+import { OpenRequests } from './openRequests';
+import { claudeModOpenDir } from './claudeMod';
 import { DockMenu } from './dockMenu';
 import { openLink } from './external';
 import { HIDDEN_FLAG, setLinuxAutostart } from './autostart';
@@ -58,7 +60,7 @@ import { ModelSearch } from './modelSearch';
 import { Usage } from './usage';
 import { RunningAgents } from './running';
 import { SHELL_SETTING, chosenShell, listShells } from './shells';
-import { activityLabel, githubAnswered, ticketKeyInTitle, type ActivityEvent, type PriceCheckRunner, type PriceRule, type QuickKind, type ReviewEvent } from '@kovan/core';
+import { activityLabel, diffSideFor, githubAnswered, ticketKeyInTitle, type ActivityEvent, type PriceCheckRunner, type PriceRule, type QuickKind, type ReviewEvent } from '@kovan/core';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -212,6 +214,29 @@ const dockMenu = new DockMenu(() => workspaces.list(), () => workspaces.activeId
 host.config.onChange((key) => {
   if (key === 'workspaces' || key === 'workspace.active') void dockMenu.refresh();
 });
+
+/**
+ * "Open in Kovan" from the pane beside Claude (item 148): the file's diff in
+ * the Workspace view, with the window brought forward. Only for a repository
+ * in one of Kovan's workspaces, the same rule every workspace read follows.
+ */
+let pendingDiffOpen: { repo: string; file: string; side: 'staged' | 'unstaged' | 'untracked' } | undefined;
+const openRequests = new OpenRequests(claudeModOpenDir(), async ({ repo, file }) => {
+  const root = await workspaces.contains(repo);
+  if (!root) {
+    return { ok: false, message: `${path.basename(repo)} isn't in a Kovan workspace, so Kovan can't show its diff. Add the folder in Kovan's Workspace view.` };
+  }
+  const side = diffSideFor(await workspaces.status(root), file);
+  if (!side) return { ok: false, message: `${file} has no changes now.` };
+  const target = { repo: root, file, side };
+  const fresh = !window || window.isDestroyed();
+  createWindow();
+  // The click came from a terminal, maybe another app's: bring Kovan to the front.
+  app.focus({ steal: true });
+  if (fresh) pendingDiffOpen = target;
+  else window?.webContents.send('kovan:open-diff', target);
+  return { ok: true, message: `Opened ${file} in Kovan.` };
+}, (message) => host.log.info(message));
 
 /**
  * One pull request's full detail. Shared by the detail pane and the quick
@@ -592,6 +617,7 @@ app.whenReady().then(async () => {
     host.log.warn('could not pick up sessions from the terminal host', error);
   }
   void agentStatus.watch((id, state) => sessions.setStatus(id, state));
+  void openRequests.start().catch((error: unknown) => host.log.warn('could not watch for Open in Kovan requests', error));
 
   poller.onDidChange((snapshot) => {
     broadcast(snapshot);
@@ -883,6 +909,11 @@ app.whenReady().then(async () => {
     const active = workspaces.list().find((w) => w.id === workspaces.activeId());
     if (!active || active.folders.length === 0) return { workspace: null, files: [] };
     return { workspace: active.name, files: await fileIndex.files(active.folders, force === true) };
+  });
+  ipcMain.handle('kovan:open-diff-pending', () => {
+    const pending = pendingDiffOpen;
+    pendingDiffOpen = undefined;
+    return pending;
   });
   ipcMain.handle('kovan:open-workspace-pending', () => {
     const pending = pendingWorkspaceOpen;

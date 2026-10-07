@@ -53,12 +53,20 @@ const KIND_MARK: Record<ChangeKind, string> = {
 
 interface Cursor { line: number; column: number; selected: number }
 
+/** A file to open in the Workspace view: in the editor, or its diff when `diff` says which. */
+export interface OpenRequest {
+  path: string;
+  line?: number;
+  diff?: { repo: string; file: string; side: DiffSide };
+  nonce: number;
+}
+
 export function WorkspaceView({ onTerminal, visible, openRequest, showRequest }: {
   onTerminal: (cwd: string) => void;
   /** The Dock menu (item 135): switch to this workspace, opened at `folder`. */
   showRequest?: { id: string; folder?: string; nonce: number };
   /** ⌘P picked a file (item 100): open it, at a line if one was typed. */
-  openRequest?: { path: string; line?: number; nonce: number };
+  openRequest?: OpenRequest;
   /**
    * App keeps this view mounted once opened and only hides it, so coming back
    * finds the same Files/Changes tab, open repositories, editor tabs and
@@ -378,13 +386,6 @@ export function WorkspaceView({ onTerminal, visible, openRequest, showRequest }:
   }, [open]);
 
   const [jump, setJump] = useState<{ path: string; line: number; nonce: number }>();
-  const handled = useRef<number>();
-  useEffect(() => {
-    if (!openRequest || handled.current === openRequest.nonce) return;
-    handled.current = openRequest.nonce;
-    openFile({ name: openRequest.path.split('/').pop() || openRequest.path, path: openRequest.path, directory: false });
-    if (openRequest.line) setJump({ path: openRequest.path, line: openRequest.line, nonce: openRequest.nonce });
-  }, [openRequest, openFile]);
 
   const openDiff = useCallback((repo: string, file: string, side: DiffSide, from?: string) =>
     open({
@@ -395,6 +396,18 @@ export function WorkspaceView({ onTerminal, visible, openRequest, showRequest }:
       title: file.split('/').pop() || file,
       path: file, repo, side, ...(from ? { from } : {})
     }), [open]);
+
+  const handled = useRef<number>();
+  useEffect(() => {
+    if (!openRequest || handled.current === openRequest.nonce) return;
+    handled.current = openRequest.nonce;
+    if (openRequest.diff) {
+      openDiff(openRequest.diff.repo, openRequest.diff.file, openRequest.diff.side);
+      return;
+    }
+    openFile({ name: openRequest.path.split('/').pop() || openRequest.path, path: openRequest.path, directory: false });
+    if (openRequest.line) setJump({ path: openRequest.path, line: openRequest.line, nonce: openRequest.nonce });
+  }, [openRequest, openFile, openDiff]);
 
   const close = useCallback((key: string) => {
     setTabs((existing) => {

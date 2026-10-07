@@ -106,3 +106,50 @@ test('an edit lists the file with its counts, and a click opens its diff', async
   expect(await ui.find({ type: 'Code' })).toBeUndefined()
   await ui.unmount()
 })
+
+test('Open in Kovan writes a request into the folder Kovan watches and shows its reply', async ($, on) => {
+  const DIFF = 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-const a = 1\n+const a = 2\n'
+  const written: Record<string, string> = {}
+  const toasts: string[] = []
+  mock.env(on, { KOVAN_OPEN_DIR: '/kovan/open' })
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('clock.now', () => ({ value: 1_000 }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('process.run', ($, e) => {
+    const argv = (e as unknown as { argv: string[] }).argv.join(' ')
+    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (argv.startsWith('git rev-parse')) return out('/repo\n')
+    if (argv.startsWith('git ls-files')) return out('src/a.ts\n')
+    if (argv.startsWith('git diff --numstat')) return out('1\t1\tsrc/a.ts\n')
+    if (argv.startsWith('git diff HEAD')) return out(DIFF)
+    return out('', 1)
+  })
+  on('fs.write', ($, e) => {
+    const { path, text } = e as unknown as { path: string; text: string }
+    written[path] = text
+    // Kovan answers at once.
+    written[path.replace(/\.json$/, '.reply')] = JSON.stringify({ ok: true, message: 'Opened src/a.ts in Kovan.' })
+    return { value: undefined }
+  })
+  on('fs.exists', ($, e) => ({ value: (e as unknown as { path: string }).path in written }))
+  on('fs.read', ($, e) => {
+    const p = (e as unknown as { path: string }).path
+    if (p in written) return { value: written[p] }
+    throw new Error('no such file')
+  })
+  on('ui.toast', ($, e) => { toasts.push((e as unknown as { text: string }).text); return { value: undefined } })
+  on('tool.call', { tool: 'Edit' }, () => ({ result: {} as never }))
+
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/src/a.ts', old_string: 'const a = 1', new_string: 'const a = 2' } as never)
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ key: 'kovan:/repo/src/a.ts' })).toBeUndefined()
+  await ui.press({ key: 'file:/repo/src/a.ts' })
+  await ui.press({ key: 'kovan:/repo/src/a.ts' })
+  const request = Object.entries(written).find(([p]) => p.startsWith('/kovan/open/') && p.endsWith('.json'))
+  expect(JSON.parse(request?.[1] ?? '{}')).toEqual({ repo: '/repo', file: '/repo/src/a.ts' })
+  expect(toasts).toEqual(['Opened src/a.ts in Kovan.'])
+  await ui.unmount()
+})
+
