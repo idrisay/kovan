@@ -235,8 +235,10 @@ async function openInKovan($: $, file: string) {
   const id = `${await $.clock.now()}-${Math.random().toString(36).slice(2, 8)}`
   await $.fs.write(`${dir}/${id}.json`, JSON.stringify({ repo: root, file: `${root}/${relativeTo(root, file)}` }))
   const reply = `${dir}/${id}.reply`
-  for (let i = 0; i < 20; i++) {
-    await $.clock.sleep(150)
+  // Up to 10 s: Kovan looks at least once a second, and a window just
+  // coming forward can take a moment.
+  for (let i = 0; i < 50; i++) {
+    await $.clock.sleep(200)
     if (!(await $.fs.exists(reply))) continue
     try {
       $.ui.toast((JSON.parse(await $.fs.read(reply)) as { message?: string }).message ?? 'Kovan answered.')

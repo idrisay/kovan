@@ -17,6 +17,7 @@ const STALE_MS = 60_000;
 
 export class OpenRequests {
   private watcher?: FSWatcher;
+  private sweep?: ReturnType<typeof setInterval>;
   private readonly busy = new Set<string>();
 
   constructor(
@@ -33,10 +34,19 @@ export class OpenRequests {
     this.watcher = watch(this.dir, (_event, name) => {
       if (name && String(name).endsWith('.json')) void this.take(String(name));
     });
+    // macOS can hold a new watcher's first events for seconds, and a click
+    // that waits that long reads as broken: a look at this tiny folder each
+    // second catches what the watch hasn't reported yet.
+    this.sweep = setInterval(() => {
+      void readdir(this.dir).then((names) => {
+        for (const name of names) if (name.endsWith('.json')) void this.take(name);
+      }, () => undefined);
+    }, 1_000);
   }
 
   stop(): void {
     this.watcher?.close();
+    if (this.sweep) clearInterval(this.sweep);
   }
 
   private async take(name: string): Promise<void> {
