@@ -1,0 +1,7 @@
+{
+  "name": "kovan",
+  "version": "0.1.0",
+  "author": { "name": "Kovan" },
+  "description": "Kovan's pane beside Claude: the goal, the plan with Now and Next, the files changed with their diffs, the checks, and usage.",
+  "types": "./types/index.d.ts"
+}

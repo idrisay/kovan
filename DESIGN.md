@@ -387,6 +387,20 @@ otherwise, so they line up as a column. The row has no cost chip; the hover
 card has Cost, and its Now line says "Done, 3h ago, not opened yet". The
 terminal header and pane tabs keep the worded badge.
 
+**Kovan's pane in Claude (item 147).** Claude sessions Kovan starts load a
+Claude Code mod from `resources/claude-mod/kovan` (`--plugin-dir`, through
+`modArgs` in core and `main/claudeMod.ts`; other agents get nothing). It is a
+pane beside Claude, from top to bottom:
+- Goal (`KOVAN_GOAL` / `KOVAN_GOAL_KEY`, from `modGoal`: the ticket over the PR).
+- Claude's own plan, from TodoWrite or TaskCreate/TaskUpdate: ✓ done, the step in progress as Now with its minutes, the one after it as Next.
+- Changes: each file the session edited, +/- against HEAD. A click opens its diff under it, cut at a hunk past 400 lines.
+- Checks: the tests, typechecks and lints the agent ran, from its own Bash calls. Run checks runs the project's `typecheck`, `test` and `lint` scripts, only when pressed.
+- One small dim line: `Model · Context · Session · Weekly` with reset times.
+
+It opens by itself on a terminal of 144+ columns and with `/kovan` at any
+width. The mod has its own tests (`claude plugin test <dir>`) and must pass
+`claude plugin validate <dir>`.
+
 **Hover card (item 115).** A session or Quick model row shows `HoverCard`
 (`sessionCard.tsx`) after 500 ms: the subject from the loaded snapshot, never
 fetched, then the session. It is portalled like every popover over the

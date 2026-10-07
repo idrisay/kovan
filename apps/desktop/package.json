@@ -113,6 +113,11 @@
         {
           "from": "resources/bin/kovan-dictate",
           "to": "bin/kovan-dictate"
+        },
+        {
+          "from": "resources/claude-mod",
+          "to": "claude-mod",
+          "filter": ["**/*", "!**/tests/**", "!**/.claude-plugin/types/**", "!**/tsconfig.json"]
         }
       ]
     },
@@ -152,6 +157,11 @@
         {
           "from": "resources/icon.png",
           "to": "icon.png"
+        },
+        {
+          "from": "resources/claude-mod",
+          "to": "claude-mod",
+          "filter": ["**/*", "!**/tests/**", "!**/.claude-plugin/types/**", "!**/tsconfig.json"]
         }
       ],
       "artifactName": "Kovan-${version}-${arch}.${ext}"

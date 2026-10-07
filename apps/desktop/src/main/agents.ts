@@ -31,11 +31,15 @@ import {
   type SentryIssue,
   extraDirArgs,
   foldersPromptSection,
+  modArgs,
+  modEnv,
+  modGoal,
   runPageUrl
 } from '@kovan/core';
 import { isAppFrame, resolveFrame } from '@kovan/core/node';
 import { AgentLimitsReader } from './agentLimits';
 import { AgentStatus } from './agentStatus';
+import { claudeModDir } from './claudeMod';
 import { RunStore, available, writeSettingsFile, type RunKind, type Runner } from '@kovan/agent';
 import { findClones, runTargets, type RunTarget } from '@kovan/git';
 import { HttpClient, JiraClient, SentryClient, type RawSentryFrame } from '@kovan/providers';
@@ -343,14 +347,20 @@ export class Agents {
     const limitSettings = await this.limits.claudeSettings(base);
     const settings = limitSettings || status.claudeSettings ? { ...limitSettings, ...status.claudeSettings } : undefined;
     // A file, not inline JSON: inline it made the typed line too long (item 141).
-    const extraArgs = [...(settings ? ['--settings', await writeSettingsFile(settings)] : []), ...status.args];
+    // Kovan's pane beside Claude (item 147): goal, plan, changes, checks, usage.
+    const extraArgs = [
+      ...(settings ? ['--settings', await writeSettingsFile(settings)] : []),
+      ...status.args,
+      ...modArgs(base.command, claudeModDir())
+    ];
+    const goalEnv = modArgs(base.command, claudeModDir()).length ? modEnv(modGoal(subject)) : {};
     const result = await this.sessions.run({
       runner: extraArgs.length ? { ...base, leadingArgs: [...base.leadingArgs, ...extraArgs] } : base,
       prompt,
       cwd,
       title: `${request.kind} · ${subjectId}`,
       run,
-      env: { ...env, ...status.env },
+      env: { ...env, ...status.env, ...goalEnv },
       statusSource: status.source
     });
 
