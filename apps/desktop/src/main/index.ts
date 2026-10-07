@@ -242,6 +242,8 @@ async function loadPullDetail(repo: string, number: number) {
  */
 async function loadPullSummary(repo: string, number: number) {
   if (process.env['KOVAN_SMOKE'] && process.env['KOVAN_USER_DATA']) {
+    // #404 stands for one that was deleted, for item 145's "couldn't load it".
+    if (number === 404) throw new Error('Could not resolve to a PullRequest with the number of 404.');
     const sample = fixtureSnapshot(10).merged[0]!;
     return { ...sample, repo, number, title: `Fixture pull request ${repo}#${number}`, url: `https://github.com/${repo}/pull/${number}` };
   }

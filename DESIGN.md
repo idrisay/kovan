@@ -166,6 +166,20 @@ dot-folder in your home, mode 600, never read back). nv-review is always the fir
   The rail's order is a per-window preference too (`railOrder.ts`, Settings
   pinned below it); `reconcileOrder` in core keeps a saved order valid when a
   tab is added or removed, placing a new one beside its default neighbour.
+- **Pins** (`renderer/pins.tsx`, pure parts in core `pins.ts`, item 145): pull
+  requests, tickets and sessions can be pinned, and a pinned row keeps its
+  place (nothing moves). Its pin sits after the age in clay and unpins on a
+  click; an unpinned row shows a grey pin on hover only. On a pull request or
+  ticket row the pin is a button beside the row's button (a button can't hold
+  one), laid over `.pin-slot`, which takes room only while pinned, hovered or
+  focused. Right-click a row for Pin/Unpin (and Open on GitHub/Jira, Copy
+  link). The pin in a list's header shows only pinned rows, opens folded
+  groups, and is dimmed while nothing there is pinned. A pinned pull request
+  or ticket the lists no longer carry is fetched once per launch, after the
+  service has answered, and kept in its group (the header says "+1 pinned" in
+  grey). One that can't be loaded says so, with Retry and Unpin; a pin is
+  never dropped by itself, except a closed session's, whose id can't come
+  back. Pins are the `pins` setting, not localStorage.
 - **Settings** (`Settings.tsx`, item 99): one list, no side nav. A search
   field, then seven rows — Appearance, Text & terminal, Notifications,
   Dictation, Agents, Connections, Environments — each saying its current

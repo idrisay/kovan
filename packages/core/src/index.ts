@@ -57,3 +57,4 @@ export * from './runPages';
 export * from './limits';
 export * from './problems';
 export * from './externalUrl';
+export * from './pins';

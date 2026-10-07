@@ -2,7 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { isAppShortcut, keyLabel } from './platform';
 import { createPortal } from 'react-dom';
 import { useMenuDismiss } from './menuDismiss';
-import { DEFAULT_PULL_SORT, describeGitHubBudget, formatAge, isBlocked, moveBy, moveItem, PULL_SORTS, sortPulls, withSelected, type PullSort } from '@kovan/core';
+import {
+  DEFAULT_PULL_SORT, describeGitHubBudget, formatAge, isBlocked, moveBy, moveItem, pinKind, PULL_SORTS, pullPinKey, sessionPinKey,
+  sortPulls, ticketPinKey, withSelected, type PullSort
+} from '@kovan/core';
 import type {
   JiraIssue, PolledProvider, PullSummary, RunKind, RunTarget, SentryFrame, SentryIssue,
   SessionInfo, Snapshot
@@ -33,6 +36,11 @@ import { useNavHistory } from './navHistory';
 import type { ActivityEvent, ShellOption } from './types';
 import { setShell, useShellChoice } from './shellChoice';
 import { Search, type SearchAction } from './Search';
+import {
+  FailedPinRow, forgetClosedSessions, NothingPinned, PinnedOnlyButton, PinToggle, usePinnedKeys, usePinnedOnly, usePins,
+  useKeptPins, useRowMenu, type RowMenuItem
+} from './pins';
+import { PinSlot } from './rows';
 
 /** What the detail pane is showing, in words — for its error card and the log (item 83). */
 function paneWhere(selected: Selection): string {
@@ -151,6 +159,8 @@ interface Group {
   pulls: PullSummary[];
   tint: boolean;
   note?: string;
+  /** A note that is only information (a kept pin), in grey rather than red. */
+  noteQuiet?: boolean;
 }
 
 const countBlocked = (pulls: readonly PullSummary[]) => pulls.filter(isBlocked).length;
@@ -1126,10 +1136,35 @@ export function App() {
    *
    * Drafts sit last because a draft is not waiting on anyone.
    */
+  // Pinned rows stay where their list puts them (item 145); one the lists no
+  // longer carry is fetched and kept in the group it belongs to.
+  const pins = usePins();
+  const pinnedKeys = usePinnedKeys();
+  const kept = useKeptPins(snapshot);
+  const rowMenu = useRowMenu();
+  const [pullsPinnedOnly, setPullsPinnedOnly] = usePinnedOnly('pull');
+  const [ticketsPinnedOnly, setTicketsPinnedOnly] = usePinnedOnly('ticket');
+  const pinnedPullCount = pins.filter((pin) => pinKind(pin.key) === 'pull').length;
+  const pinnedTicketCount = pins.filter((pin) => pinKind(pin.key) === 'ticket').length;
+  const failedPulls = kept.failed.filter((f) => f.kind === 'pull');
+  const failedTickets = kept.failed.filter((f) => f.kind === 'ticket');
+  /** A row menu's items after Pin: open it on its service, copy its link. */
+  const linkMenu = useCallback((url: string, service: string): RowMenuItem[] => [
+    { label: `Open on ${service}`, run: () => void window.kovan.openExternal(url) },
+    { label: 'Copy link', run: () => void window.kovan.copyText(url) }
+  ], []);
+  const issueMenu = useCallback((issue: JiraIssue): RowMenuItem[] => (issue.url ? linkMenu(issue.url, 'Jira') : []), [linkMenu]);
+
   const groups = useMemo((): Group[] => {
     const blockedIds = new Set(snapshot.blocked.map((p) => `${p.repo}#${p.number}`));
     const rest = snapshot.mine.filter((p) => !blockedIds.has(`${p.repo}#${p.number}`));
     const drafts = rest.filter((p) => p.isDraft).filter(match);
+    // A kept pull request goes where its state puts it: merged ones after the
+    // merged window, newest first; anything still open into Open.
+    const keptMerged = kept.pulls.filter((p) => p.mergedAt)
+      .sort((a, b) => b.mergedAt!.localeCompare(a.mergedAt!)).filter(match);
+    const keptOpen = kept.pulls.filter((p) => !p.mergedAt).filter(match);
+    const keptNote = (n: number) => (n > 0 ? `+${n} pinned` : undefined);
     // Merged keeps its own newest-shipped order regardless of the sort menu:
     // it is a window onto a much longer list, paginated by merge date, and
     // re-sorting just the visible page by "created" or "updated" would make
@@ -1145,7 +1180,8 @@ export function App() {
       },
       {
         id: 'open', label: 'Open',
-        pulls: sortPulls(rest.filter((p) => !p.isDraft).filter(match), pullSort), tint: false
+        pulls: sortPulls([...rest.filter((p) => !p.isDraft).filter(match), ...keptOpen], pullSort), tint: false,
+        note: keptNote(keptOpen.length), noteQuiet: true
       },
       {
         id: 'drafts',
@@ -1157,9 +1193,14 @@ export function App() {
         // because folded is exactly where it would otherwise go unnoticed.
         note: countBlocked(drafts) > 0 ? `${countBlocked(drafts)} blocked` : undefined
       },
-      { id: 'merged', label: 'Recently merged', pulls: snapshot.merged.filter(match), tint: false }
-    ];
-  }, [snapshot, match, pullSort]);
+      {
+        id: 'merged', label: 'Recently merged', pulls: [...snapshot.merged.filter(match), ...keptMerged], tint: false,
+        note: keptNote(keptMerged.length), noteQuiet: true
+      }
+    ].map((group) => (
+      pullsPinnedOnly ? { ...group, pulls: group.pulls.filter((p) => pinnedKeys.has(pullPinKey(p.repo, p.number))) } : group
+    ));
+  }, [snapshot, match, pullSort, kept.pulls, pullsPinnedOnly, pinnedKeys]);
 
   const pullFacets = useMemo(() => pullFacetValues(pullUniverse(snapshot)), [snapshot]);
   const pullFilterCount = PULL_FACETS.reduce((n, f) => n + pullFilters[f.key].size, 0);
@@ -1173,7 +1214,8 @@ export function App() {
 
   const tickets = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const matching = snapshot.tickets.filter((t) => {
+    const matching = [...snapshot.tickets, ...kept.issues].filter((t) => {
+      if (ticketsPinnedOnly && !pinnedKeys.has(ticketPinKey(t.key))) return false;
       if (q && !t.summary.toLowerCase().includes(q) && !t.key.toLowerCase().includes(q)) {
         return false;
       }
@@ -1191,7 +1233,7 @@ export function App() {
       sorted.sort((a, b) => b.updated.localeCompare(a.updated));
     }
     return sorted;
-  }, [snapshot.tickets, filter, ticketFilters, ticketSort]);
+  }, [snapshot.tickets, kept.issues, ticketsPinnedOnly, pinnedKeys, filter, ticketFilters, ticketSort]);
 
   /** Newest-first, same as the ticket list's own default — no sort/filter
    *  menu of its own yet, just the shared search box. */
@@ -1365,6 +1407,7 @@ export function App() {
                           onClear={clearTicketFilters}
                         />
                         <TicketSortMenu value={ticketSort} onChange={setTicketSort} />
+                        <PinnedOnlyButton on={ticketsPinnedOnly} count={pinnedTicketCount} onChange={setTicketsPinnedOnly} />
                       </>
                     ) : view === 'pulls' ? (
                       <>
@@ -1375,6 +1418,7 @@ export function App() {
                           onClear={clearPullFilters}
                         />
                         <PullSortMenu value={pullSort} onChange={setPullSort} />
+                        <PinnedOnlyButton on={pullsPinnedOnly} count={pinnedPullCount} onChange={setPullsPinnedOnly} />
                       </>
                     ) : view === 'activity' ? (
                       activity.unread > 0 && (
@@ -1429,14 +1473,22 @@ export function App() {
                       </ul>
                     )
                   ) : view === 'tickets' ? (
-                    tickets.length === 0 ? (
-                      <p className="quiet">
-                        {filter || ticketFilterCount > 0 ? 'No tickets match.' : 'No tickets.'}
-                      </p>
+                    tickets.length === 0 && failedTickets.length === 0 ? (
+                      ticketsPinnedOnly && pinnedTicketCount === 0 ? <NothingPinned /> : (
+                        <p className="quiet">
+                          {filter || ticketFilterCount > 0 || ticketsPinnedOnly ? 'No tickets match.' : 'No tickets.'}
+                        </p>
+                      )
                     ) : (
                       <ul className="rows">
-                        {tickets.map((issue) => (
-                          <li key={issue.key}>
+                        {tickets.map((issue) => {
+                          const pinKey = ticketPinKey(issue.key);
+                          const pinned = pinnedKeys.has(pinKey);
+                          return (
+                          <li
+                            key={issue.key} className={`pinnable${pinned ? ' pinned' : ''}`}
+                            onContextMenu={(e) => rowMenu.open(e, pinKey, `${issue.key} ${issue.summary}`, pinned, issueMenu(issue))}
+                          >
                             <button
                               className={selected.issue?.key === issue.key ? 'row selected' : 'row'}
                               onClick={() => setSelected({ issue })}
@@ -1457,25 +1509,41 @@ export function App() {
                                 )}
                                 <span className="spacer" />
                                 <span className="row-age">{formatAge(issue.updated)}</span>
+                                <PinSlot />
                               </span>
                             </button>
+                            <PinToggle pinKey={pinKey} title={`${issue.key} ${issue.summary}`} pinned={pinned} />
                           </li>
+                          );
+                        })}
+                        {failedTickets.map((f) => (
+                          <FailedPinRow
+                            key={f.pin.key} pin={f.pin} label={f.pin.key.slice('ticket:'.length)}
+                            error={f.error} onRetry={() => kept.retry(f.pin.key)}
+                          />
                         ))}
                       </ul>
                     )
+                  ) : pullsPinnedOnly && pinnedPullCount === 0 ? (
+                    <NothingPinned />
                   ) : (
-                    groups.map((group) => {
-                      const open = !collapsed.has(group.id);
+                    <>
+                    {groups.map((group) => {
+                      // Pinned only shows every pinned row, folded section or not.
+                      const open = pullsPinnedOnly || !collapsed.has(group.id);
                       const empty = group.pulls.length === 0;
+                      // Pinned only: a section with nothing pinned in it is noise.
+                      if (pullsPinnedOnly && empty) return null;
                       return (
                         <section key={group.id}>
                           <GroupHead
                             label={group.label}
                             count={group.pulls.length}
-                            total={group.id === 'merged' ? snapshot.mergedTotal : undefined}
+                            total={group.id === 'merged' && !pullsPinnedOnly ? snapshot.mergedTotal : undefined}
                             open={open}
                             tint={group.tint && !empty}
                             note={group.note}
+                            noteQuiet={group.noteQuiet}
                             onToggle={() => toggleGroup(group.id)}
                           />
                           {open && empty && (
@@ -1496,6 +1564,11 @@ export function App() {
                                       selected.pull?.repo === pull.repo
                                     }
                                     onSelect={() => setSelected({ pull })}
+                                    pinned={pinnedKeys.has(pullPinKey(pull.repo, pull.number))}
+                                    onMenu={(e) => rowMenu.open(
+                                      e, pullPinKey(pull.repo, pull.number), `#${pull.number} ${pull.title}`,
+                                      pinnedKeys.has(pullPinKey(pull.repo, pull.number)), linkMenu(pull.url, 'GitHub')
+                                    )}
                                   />
                                 ))}
                               </ul>
@@ -1504,7 +1577,7 @@ export function App() {
                                 one, and a list that stops without saying so is
                                 a list you assume is complete.
                               */}
-                              {group.id === 'merged' &&
+                              {group.id === 'merged' && !pullsPinnedOnly &&
                                 snapshot.merged.length < snapshot.mergedTotal && (
                                 <button
                                   type="button"
@@ -1524,9 +1597,29 @@ export function App() {
                           )}
                         </section>
                       );
-                    })
+                    })}
+                    {failedPulls.length > 0 && (
+                      <section>
+                        <GroupHead
+                          label="Pinned, not loaded" count={failedPulls.length}
+                          open={!collapsed.has('pins-failed')} onToggle={() => toggleGroup('pins-failed')}
+                        />
+                        {!collapsed.has('pins-failed') && (
+                          <ul className="rows">
+                            {failedPulls.map((f) => (
+                              <FailedPinRow
+                                key={f.pin.key} pin={f.pin} label={f.pin.key.slice(f.pin.key.lastIndexOf('#') + 1)}
+                                error={f.error} onRetry={() => kept.retry(f.pin.key)}
+                              />
+                            ))}
+                          </ul>
+                        )}
+                      </section>
+                    )}
+                    </>
                   )}
                 </div>
+                {rowMenu.element}
               </aside>
               <Resizer />
 
@@ -1689,9 +1782,12 @@ function NewSessionMenu({
 }
 
 function SessionRow({
-  session, selected, seen, snapshot, onSelect, onOpenSubject, onRename, drag, onMove
+  session, selected, seen, snapshot, onSelect, onOpenSubject, onRename, drag, onMove, pinned, onMenu
 }: {
   session: SessionInfo;
+  /** Pinned (item 145): the pin stays in the row's icons, and a click unpins. */
+  pinned: boolean;
+  onMenu: (event: React.MouseEvent, title: string) => void;
   selected: boolean;
   /** Whether its latest status has been on screen (item 112). */
   seen: boolean;
@@ -1727,6 +1823,7 @@ function SessionRow({
         {...drags}
         onMouseEnter={hover.handlers.onMouseEnter}
         onMouseLeave={hover.handlers.onMouseLeave}
+        onContextMenu={(e) => onMenu(e, session.title)}
         onPointerDown={(e) => { hover.handlers.onPointerDown(); drags?.onPointerDown(e); }}
         onKeyDown={(e) => {
           if (editing) return;
@@ -1754,6 +1851,7 @@ function SessionRow({
           {session.shell && <span className="row-shell" title={session.shell}>{session.shell.split('/').pop()}</span>}
           {/* Status as one small icon before the age; cost and the words are
               in the hover card (item 146). */}
+          {!editing && <PinToggle pinKey={sessionPinKey(session.id)} title={session.title} pinned={pinned} className="inline" />}
           {!editing && <SessionCloseButton session={session} />}
           <SessionStateIcon session={session} seen={seen} />
           <span className="row-age">{formatAge(new Date(session.startedAt).toISOString())}</span>
@@ -2120,12 +2218,24 @@ function Sessions({
   // A Done is news until the session has been on screen (item 112).
   const seen = useSeenStatus(sessions, job ? [] : shownSessions(pane.tree));
 
+  // Pins (item 145). A closed session's id never comes back, so its pin goes
+  // with it — once the list is known, never from the empty list before that.
+  const pinnedKeys = usePinnedKeys();
+  const [pinnedOnly, setPinnedOnly] = usePinnedOnly('session');
+  const rowMenu = useRowMenu();
+  useEffect(() => {
+    if (sessionsReady) forgetClosedSessions(new Set(sessions.map((s) => s.id)));
+  }, [sessions, sessionsReady]);
+  const pinnedCount = sessions.filter((s) => pinnedKeys.has(sessionPinKey(s.id))).length;
+  const listed = pinnedOnly ? ordered.filter((s) => pinnedKeys.has(sessionPinKey(s.id))) : ordered;
+
   return (
     <>
       <aside className="queue" aria-label="Sessions">
         <div className="queue-head">
           <div className="queue-title-row">
             <h1>Sessions</h1>
+            <PinnedOnlyButton on={pinnedOnly} count={pinnedCount} onChange={setPinnedOnly} />
             <NewSessionMenu targets={targets} onOpen={onOpen} />
           </div>
         </div>
@@ -2136,12 +2246,16 @@ function Sessions({
                 ? 'No terminal sessions. Start an agent from a pull request or a ticket, or open a terminal.'
                 : 'Nothing running. Start an agent from a pull request or a ticket, or open a terminal.'}
             </p>
+          ) : pinnedOnly && listed.length === 0 ? (
+            <NothingPinned />
           ) : (
             <ul className="rows">
-              {ordered.map((s, i) => (
+              {listed.map((s, i) => (
                 <SessionRow
                   key={s.id}
                   session={s}
+                  pinned={pinnedKeys.has(sessionPinKey(s.id))}
+                  onMenu={(e, title) => rowMenu.open(e, sessionPinKey(s.id), title, pinnedKeys.has(sessionPinKey(s.id)))}
                   selected={s.id === active && !job}
                   seen={seen(s)}
                   snapshot={snapshot}
@@ -2150,7 +2264,7 @@ function Sessions({
                   onRename={onRename}
                   drag={drag}
                   onMove={(delta) => {
-                    const target = ordered[i + delta];
+                    const target = listed[i + delta];
                     if (target) moveInOrder(s.id, target.id, delta > 0);
                   }}
                 />
@@ -2182,6 +2296,7 @@ function Sessions({
             </>
           )}
         </div>
+        {rowMenu.element}
       </aside>
       <Resizer />
       <main className="pane term-pane">

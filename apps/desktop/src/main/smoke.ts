@@ -184,10 +184,12 @@ export function fixtureSnapshot(mergedCount: number): Snapshot {
     loadingMerged: false,
     tickets: [TICKET, TICKET_LOW, TICKET_HIGHEST],
     sentryIssues: [SENTRY_ISSUE],
-    connected: ['github' as const, 'sentry' as const],
+    // Item 145's flow keeps a pinned ticket that isn't in the list, which
+    // waits for Jira to have answered.
+    connected: process.env['KOVAN_SMOKE_ITEM145'] ? ['github' as const, 'jira' as const, 'sentry' as const] : ['github' as const, 'sentry' as const],
     errors: [],
     refreshing: false,
-    refreshedAt: { github: Date.now() - 90_000 },
+    refreshedAt: process.env['KOVAN_SMOKE_ITEM145'] ? { github: Date.now() - 90_000, jira: Date.now() - 90_000 } : { github: Date.now() - 90_000 },
     refreshingProviders: []
   };
 }
@@ -323,7 +325,11 @@ export function diffFixture(): string {
   ].join('\n');
 }
 
-export function ticketFixture(_key: string) {
+export function ticketFixture(key: string) {
+  // Item 145: a pinned ticket that isn't in the list must come back as itself.
+  if (process.env['KOVAN_SMOKE_ITEM145'] && key !== TICKET.key) {
+    return { ...TICKET, key, summary: `Fixture ticket ${key}, reassigned away`, url: `https://example.invalid/browse/${key}` };
+  }
   // The quick-model shot needs a thread long enough for "Condense" to appear
   // (more than the latest ten). Only under that flag, so every other shot of
   // the ticket pane keeps the one comment it was taken with.
@@ -697,6 +703,11 @@ export async function smokeUi(
   // Item 120: connection problems in the status bar.
   if (process.env['KOVAN_SMOKE_ITEM120'] && mode === 'seeded') {
     return { item120: await driveItem120(win, process.env['KOVAN_SMOKE_ITEM120']) };
+  }
+
+  // Item 145: pin in place.
+  if (process.env['KOVAN_SMOKE_ITEM145'] && mode === 'seeded') {
+    return { item145: await driveItem145(win, process.env['KOVAN_SMOKE_ITEM145']) };
   }
 
   // Item 144: a notification opens in Kovan, never the browser by itself.
@@ -4498,6 +4509,100 @@ async function driveItem124(win: BrowserWindow, prefix: string): Promise<Record<
   report['offAgainButtons'] = await headerButtons();
   report['cardsWhenOff'] = await cards();
   report['saved'] = await read(win, `window.kovan.settings().then((s) => ({ summarize: s['buttons.summarize'], review: s['buttons.review'], condense: s['buttons.condense'] }))`);
+  return report;
+}
+
+async function driveItem145(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(900);
+    win.webContents.invalidate();
+    await pause(300);
+    // The first capture can return the frame before the last change.
+    await win.webContents.capturePage();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const centre = async (selector: string) => await read(win, `(() => {
+    const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null;
+    const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`) as { x: number; y: number } | null;
+  const report: Record<string, unknown> = {};
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  const first = FIXTURE;
+  // Seeded before the window reads them: one pull request in the lists, one
+  // merged out of the window, one that can't be loaded, one ticket that isn't
+  // in the list.
+  await read(win, `window.kovan.setSetting('pins', [
+    { key: 'pull:${first.repo}#${first.number}', title: ${JSON.stringify(first.title)}, at: new Date().toISOString() },
+    { key: 'pull:acme/acme-backend#861', title: 'Fix lesson progress sync', at: new Date().toISOString() },
+    { key: 'pull:acme/acme-backend#404', title: 'A pull request that was deleted', at: new Date().toISOString() },
+    { key: 'ticket:ACME-9001', title: 'ACME-9001 Reassigned ticket', at: new Date().toISOString() }
+  ])`);
+  win.webContents.reload();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await pause(500);
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  // Pull requests is the first view; clicking its active rail icon would hide the sidebar.
+  await until(win, `document.querySelectorAll('.queue-list .row').length > 3`, 10_000);
+  await until(win, `document.querySelector('.row.pin-failed') !== null`, 8_000).catch(() => undefined);
+  report['pinnedRows'] = await read(win, `Array.from(document.querySelectorAll('li.pinnable.pinned .row-num')).map((n) => n.textContent)`);
+  report['groupNotes'] = await read(win, `Array.from(document.querySelectorAll('.group-head')).map((h) => h.innerText.replace(/\\s+/g, ' '))`);
+  report['failed'] = await read(win, `Array.from(document.querySelectorAll('.row.pin-failed')).map((r) => r.innerText.replace(/\\s+/g, ' '))`);
+  await snap('pulls-top');
+  await read(win, `(() => { const q = document.querySelector('.queue-list'); if (q) q.scrollTop = q.scrollHeight; return Boolean(q); })()`);
+  await snap('pulls-bottom');
+  await read(win, `(() => { const q = document.querySelector('.queue-list'); if (q) q.scrollTop = 0; return Boolean(q); })()`);
+
+  // Hover an unpinned row: its pin appears after the age.
+  const unpinned = await centre('li.pinnable:not(.pinned) .row');
+  if (unpinned) win.webContents.sendInputEvent({ type: 'mouseMove', x: unpinned.x, y: unpinned.y });
+  await snap('hover');
+  report['hoverPinVisible'] = await read(win, `(() => { const b = document.querySelector('li.pinnable:not(.pinned):hover > .pin-toggle'); return b ? getComputedStyle(b).opacity : null; })()`);
+
+  // Right-click it: Pin, Open on GitHub, Copy link.
+  if (unpinned) {
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: unpinned.x, y: unpinned.y, button: 'right', clickCount: 1 });
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: unpinned.x, y: unpinned.y, button: 'right', clickCount: 1 });
+  }
+  await pause(300);
+  report['menu'] = await read(win, `Array.from(document.querySelectorAll('.row-menu button')).map((b) => b.textContent)`);
+  await snap('menu');
+  await read(win, `Array.from(document.querySelectorAll('.row-menu button')).find((b) => b.textContent === 'Pin')?.click()`);
+  await pause(300);
+  report['pinnedAfterMenu'] = await read(win, `document.querySelectorAll('li.pinnable.pinned').length`);
+
+  // Pinned only.
+  win.webContents.sendInputEvent({ type: 'mouseMove', x: 5, y: 5 });
+  await read(win, `document.querySelector('.queue-head .pinned-only')?.click()`);
+  await pause(300);
+  await pause(1_500);
+  report['pinnedOnlyRows'] = await read(win, `Array.from(document.querySelectorAll('.queue-list .row .row-num')).map((n) => n.textContent)`);
+  await snap('pinned-only');
+  await read(win, `document.querySelector('.queue-head .pinned-only')?.click()`);
+
+  // Tickets: the reassigned one is kept.
+  await read(win, `document.querySelector('.rail-item[data-view="tickets"]')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.queue-list .row-num')).some((n) => n.textContent === 'ACME-9001')`, 8_000).catch(() => undefined);
+  report['tickets'] = await read(win, `Array.from(document.querySelectorAll('.queue-list li')).map((li) => (li.classList.contains('pinned') ? '[pin] ' : '') + (li.querySelector('.row-num')?.textContent ?? ''))`);
+  await snap('tickets');
+
+  // Sessions: pin one, then close it — its pin goes with it.
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  const a = await read(win, `window.kovan.openTerminal(${JSON.stringify(os.tmpdir())}).then((s) => s.id)`) as string;
+  const b = await read(win, `window.kovan.openTerminal(${JSON.stringify(os.tmpdir())}).then((s) => s.id)`) as string;
+  await until(win, `document.querySelectorAll('[data-session-row]').length >= 2`, 8_000);
+  await read(win, `document.querySelector('[data-session-row="${a}"] .pin-toggle')?.click()`);
+  await pause(400);
+  report['sessionPinned'] = await read(win, `document.querySelector('[data-session-row="${a}"] .pin-toggle.on') !== null`);
+  report['otherSessionPinVisible'] = await read(win, `getComputedStyle(document.querySelector('[data-session-row="${b}"] .pin-toggle')).display`);
+  await snap('sessions');
+  await read(win, `window.kovan.sessionClose(${JSON.stringify(a)})`);
+  await pause(800);
+  report['pinsAfterClose'] = await read(win, `window.kovan.settings().then((s) => s.pins.map((p) => p.key))`);
+  await read(win, `window.kovan.sessionClose(${JSON.stringify(b)})`);
   return report;
 }
 

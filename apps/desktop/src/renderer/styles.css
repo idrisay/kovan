@@ -3149,3 +3149,42 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .activity-event-what { margin: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; color: var(--meta); }
 .activity-event-excerpt { margin: 4px 0; padding: 8px 12px; border-left: 2px solid var(--hair-strong); color: var(--prose); font-size: 13px; }
 .activity-event-actions { display: flex; gap: 8px; margin-top: 6px; }
+
+/* Pins (item 145, "pin in place"). A pinned row keeps its place; its pin sits
+   after the age in clay and unpins on a click (clay because it can be clicked,
+   rule 2). On a pull request or ticket row the pin is a button beside the
+   row's own button, laid over `.pin-slot`, which takes room only while the
+   row is pinned, hovered or focused — an unpinned title isn't cut short. */
+.rows > li.pinnable { position: relative; }
+.pin-slot { display: none; flex: none; width: 18px; height: 1px; }
+li.pinnable.pinned .pin-slot,
+li.pinnable:hover .pin-slot,
+li.pinnable:focus-within .pin-slot { display: inline-block; }
+.icon-button.pin-toggle {
+  flex: none; width: 20px; height: 20px; padding: 0;
+  color: var(--dim);
+}
+.icon-button.pin-toggle:hover { color: var(--secondary); }
+.icon-button.pin-toggle.on { color: var(--clay); }
+.icon-button.pin-toggle.on:hover { color: var(--clay-bright); background: color-mix(in srgb, var(--clay) 12%, transparent); }
+li.pinnable > .pin-toggle {
+  position: absolute; right: 8px; bottom: 7px;
+  opacity: 0;
+}
+li.pinnable.one > .pin-toggle { bottom: auto; top: 50%; transform: translateY(-50%); }
+li.pinnable.pinned > .pin-toggle,
+li.pinnable:hover > .pin-toggle,
+li.pinnable > .pin-toggle:focus-visible { opacity: 1; }
+/* In a session row the pin is one of the row's own icons, before the close. */
+.row.one-line .icon-button.pin-toggle.inline { display: none; }
+.row.one-line:hover .icon-button.pin-toggle.inline,
+.row.one-line:focus-within .icon-button.pin-toggle.inline,
+.row.one-line .icon-button.pin-toggle.inline.on { display: grid; }
+/* The header's "pinned only": dimmed while nothing in the list is pinned. */
+.icon-button.pinned-only.none { opacity: 0.5; }
+/* A pin that couldn't be loaded: dim, with Retry and Unpin. */
+.row.pin-failed { cursor: default; }
+.row.pin-failed .row-title, .row.pin-failed .row-num { color: var(--dim); }
+.row.pin-failed .link { font-size: 11px; }
+.menu.row-menu { min-width: 170px; z-index: 30; }
+.group-note.kept { color: var(--muted); }
