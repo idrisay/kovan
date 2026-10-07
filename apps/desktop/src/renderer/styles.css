@@ -3041,6 +3041,19 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
   animation: boot-spin 0.9s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) { .session-state-spin { animation: none; } }
+/* The sidebar row's status (item 146): one small icon in a fixed slot before
+   the age, so a list of them reads as a column. Empty slot when there's
+   nothing to say, so the ages stay aligned. */
+.session-icon { flex: none; width: 14px; height: 14px; display: grid; place-items: center; }
+.session-icon svg { width: 13px; height: 13px; }
+.session-icon.done { color: var(--pass); }
+.session-icon.input { color: var(--running); }
+.session-icon-spin {
+  width: 9px; height: 9px; border-radius: 50%;
+  border: 1.5px solid var(--hair-strong); border-top-color: var(--muted);
+  animation: boot-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .session-icon-spin { animation: none; } }
 .term-head-title-row .session-state { margin-left: 6px; }
 .pane-tab .session-state { height: 15px; font-size: 10px; padding: 0 5px; }
 

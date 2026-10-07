@@ -56,6 +56,35 @@ export function AgentStateBadge({ session, seen }: { session: SessionInfo; seen:
   );
 }
 
+/**
+ * The sidebar row's status (item 146, option B): one small icon in a fixed
+ * slot before the age, so they line up and scan as a column. ✓ for a Done
+ * you haven't looked at, ! for Input, a spinner while it works; nothing
+ * otherwise. The badge with words stays where there is room for it (the
+ * terminal's header, a pane tab); the row's hover card says it in full.
+ */
+export function SessionStateIcon({ session, seen }: { session: SessionInfo; seen: boolean }) {
+  const state = session.running ? session.status : undefined;
+  const shown = state && !(state === 'done' && seen) ? state : undefined;
+  return (
+    <span className={`session-icon${shown ? ` ${shown}` : ''}`} title={shown ? STATE_HINT[shown] : undefined} aria-label={shown ? STATE_TEXT[shown] : undefined}>
+      {shown === 'done' && (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M3.5 8.5l3 3 6-7" />
+        </svg>
+      )}
+      {shown === 'input' && (
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <circle cx="8" cy="8" r="6.9" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="7.2" y="4" width="1.6" height="5.2" rx="0.8" />
+          <circle cx="8" cy="11.6" r="0.95" />
+        </svg>
+      )}
+      {shown === 'working' && <span className="session-icon-spin" aria-hidden="true" />}
+    </span>
+  );
+}
+
 /** The row's dot: amber for a bell or Input, as before for everything else. */
 export function sessionDot(session: SessionInfo): string {
   if (!session.running) return 'dot';
@@ -176,13 +205,16 @@ function SubjectPart({ subject, fallback, snapshot }: { subject?: string; fallba
   );
 }
 
-function SessionCard({ session, snapshot }: { session: SessionInfo; snapshot: Snapshot }) {
+function SessionCard({ session, snapshot, seen }: { session: SessionInfo; snapshot: Snapshot; seen?: boolean }) {
   const home = /^\/Users\/[^/]+/;
   const state = !session.running
     ? `Exited${session.exitCode !== undefined ? ` (${session.exitCode})` : ''}`
-    : session.status
-      ? STATE_TEXT[session.status]
-      : session.attention ? 'Waiting for you' : 'Running';
+    : session.status === 'done'
+      // What the row's ✓ means, in words (item 146).
+      ? `Done${session.statusAt ? `, ${age(new Date(session.statusAt).toISOString())}` : ''}${seen === false ? ', not opened yet' : ''}`
+      : session.status
+        ? STATE_TEXT[session.status]
+        : session.attention ? 'Waiting for you' : 'Running';
   const matched = session.subject ? findSubject(session.subject, snapshot) : undefined;
   return (
     <>
@@ -214,8 +246,8 @@ export function JobCard({ subject, kind, state, startedAt, snapshot }: {
   );
 }
 
-export function SessionHoverCard({ anchor, session, snapshot }: { anchor?: DOMRect; session: SessionInfo; snapshot: Snapshot }) {
-  return <HoverCard anchor={anchor}><SessionCard session={session} snapshot={snapshot} /></HoverCard>;
+export function SessionHoverCard({ anchor, session, snapshot, seen }: { anchor?: DOMRect; session: SessionInfo; snapshot: Snapshot; seen?: boolean }) {
+  return <HoverCard anchor={anchor}><SessionCard session={session} snapshot={snapshot} seen={seen} /></HoverCard>;
 }
 
 /** Beside the row, kept inside the window; outside the sidebar's zoom and scroll. */

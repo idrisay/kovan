@@ -366,7 +366,12 @@ output:
 Each writes one word to `userData/status/<KOVAN_SESSION_ID>`, and Kovan
 watches that folder. The badge is `.session-state` (not `.agent-state`, which
 is Agents › Running's). Done hides once the session has been on screen
-(`useSeenStatus`); Input stays until answered.
+(`useSeenStatus`); Input stays until answered. In the sidebar row it is not
+a badge but one small icon in a fixed slot before the age (item 146,
+`SessionStateIcon`): ✓ Done, ! Input, a spinner while working, an empty slot
+otherwise, so they line up as a column. The row has no cost chip; the hover
+card has Cost, and its Now line says "Done, 3h ago, not opened yet". The
+terminal header and pane tabs keep the worded badge.
 
 **Hover card (item 115).** A session or Quick model row shows `HoverCard`
 (`sessionCard.tsx`) after 500 ms: the subject from the loaded snapshot, never

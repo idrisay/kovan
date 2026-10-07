@@ -4918,7 +4918,7 @@ async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: stri
   await until(win, `document.querySelectorAll('.row.one-line').length >= 4`, 8_000);
   await pause(3_000);
   report['states'] = sessions.list().map((s) => ({ title: s.title, status: s.status, hosted: s.hosted }));
-  report['badges'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-state')?.textContent ?? '—'))`);
+  report['badges'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-icon')?.getAttribute('aria-label') ?? '—'))`);
   await snap('badges');
 
   // Hover the ticket's session for the card.
@@ -4949,7 +4949,7 @@ async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: stri
   // Opening the Done session clears its badge.
   await read(win, `[...document.querySelectorAll('.row.one-line')].find((r) => r.textContent.includes(${JSON.stringify(snapshot.ticket ?? 'ACME-1')}))?.click()`);
   await pause(1_500);
-  report['afterOpen'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-state')?.textContent ?? '—'))`);
+  report['afterOpen'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-icon')?.getAttribute('aria-label') ?? '—'))`);
   await snap('after-open');
 
   // Finishing while another session is on screen: Done stays until it's looked at.
@@ -4961,7 +4961,7 @@ async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: stri
   await pause(300);
   sessions.setStatus(done.id, 'done');
   await pause(1_000);
-  report['doneUnseen'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-state')?.textContent ?? '—'))`);
+  report['doneUnseen'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-icon')?.getAttribute('aria-label') ?? '—'))`);
   await snap('done-unseen');
 
   // Item 114: what a restarted Kovan gets back from the terminal host.

@@ -14,12 +14,12 @@ import { RunSheet } from './RunSheet';
 import { GroupHead, PullRow, repoName } from './rows';
 import { WorkspaceView } from './Workspace';
 import { QuickJobRow, QuickJobView, useQuickJobs } from './QuickJobs';
-import { SessionUsageChip, UsageOverview, UsageRow } from './Usage';
+import { UsageOverview, UsageRow } from './Usage';
 import { RunningAgentsPane, RunningAgentsRow, idleAgents, useRunningAgents } from './RunningAgents';
 import { Resizer } from './Resizer';
 import { useTerminalFontSize } from './terminalFontSize';
 import { findSubject, type Selection, SessionName } from './sessionSubject';
-import { AgentStateBadge, SessionHoverCard, sessionDot, useHoverCard, useSeenStatus } from './sessionCard';
+import { SessionHoverCard, SessionStateIcon, sessionDot, useHoverCard, useSeenStatus } from './sessionCard';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ActivityEventPane, ActivityList, ActivityToasts, useActivity } from './Activity';
 import { DictationLayer } from './Dictation';
@@ -1752,13 +1752,14 @@ function SessionRow({
             className="row-title" plainName
           />
           {session.shell && <span className="row-shell" title={session.shell}>{session.shell.split('/').pop()}</span>}
-          <AgentStateBadge session={session} seen={seen} />
-          <SessionUsageChip id={session.id} />
+          {/* Status as one small icon before the age; cost and the words are
+              in the hover card (item 146). */}
           {!editing && <SessionCloseButton session={session} />}
+          <SessionStateIcon session={session} seen={seen} />
           <span className="row-age">{formatAge(new Date(session.startedAt).toISOString())}</span>
         </span>
       </div>
-      {!editing && <SessionHoverCard anchor={hover.anchor} session={session} snapshot={snapshot} />}
+      {!editing && <SessionHoverCard anchor={hover.anchor} session={session} snapshot={snapshot} seen={seen} />}
     </li>
   );
 }
