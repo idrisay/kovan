@@ -32,7 +32,7 @@ import { FileIndex } from './fileIndex';
 import { RunWatcher } from './runWatch';
 import { QuickCommands } from './quickCommands';
 import {
-  CREDENTIAL_FIELDS, Credentials, HttpClient, JiraClient, fetchPullDetail, fetchPullDiff, fetchReviewerCandidates,
+  CREDENTIAL_FIELDS, Credentials, HttpClient, JiraClient, fetchPullDetail, fetchPullDiff, fetchPullSummary, fetchReviewerCandidates,
   requestPullReviewers, submitPullReview
 } from '@kovan/providers';
 import { adoptImportedTokens } from './adopt';
@@ -234,6 +234,22 @@ async function loadPullDetail(repo: string, number: number) {
     repo,
     number
   );
+}
+
+/**
+ * One pull request as the lists show it, for a notification about one that is
+ * in none of them any more (item 144).
+ */
+async function loadPullSummary(repo: string, number: number) {
+  if (process.env['KOVAN_SMOKE'] && process.env['KOVAN_USER_DATA']) {
+    const sample = fixtureSnapshot(10).merged[0]!;
+    return { ...sample, repo, number, title: `Fixture pull request ${repo}#${number}`, url: `https://github.com/${repo}/pull/${number}` };
+  }
+  const token = await host.secrets.get('github');
+  if (!token) {
+    throw new Error('GitHub is not connected');
+  }
+  return fetchPullSummary(detailHttp, host.config.get('github.baseUrl', 'https://api.github.com'), token, repo, number);
 }
 
 /** A pull request's unified diff, for the Kimi K3 review. */
@@ -649,6 +665,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:reviewers-request', (_event, repo: string, number: number, people: string[], teams: string[]) =>
     requestReviewers(repo, number, people, teams));
   ipcMain.handle('kovan:ticket-detail', (_event, key: string) => loadTicket(key));
+  ipcMain.handle('kovan:pull-summary', (_event, repo: string, number: number) => loadPullSummary(String(repo), Number(number)));
   ipcMain.handle('kovan:ticket-status', (_event, key: string) => loadTicketStatus(key));
 
   // --- Quick model ----------------------------------------------------------

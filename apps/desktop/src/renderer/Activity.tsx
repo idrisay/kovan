@@ -135,6 +135,49 @@ export function ActivityList({ inbox, filter, selectedId, onOpen }: {
   );
 }
 
+/** Where an event's own page is: GitHub for a pull request, else the tracker its URL names. */
+function serviceOf(event: ActivityEvent): string {
+  if (event.subject.includes('#')) return 'GitHub';
+  if (/atlassian\.net|jira/i.test(event.url)) return 'Jira';
+  if (/sentry/i.test(event.url)) return 'Sentry';
+  return 'the web';
+}
+
+/**
+ * The pane for a notification whose pull request or ticket isn't in any list
+ * Kovan holds (item 144): while it is fetched, if it can't be, or when it's
+ * something Kovan can't show. It says what happened; the service is one
+ * click away but never opened by itself.
+ */
+export function ActivityEventPane({ event, loading, error }: { event: ActivityEvent; loading?: boolean; error?: string }) {
+  const service = serviceOf(event);
+  return (
+    <section className="activity-event-pane">
+      <p className="activity-event-label">{event.label}</p>
+      <h2>{event.title}</h2>
+      <p className="activity-event-what">
+        <span className={`dot ${TONE[event.kind]}`} />
+        {activityLabel(event.kind)}
+        {event.who && <> · {event.who}</>}
+        {' · '}
+        {formatAge(new Date(event.at).toISOString())}
+        {' · '}
+        {event.read ? 'read' : 'unread'}
+      </p>
+      {event.excerpt && <blockquote className="activity-event-excerpt">{event.excerpt}</blockquote>}
+      {loading && <p className="quiet">Loading it from {service}…</p>}
+      {error && <p className="quiet">Kovan couldn't load it here: {error}</p>}
+      {!loading && (
+        <div className="activity-event-actions">
+          <button type="button" className="ghost" onClick={() => void window.kovan.openExternal(event.url)}>
+            Open on {service}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 const TOAST_MS = 8_000;
 const MAX_TOASTS = 3;
 

@@ -21,7 +21,7 @@ import { useTerminalFontSize } from './terminalFontSize';
 import { findSubject, type Selection, SessionName } from './sessionSubject';
 import { AgentStateBadge, SessionHoverCard, sessionDot, useHoverCard, useSeenStatus } from './sessionCard';
 import { ErrorBoundary } from './ErrorBoundary';
-import { ActivityList, ActivityToasts, useActivity } from './Activity';
+import { ActivityEventPane, ActivityList, ActivityToasts, useActivity } from './Activity';
 import { DictationLayer } from './Dictation';
 import { useRailOrder } from './railOrder';
 import { QuickCommands } from './QuickCommands';
@@ -943,14 +943,50 @@ export function App() {
   const [activityRequest, setActivityRequest] = useState<string>();
 
   /** An event, clicked in the inbox or on a toast: read it and show it beside the inbox. */
+  /**
+   * Opening a notification reads it and shows what it is about, here (item
+   * 144). One that is in none of Kovan's lists any more — merged and aged out,
+   * someone else's ticket — is fetched and shown in the same pane; while it
+   * loads, or if it can't be, a card says what happened. Never the browser by
+   * itself: that is one click away on the card.
+   */
+  const [eventPane, setEventPane] = useState<{ event: ActivityEvent; loading?: boolean; error?: string }>();
+  const openingEvent = useRef('');
   const openEvent = useCallback((event: ActivityEvent) => {
     if (!event.read) activity.markRead([event.id]);
     setView('activity');
     setActivityId(event.id);
+    openingEvent.current = event.id;
     const match = findSubject(event.subject, snapshot);
-    if (match) setSelected(match);
-    // Merged and aged out, or resolved: not in any list Kovan holds any more.
-    else void window.kovan.openExternal(event.url);
+    if (match) {
+      setEventPane(undefined);
+      setSelected(match);
+      return;
+    }
+    setSelected({});
+    const shown = { ...event, read: true };
+    const hash = event.subject.lastIndexOf('#');
+    const load: Promise<Selection> | undefined = hash > 0
+      ? window.kovan.pullSummary(event.subject.slice(0, hash), Number(event.subject.slice(hash + 1))).then((pull) => ({ pull }))
+      : /^[A-Z][A-Z0-9]+-\d+$/.test(event.subject)
+        ? window.kovan.ticketDetail(event.subject).then((issue) => ({ issue }))
+        : undefined;
+    if (!load) {
+      setEventPane({ event: shown });
+      return;
+    }
+    setEventPane({ event: shown, loading: true });
+    load.then(
+      (found) => {
+        if (openingEvent.current !== event.id) return;
+        setEventPane(undefined);
+        setSelected(found);
+      },
+      (err: unknown) => {
+        if (openingEvent.current !== event.id) return;
+        setEventPane({ event: shown, error: err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(err) });
+      }
+    );
   }, [activity, snapshot]);
 
   // A clicked macOS notification, now or from before this window existed.
@@ -1528,6 +1564,8 @@ export function App() {
                     onRun={(issue, frames) => setRunSheet({ kind: 'implement', sentry: { issue, frames } })}
                     onOpenSession={openSession}
                   />
+                ) : view === 'activity' && eventPane ? (
+                  <ActivityEventPane event={eventPane.event} loading={eventPane.loading} error={eventPane.error} />
                 ) : (
                   <p className="quiet centred">
                     Pick a row to see it, and to hand it to an agent.

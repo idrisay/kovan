@@ -146,6 +146,39 @@ query KovanMerged($merged: String!, $first: Int!) {
   }
 }`;
 
+const ONE_PULL_QUERY = `
+query KovanOnePull($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) { ${PULL_FIELDS} }
+  }
+}`;
+
+/**
+ * One pull request as the lists show it, by number: for a notification about
+ * one that is in none of them any more (merged and aged out of the merged
+ * list) — item 144. The same fields and mapping as the queues, so it opens in
+ * the same pane.
+ */
+export async function fetchPullSummary(
+  http: HttpClient, baseUrl: string, token: string, repo: string, number: number, signal?: CancelSignal
+): Promise<PullSummary> {
+  const [owner, name] = repo.split('/');
+  if (!owner || !name || !Number.isInteger(number)) throw new Error(`Not a pull request: ${repo}#${number}`);
+  const response = await http.json<{ data?: { repository?: { pullRequest?: ApiPullNode | null } | null }; errors?: { message: string }[] }>(
+    graphqlEndpoint(baseUrl),
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+      body: { query: ONE_PULL_QUERY, variables: { owner, name, number } },
+      signal
+    }
+  );
+  if (response.errors?.length) throw new Error(response.errors.map((e) => e.message).join('; '));
+  const node = response.data?.repository?.pullRequest;
+  if (!node?.number) throw new Error(`GitHub has no pull request ${repo}#${number}, or your token can't see it.`);
+  return summaryFromApi(node);
+}
+
 /** `sort:` is part of the query because GitHub search has no order argument. */
 const MERGED_SEARCH = 'is:pr is:merged author:@me sort:updated-desc';
 

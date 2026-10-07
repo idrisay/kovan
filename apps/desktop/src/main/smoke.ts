@@ -699,6 +699,11 @@ export async function smokeUi(
     return { item120: await driveItem120(win, process.env['KOVAN_SMOKE_ITEM120']) };
   }
 
+  // Item 144: a notification opens in Kovan, never the browser by itself.
+  if (process.env['KOVAN_SMOKE_ITEM144'] && mode === 'seeded') {
+    return { item144: await driveItem144(win, process.env['KOVAN_SMOKE_ITEM144']) };
+  }
+
   // Item 143: adding a reviewer, testing it, and picking it on the Review button.
   if (process.env['KOVAN_SMOKE_ITEM143'] && mode === 'seeded') {
     return { item143: await driveItem143(win, process.env['KOVAN_SMOKE_ITEM143']) };
@@ -4493,6 +4498,53 @@ async function driveItem124(win: BrowserWindow, prefix: string): Promise<Record<
   report['offAgainButtons'] = await headerButtons();
   report['cardsWhenOff'] = await cards();
   report['saved'] = await read(win, `window.kovan.settings().then((s) => ({ summarize: s['buttons.summarize'], review: s['buttons.review'], condense: s['buttons.condense'] }))`);
+  return report;
+}
+
+async function driveItem144(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(1_000);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="activity"]')`, 15_000);
+  // Count what would leave for the browser: nothing should.
+  await read(win, `(() => { window.__external = []; const open = window.kovan.openExternal; window.kovan.openExternal = (url) => { window.__external.push(url); }; return true; })()`).catch(() => undefined);
+  const now = Date.now();
+  const merged = {
+    id: 'approved:acme/acme-backend#861:1', kind: 'approved', at: now, subject: 'acme/acme-backend#861', label: 'acme-backend #861',
+    title: 'bug/ACME-2453 QA | Parent performance page', who: 'alice-dev', url: 'https://github.com/acme/acme-backend/pull/861', read: false
+  };
+  const ticket = {
+    id: 'mentioned:ACME-2453:1', kind: 'mentioned', at: now - 60_000, subject: 'ACME-2453', label: 'ACME-2453',
+    title: 'QA | Parent performance page for v3', who: 'Natalija P', excerpt: '@Idris Ay is this ready for QA?',
+    url: 'https://example.invalid/browse/ACME-2453', read: false
+  };
+  win.webContents.send('kovan:activity', [merged, ticket]);
+  await read(win, `document.querySelector('.rail-item[data-view="activity"]')?.click()`);
+  await until(win, `document.querySelectorAll('.activity-row').length >= 2`, 5_000);
+  const report: Record<string, unknown> = {};
+
+  await read(win, `Array.from(document.querySelectorAll('.activity-row')).find((r) => r.innerText.includes('#861')).click()`);
+  await until(win, `document.querySelector('.detail-head h2, .detail h2')?.textContent?.includes('Fixture pull request')`, 8_000).catch(() => undefined);
+  report['pullOpened'] = await read(win, `document.querySelector('.detail-head h2')?.textContent ?? document.querySelector('.activity-event-pane h2')?.textContent ?? null`);
+  report['pullRowRead'] = await read(win, `Array.from(document.querySelectorAll('.activity-row')).find((r) => r.innerText.includes('#861'))?.classList.contains('read') ?? 'row gone (inbox reloaded from main)'`);
+  // Marking read reloads the inbox from main, which never had these: send them again.
+  win.webContents.send('kovan:activity', [{ ...merged, read: true }, ticket]);
+  await pause(400);
+  report['view'] = await read(win, `document.querySelector('.rail-item.active')?.getAttribute('data-view')`);
+  await snap('pull');
+
+  await read(win, `Array.from(document.querySelectorAll('.activity-row')).find((r) => r.querySelector('.row-num')?.textContent === 'ACME-2453').click()`);
+  await pause(1_500);
+  report['ticketOpened'] = await read(win, `document.querySelector('.detail-head h2')?.textContent ?? null`);
+  await snap('ticket');
+  report['openedInBrowser'] = await read(win, `window.__external ?? 'not patched'`);
   return report;
 }
 
