@@ -32,6 +32,10 @@ export interface ReviewTool {
   model?: string;
   /** Commands only: the environment variable the model goes in. */
   modelEnv?: string;
+  /** Commands only: the flag the model goes behind (`-m`, `--model`), instead of a variable. */
+  modelFlag?: string;
+  /** Commands only: the prompt on stdin (the default), or as a file path argument. */
+  promptAs?: 'stdin' | 'file';
   timeoutMinutes: number;
   /** The last Test: whether it passed, when, and what failed. */
   test?: { ok: boolean; at: string; failed?: string };
@@ -66,6 +70,11 @@ export function isEnvName(name: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
 }
 
+/** A flag, and only a flag: `-m`, `--model`. Never a value that could carry anything else. */
+export function isFlagName(flag: string): boolean {
+  return /^-{1,2}[A-Za-z][A-Za-z0-9-]*$/.test(flag);
+}
+
 /**
  * The settings value, made safe to use: external data that an older app or a
  * hand edit may have broken. `nv-review` is always there, first, and its
@@ -91,6 +100,8 @@ export function normaliseReviewTools(stored: unknown, nvModel: string): ReviewTo
       family,
       model: typeof t.model === 'string' && t.model.trim() ? t.model.trim() : undefined,
       modelEnv: kind === 'command' && typeof t.modelEnv === 'string' && isEnvName(t.modelEnv) ? t.modelEnv : undefined,
+      modelFlag: kind === 'command' && typeof t.modelFlag === 'string' && isFlagName(t.modelFlag) ? t.modelFlag : undefined,
+      promptAs: kind === 'command' && t.promptAs === 'file' ? 'file' : undefined,
       timeoutMinutes: Number(t.timeoutMinutes) >= 1 ? Math.min(120, Math.round(Number(t.timeoutMinutes))) : REVIEW_TOOL_DEFAULT_MINUTES,
       test: t.test && typeof t.test.ok === 'boolean' && typeof t.test.at === 'string' ? t.test : undefined
     });
@@ -177,14 +188,74 @@ export function agentReviewArgs(family: AgentFamily, model: string | undefined, 
   ];
 }
 
+/**
+ * A command's arguments: the model behind its flag when it takes one that
+ * way, then the prompt file when it wants a path rather than stdin.
+ */
+export function commandReviewArgs(tool: Pick<ReviewTool, 'model' | 'modelFlag' | 'promptAs'>, promptFile: string): string[] {
+  return [
+    ...(tool.modelFlag && tool.model ? [tool.modelFlag, tool.model] : []),
+    ...(tool.promptAs === 'file' ? [promptFile] : [])
+  ];
+}
+
 /** The line a form shows, so nothing about how a reviewer runs is hidden. */
-export function reviewToolCommandLine(tool: Pick<ReviewTool, 'kind' | 'command' | 'family' | 'model' | 'modelEnv'>): string {
+export function reviewToolCommandLine(
+  tool: Pick<ReviewTool, 'kind' | 'command' | 'family' | 'model' | 'modelEnv' | 'modelFlag' | 'promptAs'>
+): string {
   if (tool.kind === 'agent' && tool.family) {
     const args = agentReviewArgs(tool.family, tool.model, '<answer file>').map((a) => (a.includes(' ') ? `'${a}'` : a));
     return `${tool.command} ${args.join(' ')} < prompt`;
   }
-  const env = tool.modelEnv && tool.model ? `${tool.modelEnv}=${tool.model} ` : '';
-  return `${env}${tool.command} < prompt`;
+  const env = tool.modelEnv && !tool.modelFlag && tool.model ? `${tool.modelEnv}=${tool.model} ` : '';
+  const args = commandReviewArgs(tool, 'prompt.md');
+  return `${env}${[tool.command, ...args].join(' ')}${tool.promptAs === 'file' ? '' : ' < prompt'}`;
+}
+
+/** What a command's `--help` says about how to call it, for the Add form to fill in. */
+export interface CommandHelp {
+  modelFlag?: string;
+  modelEnv?: string;
+  promptAs?: 'stdin' | 'file';
+  /** Models its examples pass: `@cf/openai/gpt-oss-120b`. */
+  models: string[];
+  /** Key or token files it says it reads: `~/.config/cloudflare/key`. */
+  keyFiles: string[];
+}
+
+/**
+ * Reads a review command's `--help`. A guess, shown as one and editable: it
+ * only fills in the form. Prefers a model flag over a variable, since a flag
+ * named in the usage line is how the command is meant to be called.
+ */
+export function parseCommandHelp(help: string): CommandHelp {
+  const text = help.slice(0, 20_000);
+  let modelFlag: string | undefined;
+  if (/(^|[\s\[,(])--model\b/m.test(text)) modelFlag = '--model';
+  else if (/(^|[\s\[,(])-m\b[^\n]*model/im.test(text)) modelFlag = '-m';
+  const modelEnv = /\b([A-Z][A-Z0-9]*_MODEL(?:_ID)?)\b/.exec(text)?.[1];
+  const promptAs: CommandHelp['promptAs'] = /\bstdin\b|<\s*prompt/i.test(text)
+    ? 'stdin'
+    : /\bprompt[_-]?file\b|\bprompt\.(txt|md)\b/i.test(text) ? 'file' : undefined;
+  const models = [...new Set(
+    [...text.matchAll(/(?:^|\s)(?:-m|--model)[ =]([^\s<>|'"]+)/gm)]
+      .map((m) => m[1]!.replace(/[,;.]+$/, ''))
+      .filter((m) => m && !/^[A-Z_]+$/.test(m) && !m.startsWith('-'))
+  )];
+  const keyFiles = [...new Set(
+    [...text.matchAll(/(~\/[\w.\/-]+)/g)]
+      .map((m) => m[1]!.replace(/[.,;:]+$/, ''))
+      .filter((p) => !p.endsWith('/') && /(^|[\/._-])(key|token|secret|credentials?|api[_-]?key)([._-]|$)/i.test(p.split('/').pop() ?? ''))
+  )];
+  return { modelFlag, modelEnv: modelFlag ? undefined : modelEnv, promptAs, models, keyFiles };
+}
+
+/**
+ * A review without the one line some scripts print first to say which model
+ * answered (`--- @cf/zai-org/glm-4.7-flash`). A rule (`---` alone) stays.
+ */
+export function stripReviewHeader(text: string): string {
+  return text.replace(/^---[ \t]+\S[^\n]*\n+/, '');
 }
 
 // --- Test ---------------------------------------------------------------------------

@@ -191,6 +191,14 @@ export interface KovanApi {
   reviewToolCandidates(): Promise<{ command: string; kind: 'agent' | 'command'; family?: AgentFamily; how: string }[]>;
   /** Whether the shell can find a command now: 'function', 'command', 'none'… */
   reviewToolCheck(command: string): Promise<string>;
+  /** Whether the shell finds it, and what its --help says: model flag or variable, stdin or file, key files. */
+  reviewToolSetup(command: string): Promise<{
+    found: string;
+    help?: { modelFlag?: string; modelEnv?: string; promptAs?: 'stdin' | 'file'; models: string[]; keyFiles: string[] };
+    keys: { path: string; exists: boolean }[];
+  }>;
+  /** Saves a key where the command's help says it reads it, readable by you only. Never read back. */
+  reviewToolSaveKey(file: string, value: string): Promise<{ ok: boolean; error?: string }>;
   /** Runs the planted-bug test pull request through it. */
   reviewToolTest(tool: Partial<ReviewTool>): Promise<{ ok: boolean; checks: { label: string; ok: boolean; note?: string }[] }>;
   /** The clipboard's image saved as a PNG; '' when it holds none. */

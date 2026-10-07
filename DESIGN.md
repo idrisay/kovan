@@ -124,7 +124,11 @@ of them get `pullReviewPrompt` and may end with a VERDICT line; Kovan keeps
 the timeout, saving, and posting only after you confirm. The button stores
 one string: `<model> (<reviewer id>)`, the format nv-review always used.
 Every reviewer has a Test: a made-up PR with one planted bug, which says
-which step failed. nv-review is always the first row and can't be removed.
+which step failed. Adding a command takes a click: Kovan lists `*-review`
+commands on your PATH and in your shell, reads the picked one's `--help` to
+fill in how it takes the model (flag or variable) and the prompt (stdin or a
+file), and offers to save a key file its help names that is missing (under a
+dot-folder in your home, mode 600, never read back). nv-review is always the first row and can't be removed.
 "Review in an agent" (a full session in a terminal) is separate and stays.
 
 ### Surfaces and containers

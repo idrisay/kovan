@@ -4547,19 +4547,28 @@ async function driveItem143(win: BrowserWindow, prefix: string): Promise<Record<
   await read(win, `${button('Save reviewer')}?.click()`);
   await until(win, `document.querySelectorAll('.reviewer-row').length === 2`, 5_000);
 
-  // Add a command, check that the shell finds it, save without testing.
+  // Add a command the way you would: pick cf-review from what was found; its
+  // --help fills the form in and names the key file it still needs.
   await read(win, `${button('+ Add reviewer')}?.click()`);
   await until(win, `document.querySelector('.reviewer-kind')`, 5_000);
   await read(win, `Array.from(document.querySelectorAll('.reviewer-kind')).find((b) => b.textContent.startsWith('Command'))?.click()`);
-  await pause(300);
-  await type('.reviewer-form input[placeholder="gemini-review"]', 'gemini-review');
-  await type('.reviewer-form input[list="reviewer-models"]', 'gemini-3-pro');
-  await type('.reviewer-form input[placeholder="REVIEW_MODEL"]', 'GEMINI_MODEL');
-  await until(win, `document.querySelector('.reviewer-form .settings-note.ok')`, 5_000).catch(() => undefined);
-  report['commandFound'] = await read(win, `document.querySelector('.reviewer-form .settings-note.ok, .reviewer-form .settings-note.error')?.textContent`);
+  await until(win, `Array.from(document.querySelectorAll('.reviewer-found .checkbox-row')).some((r) => r.innerText.startsWith('cf-review'))`, 5_000);
+  report['commandsFound'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-found .checkbox-row')).map((r) => r.innerText.trim())`);
+  await read(win, `Array.from(document.querySelectorAll('.reviewer-found .checkbox-row')).find((r) => r.innerText.startsWith('cf-review'))?.querySelector('input').click()`);
+  await until(win, `document.querySelector('.reviewer-setup')`, 8_000);
+  report['setupNote'] = await read(win, `document.querySelector('.reviewer-setup .settings-note')?.textContent`);
+  report['choices'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-segmented button.on')).map((b) => b.textContent)`);
+  report['keyAsked'] = await read(win, `document.querySelector('.reviewer-key .settings-note')?.textContent`);
+  await read(win, `document.querySelector('.reviewer-form input[list="reviewer-models"]')?.focus()`);
+  report['modelSuggestions'] = await read(win, `Array.from(document.querySelectorAll('#reviewer-models option')).map((o) => o.value)`);
   report['commandLine'] = await read(win, `document.querySelector('.reviewer-cmdline')?.textContent`);
   await read(win, `document.querySelector('.reviewer-form').scrollIntoView({ block: 'start' })`);
   await snap('add-command');
+  await type('.reviewer-key input[type="password"]', 'test-key-not-real');
+  await read(win, `document.querySelector('.reviewer-key button[type="submit"]').click()`);
+  await until(win, `Array.from(document.querySelectorAll('.reviewer-setup .settings-note')).some((p) => p.textContent.includes('Saved to'))`, 5_000);
+  report['keySaved'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-setup .settings-note')).map((p) => p.textContent).pop()`);
+  await snap('key-saved');
   await read(win, `${button('Save reviewer')}?.click()`);
   await until(win, `document.querySelectorAll('.reviewer-row').length === 3`, 5_000);
   report['rowsAfter'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-row')).map((r) => r.innerText.replace(/\\s+/g, ' '))`);

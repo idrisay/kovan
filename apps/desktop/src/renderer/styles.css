@@ -2210,6 +2210,25 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
   font-family: var(--mono); font-size: 11.5px; color: var(--secondary); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .reviewer-buttons { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.settings-note.warn { color: var(--running); }
+/* What Kovan read from a command's --help, and a key it still needs. */
+.reviewer-setup { display: flex; flex-direction: column; gap: 8px; }
+.reviewer-key {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--running) 35%, transparent); background: color-mix(in srgb, var(--running) 6%, transparent);
+}
+.reviewer-key code { font-family: var(--mono); font-size: 11.5px; color: var(--title); }
+.reviewer-key-row { display: flex; gap: 8px; align-items: center; }
+.provider .reviewer-key-row input { flex: 1; min-width: 0; width: auto; font-family: var(--mono); }
+.reviewer-key-row .ghost { flex: none; }
+.reviewer-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.reviewer-choice > span:first-child { color: var(--muted); font-size: 11.5px; min-width: 88px; }
+.reviewer-segmented { display: inline-flex; border: 1px solid var(--hair-strong); border-radius: 7px; overflow: hidden; }
+.reviewer-segmented button { padding: 4px 10px; font-size: 12px; color: var(--meta); background: transparent; border: 0; }
+.reviewer-segmented button + button { border-left: 1px solid var(--hair-strong); }
+.reviewer-segmented button.on { color: var(--title); background: color-mix(in srgb, var(--clay) 14%, transparent); }
+.provider input.reviewer-inline { width: 150px; flex: none; font-family: var(--mono); padding: 4px 8px; }
+.reviewer-fix { grid-column: 1 / -1; margin: 2px 0 0; font-size: 12px; color: var(--running); }
 .reviewer-checks { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
 .reviewer-checks li { display: flex; gap: 8px; align-items: baseline; color: var(--secondary); }
 .reviewer-checks li.ok > span:first-child { color: var(--pass); }

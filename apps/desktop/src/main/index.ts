@@ -715,6 +715,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:review-tool-remove', (_event, id: string) => reviewTools.remove(String(id)));
   ipcMain.handle('kovan:review-tool-candidates', () => reviewTools.candidates());
   ipcMain.handle('kovan:review-tool-check', (_event, command: string) => reviewTools.check(String(command)));
+  ipcMain.handle('kovan:review-tool-setup', (_event, command: string) => reviewTools.setup(String(command)));
+  ipcMain.handle('kovan:review-tool-save-key', (_event, file: string, value: string) => reviewTools.saveKey(String(file), String(value)));
   ipcMain.handle('kovan:review-tool-test', async (_event, tool: Partial<ReviewTool>) => {
     const checked = reviewTools.sanitize(tool ?? {});
     return checked ? reviewTools.test(checked) : { ok: false, checks: [{ label: 'Set up', ok: false, note: 'This reviewer can\'t run: check its command and kind.' }] };

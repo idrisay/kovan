@@ -14,13 +14,13 @@
  */
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { access, chmod, constants, mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import * as path from 'node:path';
 import {
-  AGENT_FAMILY_NAME, REVIEW_TEST_DIFF, REVIEW_TEST_FILE, REVIEW_TEST_SOURCE, agentFamily, agentReviewArgs, foundPlantedBug,
-  isEnvName, normaliseReviewTools, pullReviewPrompt, reviewToolId, splitVerdict,
-  NV_REVIEW_TOOL_ID, type AgentFamily, type QuickPullInput, type ReviewTool
+  AGENT_FAMILY_NAME, REVIEW_TEST_DIFF, REVIEW_TEST_FILE, REVIEW_TEST_SOURCE, agentFamily, agentReviewArgs, commandReviewArgs,
+  foundPlantedBug, isEnvName, isFlagName, normaliseReviewTools, parseCommandHelp, pullReviewPrompt, reviewToolId, splitVerdict,
+  stripReviewHeader, NV_REVIEW_TOOL_ID, type AgentFamily, type CommandHelp, type QuickPullInput, type ReviewTool
 } from '@kovan/core';
 import { isSafeCommandName, loginShell, shellEnvironment, type CommandKind, type Runner } from '@kovan/agent';
 import type { DesktopHost } from './host';
@@ -32,6 +32,22 @@ export interface ReviewCandidate {
   family?: AgentFamily;
   /** "on PATH", "shell function" */
   how: string;
+}
+
+/** What the Add form learns about a command: whether the shell finds it, and what its --help says. */
+export interface CommandSetup {
+  found: CommandKind;
+  /** Undefined when it printed no usable help. */
+  help?: CommandHelp;
+  /** The key files its help names, and whether each exists yet. */
+  keys: { path: string; exists: boolean }[];
+}
+
+/** Key files Kovan may write: under your home, in a dot-folder, named like a key. */
+function keyFilePath(display: string): string | undefined {
+  if (!/^~\/\.[\w.-]+(\/[\w.-]+)+$/.test(display) || display.includes('..')) return undefined;
+  if (!/(^|[._-])(key|token|secret|credentials?|api[_-]?key)([._-]|$)/i.test(display.split('/').pop() ?? '')) return undefined;
+  return path.join(homedir(), display.slice(2));
 }
 
 export interface ReviewTestCheck {
@@ -86,11 +102,15 @@ export class ReviewTools {
     if (kind === 'agent' && !family) return fail(`Kovan can only run Claude Code or Codex as an agent reviewer, and ${command} is neither.`);
     const modelEnv = input.modelEnv?.trim() || undefined;
     if (modelEnv && !isEnvName(modelEnv)) return fail('The variable name may use only letters, digits and _.');
+    const modelFlag = input.modelFlag?.trim() || undefined;
+    if (modelFlag && !isFlagName(modelFlag)) return fail('The model flag should look like -m or --model.');
     const id = input.id && tools.some((t) => t.id === input.id) ? input.id : reviewToolId(command, tools.map((t) => t.id));
     const tool: ReviewTool = {
       id, kind, command, family,
       model: input.model?.trim() || undefined,
-      modelEnv: kind === 'command' ? modelEnv : undefined,
+      modelEnv: kind === 'command' && !modelFlag ? modelEnv : undefined,
+      modelFlag: kind === 'command' ? modelFlag : undefined,
+      promptAs: kind === 'command' && input.promptAs === 'file' ? 'file' : undefined,
       timeoutMinutes: Number(input.timeoutMinutes) >= 1 ? Math.min(120, Math.round(Number(input.timeoutMinutes))) : 20,
       test: input.test
     };
@@ -123,12 +143,99 @@ export class ReviewTools {
           { command: 'or-review', invocation: 'shellFunction' }
         ] as Runner[]
       : await this.runners();
-    return runners
+    const found: ReviewCandidate[] = runners
       .filter((r) => r.command && r.invocation !== 'loginShell' && r.command !== 'opencode' && !added.has(r.command))
       .map((r) => {
         const family = agentFamily(r.command);
         return { command: r.command, kind: family ? 'agent' : 'command', family, how: r.invocation === 'shellFunction' ? 'shell function' : 'on PATH' };
       });
+    // Review scripts the agent list never guessed: anything called *-review
+    // on your PATH or defined in your shell, like ~/.local/bin/cf-review.
+    const seen = new Set([...added, ...found.map((c) => c.command)]);
+    for (const name of SMOKE ? ['cf-review'] : await this.reviewCommandsOnMachine()) {
+      if (!seen.has(name)) {
+        seen.add(name);
+        found.push({ command: name, kind: 'command', how: 'on PATH' });
+      }
+    }
+    return found;
+  }
+
+  private async reviewCommandsOnMachine(): Promise<string[]> {
+    const looksLikeReview = (name: string) => /(^|[-_])review([-_]|$)/.test(name) && isSafeCommandName(name) && !agentFamily(name);
+    const env = await shellEnvironment.environment();
+    const dirs = [...new Set((env['PATH'] ?? '').split(':').filter(Boolean))];
+    const names = new Set<string>();
+    await Promise.all(dirs.map(async (dir) => {
+      const entries = await readdir(dir).catch(() => [] as string[]);
+      await Promise.all(entries.filter(looksLikeReview).map(async (name) => {
+        const info = await stat(path.join(dir, name)).catch(() => undefined);
+        if (info?.isFile() && info.mode & 0o111) names.add(name);
+      }));
+    }));
+    for (const name of await shellEnvironment.definedNames().catch(() => [] as string[])) if (looksLikeReview(name)) names.add(name);
+    return [...names].sort();
+  }
+
+  /**
+   * Whether the shell finds `command`, and what its `--help` says — run with
+   * no input, in an empty folder, for a few seconds at most. Only when you
+   * pick or type a command in the Add form.
+   */
+  async setup(command: string): Promise<CommandSetup> {
+    const found = await this.check(command);
+    if (found === 'none') return { found, keys: [] };
+    let help = '';
+    if (SMOKE) {
+      help = 'usage: cf-review [-m MODELS] [prompt_file]\n  cf-review -m @cf/openai/gpt-oss-120b < prompt.txt\nNeeds an API token saved to\n~/.config/cloudflare/key.\n  prompt_file  file holding the prompt, or - for stdin\n  -m MODELS, --model MODELS';
+    } else {
+      const cwd = await mkdtemp(path.join(tmpdir(), 'kovan-review-help-'));
+      const env = await shellEnvironment.environment();
+      try {
+        help = await new Promise<string>((resolve) => {
+          const child = spawn(loginShell(), ['-i', '-c', `${command} "$@"`, command, '--help'], {
+            cwd, env, stdio: ['ignore', 'pipe', 'pipe']
+          });
+          let out = '';
+          const add = (chunk: Buffer) => { if (out.length < 20_000) out += chunk.toString('utf8'); };
+          child.stdout.on('data', add);
+          child.stderr.on('data', add);
+          const timer = setTimeout(() => child.kill('SIGTERM'), 8_000);
+          child.on('close', () => { clearTimeout(timer); resolve(out); });
+          child.on('error', () => { clearTimeout(timer); resolve(out); });
+        });
+      } finally {
+        await rm(cwd, { recursive: true, force: true });
+      }
+    }
+    const parsed = /usage|option|--help|stdin|model/i.test(help) ? parseCommandHelp(help) : undefined;
+    const keys = await Promise.all((parsed?.keyFiles ?? []).map(async (display) => {
+      const file = keyFilePath(display);
+      const exists = SMOKE ? false : file ? await access(file, constants.R_OK).then(() => true, () => false) : true;
+      return { path: display, exists };
+    }));
+    return { found, help: parsed, keys: keys.filter((k) => keyFilePath(k.path)) };
+  }
+
+  /**
+   * Saves a key a command reads, where its help says it reads it — readable
+   * by you only. The value is written and never sent back to the window.
+   */
+  async saveKey(display: string, value: string): Promise<{ ok: boolean; error?: string }> {
+    const file = keyFilePath(display);
+    const key = value.trim();
+    if (!file) return { ok: false, error: 'Kovan only saves key files in a dot-folder in your home, named like a key.' };
+    if (!key || /\s/.test(key)) return { ok: false, error: 'Paste the key on its own, with no spaces or line breaks.' };
+    if (SMOKE) return { ok: true };
+    try {
+      await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+      await writeFile(file, key, { encoding: 'utf8', mode: 0o600 });
+      await chmod(file, 0o600);
+      this.host.log.info(`review key saved to ${display}`);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   /** Whether your shell can find `command` now — asked fresh, for a function you just wrote. */
@@ -225,15 +332,22 @@ export class ReviewTools {
     return done();
   }
 
-  /** A command: the prompt on stdin, the model in its variable, in an empty folder. */
+  /**
+   * A command, in an empty folder: the prompt on stdin or as a file, the model
+   * behind its flag or in its variable.
+   */
   private async runCommand(tool: ReviewTool, prompt: string, control: ReviewRunControl): Promise<string> {
     const env: Record<string, string> = { ...(await shellEnvironment.environment()) };
-    if (tool.modelEnv && tool.model) env[tool.modelEnv] = tool.model;
+    if (tool.modelEnv && !tool.modelFlag && tool.model) env[tool.modelEnv] = tool.model;
     const cwd = await mkdtemp(path.join(tmpdir(), 'kovan-review-'));
     try {
-      const { out } = await this.spawnTool(tool, [], { cwd, env, stdin: prompt }, control);
-      if (!out.trim() || out.trim() === '(empty response)') throw new Error(`${tool.command} returned nothing.`);
-      return out.trim();
+      const promptFile = path.join(cwd, 'prompt.md');
+      if (tool.promptAs === 'file') await writeFile(promptFile, prompt, 'utf8');
+      const args = commandReviewArgs(tool, promptFile);
+      const { out } = await this.spawnTool(tool, args, { cwd, env, stdin: tool.promptAs === 'file' ? '' : prompt }, control);
+      const answer = stripReviewHeader(out.trim()).trim();
+      if (!answer || answer === '(empty response)') throw new Error(`${tool.command} returned nothing.`);
+      return answer;
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }

@@ -70,3 +70,55 @@ describe('reviewers (item 143)', () => {
     expect(pullReviewPrompt(pull as never, 'diff')).toContain('You have no tools');
   });
 });
+
+describe('command reviewers from their --help (item 143, cf-review)', () => {
+  const CF_HELP = `usage: cf-review [-h] [-m MODELS] [--deep] [-o OUT] [--max-tokens MAX_TOKENS]
+                 [prompt_file]
+
+  cf-review prompt.txt -o review.md          # everyday models (GLM-4.7-Flash first)
+  cf-review -m @cf/openai/gpt-oss-120b < prompt.txt
+
+Needs an API token with "Workers AI: Read" + "Workers AI: Edit" saved to
+~/.config/cloudflare/key. The account id comes from CF_ACCOUNT_ID or
+~/.config/cloudflare/account_id, falling back to the wrangler login's account.
+
+positional arguments:
+  prompt_file           file holding the prompt, or - for stdin
+options:
+  -m MODELS, --model MODELS
+                        override the model list; repeat for a fallback order`;
+
+  it('reads how cf-review takes its model, prompt and key', async () => {
+    const { parseCommandHelp } = await import('../src');
+    expect(parseCommandHelp(CF_HELP)).toEqual({
+      modelFlag: '--model', modelEnv: undefined, promptAs: 'stdin',
+      models: ['@cf/openai/gpt-oss-120b'], keyFiles: ['~/.config/cloudflare/key']
+    });
+  });
+
+  it('finds a model variable when there is no flag', async () => {
+    const { parseCommandHelp } = await import('../src');
+    expect(parseCommandHelp('usage: nv-review < prompt\nModel from NV_MODEL (default moonshotai/kimi-k3).'))
+      .toMatchObject({ modelFlag: undefined, modelEnv: 'NV_MODEL', promptAs: 'stdin' });
+  });
+
+  it('runs a flag-model, file-prompt command as written', async () => {
+    const { commandReviewArgs, reviewToolCommandLine } = await import('../src');
+    const tool = { kind: 'command' as const, command: 'or-review', model: 'x/y', modelFlag: '-m', promptAs: 'file' as const };
+    expect(commandReviewArgs(tool, '/tmp/p.md')).toEqual(['-m', 'x/y', '/tmp/p.md']);
+    expect(reviewToolCommandLine(tool)).toBe('or-review -m x/y prompt.md');
+    expect(reviewToolCommandLine({ ...tool, promptAs: undefined, modelFlag: '--model' })).toBe('or-review --model x/y < prompt');
+  });
+
+  it('refuses a flag that is not just a flag', async () => {
+    const { normaliseReviewTools } = await import('../src');
+    const [, tool] = normaliseReviewTools([{ id: 'x', kind: 'command', command: 'x-review', modelFlag: '-m; rm -rf ~' }], '');
+    expect(tool!.modelFlag).toBeUndefined();
+  });
+
+  it('drops the model header cf-review prints first', async () => {
+    const { stripReviewHeader } = await import('../src');
+    expect(stripReviewHeader('--- @cf/zai-org/glm-4.7-flash (412 neurons)\n\n## Summary\nok')).toBe('## Summary\nok');
+    expect(stripReviewHeader('---\n## Summary')).toBe('---\n## Summary');
+  });
+});
