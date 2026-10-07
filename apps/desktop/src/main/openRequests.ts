@@ -56,17 +56,18 @@ export class OpenRequests {
     try {
       // The pane writes in one go but a watch can fire mid-write: read until it parses.
       let request: OpenRequest | undefined;
+      let stale = false;
       for (let attempt = 0; attempt < 5 && !request; attempt++) {
         const info = await stat(file).catch(() => undefined);
         if (!info) return;
-        if (Date.now() - info.mtimeMs > STALE_MS) break;
+        if (Date.now() - info.mtimeMs > STALE_MS) { stale = true; break; }
         request = parseOpenRequest(await readFile(file, 'utf8').catch(() => ''));
         if (!request) await new Promise((r) => setTimeout(r, 100));
       }
       await rm(file, { force: true });
       const reply: OpenReply = request
         ? await this.handle(request).catch((error: unknown) => ({ ok: false, message: error instanceof Error ? error.message : String(error) }))
-        : { ok: false, message: "Kovan couldn't read that request." };
+        : { ok: false, message: stale ? 'That request is over a minute old, so Kovan left it.' : "Kovan couldn't read that request." };
       const replyFile = file.replace(/\.json$/, '.reply');
       await writeFile(replyFile, JSON.stringify(reply), 'utf8');
       setTimeout(() => { void rm(replyFile, { force: true }); }, STALE_MS);
