@@ -44,7 +44,7 @@ describe('helpers', () => {
       model: 'claude-opus-5-5', effort: 'high', ctxTokens: 402_000, ctxWindow: 1_000_000, ctxPercent: 40,
       session: { percent: 62, resetsAt: new Date(2026, 9, 7, 15, 40).toISOString() },
       weekly: { percent: 31, resetsAt: new Date(2026, 9, 12, 9, 0).toISOString() }
-    }, now)).toBe('Model: Opus 5.5 · Context: 402k/1.0M (40%) · Session: 62%, resets 15:40 · Weekly: 31%, resets Mon')
+    }, now)).toBe('Opus 5.5 · ctx 402k/1M 40% · 5h 62% → 15:40 · wk 31% → Mon')
   })
 })
 
@@ -76,7 +76,7 @@ test('the pane shows the goal, the plan with Now and Next, and empty changes', a
   expect(await ui.find({ type: 'Text', text: /● Fix the type error/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /next/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /No files changed yet/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Model: Opus 5.5 · Context: 402k\/1.0M \(40%\)/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Opus 5.5$/ })).toBeDefined()
   await ui.unmount()
 })
 

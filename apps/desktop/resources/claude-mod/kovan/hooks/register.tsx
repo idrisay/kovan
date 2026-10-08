@@ -407,36 +407,43 @@ export function resets(iso: string | undefined, now: number): string {
   return DAYS[at.getDay()] ?? ''
 }
 
-/** One part of the usage line: a dim label, and its value in its own color (item 151). */
+/** One part of the usage line: a dim label ('' for none), and its value in its own color (item 151). */
 export type UsagePart = { label: string; value: string; color: string }
 
+/** 1.0M as 1M: the short line has no room for a zero. */
+function short(n: number): string {
+  return tokens(n).replace(/\.0(?=[kM]$)/, '')
+}
+
 /**
- * The usage line's parts, each value in the color Claude's own status line
- * gives it: model blue, context green, session amber, weekly purple. Theme
- * keys, so a light theme gets its own shades.
+ * The usage line's parts, short enough for one row of the pane (item 153):
+ * `Opus 5.5 · ctx 97k/1M 10% · 5h 19% → 17:00 · wk 40% → Mon`. Each value
+ * in the color Claude's own status line gives it: model blue, context green,
+ * session amber, weekly purple. Theme keys, so a light theme gets its own
+ * shades.
  */
 export function usageParts(u: Usage, now: number): UsagePart[] {
   const parts: UsagePart[] = []
-  if (u.model) parts.push({ label: 'Model', value: modelName(u.model), color: 'suggestion' })
+  if (u.model) parts.push({ label: '', value: modelName(u.model), color: 'suggestion' })
   if (u.ctxWindow) {
     parts.push({
-      label: 'Context',
+      label: 'ctx',
       value: u.ctxTokens !== undefined
-        ? `${tokens(u.ctxTokens)}/${tokens(u.ctxWindow)} (${u.ctxPercent ?? Math.round((u.ctxTokens / u.ctxWindow) * 100)}%)`
-        : `0/${tokens(u.ctxWindow)}`,
+        ? `${short(u.ctxTokens)}/${short(u.ctxWindow)} ${u.ctxPercent ?? Math.round((u.ctxTokens / u.ctxWindow) * 100)}%`
+        : `0/${short(u.ctxWindow)}`,
       color: 'success'
     })
   }
-  for (const [label, w, color] of [['Session', u.session, 'warning'], ['Weekly', u.weekly, 'merged']] as const) {
+  for (const [label, w, color] of [['5h', u.session, 'warning'], ['wk', u.weekly, 'merged']] as const) {
     if (!w) continue
     const when = resets(w.resetsAt, now)
-    parts.push({ label, value: `${Math.round(w.percent)}%${when ? `, resets ${when}` : ''}`, color })
+    parts.push({ label, value: `${Math.round(w.percent)}%${when ? ` → ${when}` : ''}`, color })
   }
   return parts
 }
 
 export function usageLine(u: Usage, now: number): string {
-  return usageParts(u, now).map((p) => `${p.label}: ${p.value}`).join(' · ')
+  return usageParts(u, now).map((p) => `${p.label ? `${p.label} ` : ''}${p.value}`).join(' · ')
 }
 
 async function refreshUsage($: $, effort?: string) {
@@ -621,7 +628,7 @@ export const register: Register = (on) => {
 
         <Text wrap="truncate-end">
           {usageParts(u, now).map((p, i) => (
-            <Text><Text dimColor>{`${i ? ' · ' : ''}${p.label}: `}</Text><Text color={p.color}>{p.value}</Text></Text>
+            <Text><Text dimColor>{`${i ? ' · ' : ''}${p.label ? `${p.label} ` : ''}`}</Text><Text color={p.color}>{p.value}</Text></Text>
           ))}
         </Text>
       </Box>

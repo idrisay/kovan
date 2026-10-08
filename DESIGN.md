@@ -396,7 +396,7 @@ pane beside Claude, from top to bottom:
 - Changes: each file the session edited, +/- against HEAD. A click opens its diff under it, cut at a hunk past 400 lines.
   A session over several folders (item 152) lists them under one heading each, main first, with "no changes" for a folder untouched so far: Kovan hands the folders in `KOVAN_FOLDERS`. Each file is counted, diffed and opened in Kovan against its own repository (`git rev-parse` in its folder, asked once per folder). A file in no repository goes under a dim "Other files", `~` for home, without counts or Open in Kovan; a click shows the file as it is. Long paths are cut from the front so the name shows.
 - Checks: the tests, typechecks and lints the agent ran, from its own Bash calls. Run checks runs the project's `typecheck`, `test` and `lint` scripts, only when pressed.
-- One small line on the pane's last row when docked: `Model · Context · Session · Weekly` with reset times. Labels dim, values in Claude's status-line colors (item 151): model `suggestion`, context `success`, session `warning`, weekly `merged`.
+- One small line on the pane's last row when docked: `Opus 5.5 · ctx 97k/1M 10% · 5h 19% → 17:00 · wk 40% → Mon` (item 153: short labels, since a terminal has one font size). Labels dim, values in Claude's status-line colors (item 151): model `suggestion`, context `success`, session `warning`, weekly `merged`.
 
 Under an open diff, **Open in Kovan** (item 148) shows that diff in the
 Workspace view and brings the window forward. The pane can't reach the
