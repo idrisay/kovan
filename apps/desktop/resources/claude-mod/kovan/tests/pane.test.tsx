@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { changeGroups, checkName, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
+import { changeGroups, checkName, pullKey, pullLinks, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
 
 /** `git rev-parse --show-toplevel --show-prefix` for a folder under /repo. */
 function gitPlace(e: unknown): string {
@@ -18,12 +18,22 @@ describe('helpers', () => {
     expect(checkName('pytest -q')).toBe('Tests')
     expect(checkName('npx eslint src')).toBe('Lint')
     expect(checkName('git status')).toBeUndefined()
+    expect(checkName('npm run type-check && npx eslint . --ext .ts')).toBe('Typecheck')
+    expect(checkName('cd web && NODE_ENV=test pnpm test:unit')).toBe('Tests')
+    expect(checkName('python -m pytest -q')).toBe('Tests')
+    expect(checkName('cargo clippy')).toBe('Lint')
+    expect(checkName('php artisan test --filter Lesson')).toBe('Tests')
+    expect(checkName('gh pr view 12 --json body | grep -i test')).toBeUndefined()
+    expect(checkName('echo "lint likely test"')).toBeUndefined()
+    expect(checkName('grep -rn "typecheck" package.json')).toBeUndefined()
+    expect(checkName('cat tests/a.test.ts')).toBeUndefined()
   })
 
   test('summarizes a run by its telling line', async () => {
     expect(summarize('...\n Tests  14 passed (14)\n Duration 2s\n')).toBe('Tests  14 passed (14)')
     expect(summarize('src/a.ts(42,3): error TS2339: nope\n')).toBe('src/a.ts(42,3): error TS2339: nope')
-    expect(summarize('just this\n')).toBe('just this')
+    expect(summarize('just this\n')).toBe('')
+    expect(summarize('(node:1) Warning: something\n(Use `node --trace-warnings ...`)\n')).toBe('')
   })
 
   test('cuts a long diff where a hunk starts', async () => {
@@ -251,5 +261,40 @@ test('a session over two repositories counts each file in its own, and a file in
   expect(code?.props['format']).toBe('source')
   expect(code?.props['source']).toBe('remember this')
   expect(await ui.find({ key: 'kovan:/Users/me/.claude/notes.md' })).toBeUndefined()
+  await ui.unmount()
+})
+
+describe('pull requests in the chat', () => {
+  test('finds each linked pull request once, in order', async () => {
+    const text = 'See https://github.com/acme/acme-frontend/pull/2789 and https://github.com/acme/acme-backend/pull/868/files, again https://github.com/acme/acme-frontend/pull/2789#discussion. Not https://github.com/acme/acme-frontend/issues/5.'
+    expect(pullLinks(text).map(pullKey)).toEqual(['acme-frontend#2789', 'acme-backend#868'])
+    expect(pullLinks(text)[1]?.url).toBe('https://github.com/acme/acme-backend/pull/868')
+  })
+})
+
+test("a pull request linked in a command's output shows with its title and state, the goal's own left out", async ($, on) => {
+  mock.env(on, { KOVAN_GOAL_KEY: 'acme-backend#868' })
+  on('clock.now', () => ({ value: 1_000 }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('fs.read', () => { throw new Error('no such file') })
+  on('process.run', ($, e) => {
+    const argv = (e as unknown as { argv: string[] }).argv
+    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (argv[0] === 'gh' && argv[3] === '2789') return out(JSON.stringify({ title: 'feat(qa): lesson+exercise smoke test', state: 'OPEN', isDraft: false }))
+    return out('', 1)
+  })
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'https://github.com/acme/acme-frontend/pull/2789\nhttps://github.com/acme/acme-backend/pull/868\n', stderr: '', interrupted: false } as never }))
+
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --fill' } as never)
+  // The title is asked of gh in the background, not in the tool call's way.
+  for (let i = 0; i < 50; i++) await Promise.resolve()
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^PULL REQUESTS ─+ 1$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^acme-frontend#2789$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ open$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^feat\(qa\): lesson\+exercise smoke test$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /acme-backend#868/ })).toBeUndefined()
   await ui.unmount()
 })

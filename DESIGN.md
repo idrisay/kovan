@@ -392,10 +392,11 @@ Claude Code mod from `resources/claude-mod/kovan` (`--plugin-dir`, through
 `modArgs` in core and `main/claudeMod.ts`; other agents get nothing). It is a
 pane beside Claude, from top to bottom:
 - Goal (`KOVAN_GOAL` / `KOVAN_GOAL_KEY`, from `modGoal`: the ticket over the PR).
+- Pull requests (item 154): each github.com pull request linked in the chat (a prompt, Claude's answer, a command's output such as `gh pr create`), newest first, at most 6, the goal's own left out. `repo#number`, its state (open green, merged purple, else dim) and its title, asked of `gh pr view` once per pull request in the background. The section shows only when there is one.
 - Claude's own plan, from TodoWrite or TaskCreate/TaskUpdate: ✓ done, the step in progress as Now with its minutes, the one after it as Next.
 - Changes: each file the session edited, +/- against HEAD. A click opens its diff under it, cut at a hunk past 400 lines.
   A session over several folders (item 152) lists them under one heading each, main first, with "no changes" for a folder untouched so far: Kovan hands the folders in `KOVAN_FOLDERS`. Each file is counted, diffed and opened in Kovan against its own repository (`git rev-parse` in its folder, asked once per folder). A file in no repository goes under a dim "Other files", `~` for home, without counts or Open in Kovan; a click shows the file as it is. Long paths are cut from the front so the name shows.
-- Checks: the tests, typechecks and lints the agent ran, from its own Bash calls. Run checks runs the project's `typecheck`, `test` and `lint` scripts, only when pressed.
+- Checks: the tests, typechecks and lints the agent ran, from its own Bash calls, known by the program each step runs (`npm run type-check`, `npx eslint`, `pytest`, `cargo test`), never by a word in its arguments. The detail is the output's line that counts passes or failures, else just passed or failed; it is cut before the check's name is. Run checks runs the project's `typecheck`, `test` and `lint` scripts, only when pressed.
 - One small line on the pane's last row when docked: `Opus 5.5 · ctx 97k/1M 10% · 5h 19% → 17:00 · wk 40% → Mon` (item 153: short labels, since a terminal has one font size). Labels dim, values in Claude's status-line colors (item 151): model `suggestion`, context `success`, session `warning`, weekly `merged`.
 
 Under an open diff, **Open in Kovan** (item 148) shows that diff in the

@@ -19,7 +19,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { Check, DiffView, FileChange, PlanStep, Usage } from '../types'
+import type { Check, DiffView, FileChange, PlanStep, PullLink, Usage } from '../types'
 
 const PANE = 'kovan'
 const plan = atom({ plugin: 'kovan', key: 'plan' } as const, [])
@@ -30,6 +30,7 @@ const checks = atom({ plugin: 'kovan', key: 'checks' } as const, [])
 const usage = atom({ plugin: 'kovan', key: 'usage' } as const, { model: '', effort: '', ctxWindow: 0 })
 const scripts = atom({ plugin: 'kovan', key: 'scripts' } as const, false)
 const folders = atom({ plugin: 'kovan', key: 'folders' } as const, [])
+const pulls = atom({ plugin: 'kovan', key: 'pulls' } as const, [])
 
 type $ = EngineInterface
 
@@ -39,21 +40,62 @@ const DIFF_LINES = 400
 
 // ── what the agent does ────────────────────────────────────────────────────
 
-/** The check a shell command is, by what it runs; undefined for anything else. */
-export function checkName(command: string): string | undefined {
-  const c = command.toLowerCase()
-  if (/\b(tsc|typecheck|type-check|mypy|pyright)\b/.test(c)) return 'Typecheck'
-  if (/\b(lint|eslint|ruff|clippy|golangci-lint)\b/.test(c)) return 'Lint'
-  if (/\b(test|tests|vitest|jest|pytest|mocha|rspec|phpunit)\b/.test(c)) return 'Tests'
+const TYPECHECK = new Set(['tsc', 'vue-tsc', 'mypy', 'pyright', 'phpstan', 'psalm'])
+const LINT = new Set(['eslint', 'ruff', 'biome', 'stylelint', 'golangci-lint', 'phpcs', 'rubocop', 'prettier', 'flake8', 'pylint'])
+const TESTS = new Set(['vitest', 'jest', 'pytest', 'mocha', 'rspec', 'phpunit', 'pest', 'playwright', 'cypress', 'ava', 'tap'])
+
+/** A script's kind by its name: `type-check`, `lint:fix`, `test:unit`, `e2e`. */
+function scriptKind(name: string): string | undefined {
+  if (/^(type-?check|tsc|types)\b/i.test(name)) return 'Typecheck'
+  if (/^lint\b/i.test(name)) return 'Lint'
+  if (/^(test|tests|spec|e2e)\b/i.test(name)) return 'Tests'
   return undefined
 }
 
-/** One line that says how a check went: a summary line if the output has one, else its last line. */
+/**
+ * The check a shell command is, by the program each of its steps runs;
+ * undefined for anything else. Only what is run counts, never a word in its
+ * arguments: `gh pr view 12 | grep test` and `echo lint` are not checks
+ * (item 154 fix: a pane once called a GitHub query "Tests").
+ */
+export function checkName(command: string): string | undefined {
+  for (const step of command.split(/&&|\|\||;|\||\n/)) {
+    let words = step.trim().split(/\s+/).filter(Boolean)
+    // What runs a program rather than being one.
+    while (words.length && (/^\w+=/.test(words[0]!) || ['env', 'time', 'exec', 'command', 'nice'].includes(words[0]!))) words = words.slice(1)
+    if (words[0] === 'timeout') words = words.slice(2)
+    if (words[0] === 'bundle' && words[1] === 'exec') words = words.slice(2)
+    if (/^python3?$/.test(words[0] ?? '') && words[1] === '-m') words = words.slice(2)
+    const program = (words[0] ?? '').split('/').pop() ?? ''
+    const args = words.slice(1).filter((w) => !w.startsWith('-'))
+    let kind: string | undefined
+    if (['npm', 'pnpm', 'yarn', 'bun'].includes(program)) {
+      const script = args[0] === 'run' || args[0] === 'run-script' ? args[1] : args[0]
+      kind = script ? scriptKind(script) : undefined
+    } else if (['npx', 'pnpx', 'bunx'].includes(program) || (program === 'pnpm' && args[0] === 'exec')) {
+      const tool = (args[0] ?? '').split('@')[0] ?? ''
+      kind = TYPECHECK.has(tool) ? 'Typecheck' : LINT.has(tool) ? 'Lint' : TESTS.has(tool) ? 'Tests' : undefined
+    } else if (TYPECHECK.has(program)) kind = 'Typecheck'
+    else if (LINT.has(program)) kind = 'Lint'
+    else if (TESTS.has(program)) kind = 'Tests'
+    else if (program === 'cargo' || program === 'go') kind = args[0] === 'test' ? 'Tests' : args[0] === 'clippy' || args[0] === 'vet' ? 'Lint' : undefined
+    else if (program === 'composer' || program === 'make' || program === 'just') kind = args[0] ? scriptKind(args[0]) : undefined
+    else if (program === 'php' && args[0] === 'artisan' && args[1] === 'test') kind = 'Tests'
+    if (kind) return kind
+  }
+  return undefined
+}
+
+/**
+ * One line that says how a check went: the line in its output that counts
+ * passes, failures or errors; '' when there is none, and the pane says
+ * passed or failed by itself rather than show whatever came last.
+ */
 export function summarize(output: string): string {
   const lines = output.split('\n').map((l) => l.replace(/\u001b\[[0-9;]*m/g, '').trim()).filter(Boolean)
   const telling = [...lines].reverse().find((l) =>
-    /\b\d+ (passed|failed|errors?|warnings?|problems?)\b|^Tests?:|error TS\d+|^FAIL\b|^PASS\b/i.test(l))
-  const line = telling ?? lines[lines.length - 1] ?? ''
+    /\b\d+ (passed|failed|errors?|warnings?|problems?|tests?)\b|^Tests?:|error TS\d+|^FAIL\b|^PASS\b|^Found \d+ errors?|^All checks passed|^No issues found|^Success:/i.test(l))
+  const line = telling ?? ''
   return line.length > 140 ? `${line.slice(0, 139)}…` : line
 }
 
@@ -116,6 +158,9 @@ async function observe($: $, tool: string, input: Record<string, unknown>, ran: 
 
   if (tool === 'Bash') {
     const command = String(input['command'] ?? '')
+    const said = ran.result as { stdout?: string } | undefined
+    // `gh pr create` prints the new one's link.
+    void notePulls($, `${said?.stdout ?? ''}`).catch(() => undefined)
     const name = checkName(command)
     if (!name || input['run_in_background']) return
     const r = ran.result as { stdout?: string; stderr?: string; interrupted?: boolean } | undefined
@@ -379,6 +424,64 @@ async function hasScripts($: $): Promise<boolean> {
   }
 }
 
+// ── pull requests in the chat (item 154) ──────────────────────────────────
+
+/** The pull requests a text links to, each once, in the order they first appear. */
+export function pullLinks(text: string): { url: string; repo: string; number: number }[] {
+  const found: { url: string; repo: string; number: number }[] = []
+  for (const m of text.matchAll(/https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/g)) {
+    const repo = `${m[1]}/${m[2]}`
+    const number = Number(m[3])
+    if (!found.some((p) => p.repo === repo && p.number === number)) {
+      found.push({ url: `https://github.com/${repo}/pull/${number}`, repo, number })
+    }
+  }
+  return found
+}
+
+/** How the pane names one: `acme-frontend#2789`, the way the goal does. */
+export function pullKey(p: { repo: string; number: number }): string {
+  return `${p.repo.slice(p.repo.indexOf('/') + 1)}#${p.number}`
+}
+
+/** Most recent first, and no more than this: the pane is for the few in play. */
+const PULLS_KEPT = 6
+
+/**
+ * Notes the pull requests a text links to, newest first, and asks `gh` for
+ * the title and state of each new one: one small call per pull request, the
+ * first time it is seen, never while drawing.
+ */
+async function notePulls($: $, text: string) {
+  const links = pullLinks(text)
+  if (links.length === 0) return
+  const goalKey = await $.env.get('KOVAN_GOAL_KEY')
+  const fresh = links.filter((l) => pullKey(l) !== goalKey)
+  if (fresh.length === 0) return
+  let added: typeof fresh = []
+  await update($, pulls, (list) => {
+    added = fresh.filter((l) => !list.some((p) => p.repo === l.repo && p.number === l.number))
+    const moved = fresh.map((l) => list.find((p) => p.repo === l.repo && p.number === l.number) ?? l)
+    const rest = list.filter((p) => !fresh.some((l) => l.repo === p.repo && l.number === p.number))
+    return [...moved, ...rest].slice(0, PULLS_KEPT)
+  })
+  for (const link of added) void describePull($, link).catch(() => undefined)
+}
+
+async function describePull($: $, link: { repo: string; number: number }) {
+  const r = await $.process.run(
+    ['gh', 'pr', 'view', String(link.number), '--repo', link.repo, '--json', 'title,state,isDraft'],
+    { cwd: await $.session.cwd(), timeoutMs: 15_000 }
+  )
+  if (r.exitCode !== 0) return
+  const got = JSON.parse(r.stdout) as { title?: string; state?: string; isDraft?: boolean }
+  const state: PullLink['state'] = got.isDraft && got.state === 'OPEN' ? 'draft'
+    : got.state === 'MERGED' ? 'merged' : got.state === 'CLOSED' ? 'closed' : got.state === 'OPEN' ? 'open' : undefined
+  await update($, pulls, (list) => list.map((p) => (p.repo === link.repo && p.number === link.number
+    ? { ...p, ...(got.title ? { title: got.title } : {}), ...(state ? { state } : {}) }
+    : p)))
+}
+
 // ── usage ──────────────────────────────────────────────────────────────────
 
 export function modelName(id: string): string {
@@ -484,6 +587,7 @@ export const register: Register = (on) => {
   // prompt only: a pane closed by hand stays closed until /kovan.
   let asked = false
   on('prompt.submit', async ($, e, next) => {
+    void notePulls($, e.text).catch(() => undefined)
     if (!asked) {
       asked = true
       void $.ui.open({ id: PANE, title: 'Kovan' }).catch(() => undefined)
@@ -515,6 +619,7 @@ export const register: Register = (on) => {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     void refreshUsage($).catch(() => undefined)
+    void notePulls($, done.text ?? '').catch(() => undefined)
     return done
   })
 
@@ -526,6 +631,7 @@ export const register: Register = (on) => {
       read($, plan), read($, files), read($, open), read($, diff), read($, checks), read($, usage),
       $.clock.now(), read($, scripts)
     ])
+    const linked = await read($, pulls)
     const groups = changeGroups(changed, await read($, folders))
 
     const head = (label: string, right = '') => {
@@ -573,6 +679,20 @@ export const register: Register = (on) => {
           {goal ? <Text bold wrap="wrap">{goal}</Text> : null}
           {goal ? <Text> </Text> : null}
 
+          {linked.length ? head('PULL REQUESTS', String(linked.length)) : null}
+          {linked.map((p) => (
+            <Box flexDirection="column" width={cols}>
+              {row(
+                <Text bold wrap="truncate-end">{pullKey(p)}</Text>,
+                p.state
+                  ? <Text color={p.state === 'open' ? 'success' : p.state === 'merged' ? 'merged' : 'subtle'}>{` ${p.state}`}</Text>
+                  : <Text> </Text>
+              )}
+              {p.title ? <Text wrap="truncate-end">{p.title}</Text> : null}
+            </Box>
+          ))}
+          {linked.length ? <Text> </Text> : null}
+
           {head('PLAN', steps.length ? `${done} of ${steps.length} done` : '')}
           {steps.length === 0 ? <Text dimColor>No plan yet: it shows once Claude makes one.</Text> : null}
           {steps.map((s, i) => {
@@ -618,9 +738,16 @@ export const register: Register = (on) => {
 
           {head('CHECKS')}
           {ran.length === 0 ? <Text dimColor>None yet: tests and typechecks show here when they run.</Text> : null}
-          {ran.map((c) => row(
-            <Text wrap="truncate-end"><Text color={c.ok === null ? 'subtle' : c.ok ? 'success' : 'error'}>{c.ok === null ? '… ' : '● '}</Text>{c.name}</Text>,
-            <Text dimColor wrap="truncate-end">{` ${c.detail}`}</Text>
+          {ran.map((c) => (
+            // The name never gives way: a long detail is cut, not the check it belongs to.
+            <Box flexDirection="row" width={cols}>
+              <Box flexShrink={0}>
+                <Text><Text color={c.ok === null ? 'subtle' : c.ok ? 'success' : 'error'}>{c.ok === null ? '… ' : '● '}</Text>{c.name}</Text>
+              </Box>
+              <Box flexGrow={1} flexShrink={1} marginLeft={2}>
+                <Text dimColor wrap="truncate-end">{c.detail || (c.ok === null ? 'running…' : c.ok ? 'passed' : 'failed')}</Text>
+              </Box>
+            </Box>
           ))}
           {canCheck ? <Box marginTop={1}><Button key="run-checks" label="Run checks" onPress={() => { void runChecks($) }} /></Box> : null}
           <Text> </Text>

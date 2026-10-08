@@ -38,6 +38,17 @@ export type Check = {
   detail: string;
 };
 
+/** A pull request a link in the chat named (item 154). */
+export type PullLink = {
+  url: string;
+  /** owner/name */
+  repo: string;
+  number: number;
+  /** From `gh`, once it answered; absent before, or when it can't. */
+  title?: string;
+  state?: 'open' | 'merged' | 'closed' | 'draft';
+};
+
 export type UsageWindow = { percent: number; resetsAt?: string };
 
 export type Usage = {
@@ -62,6 +73,7 @@ declare module 'claude-code' {
       scripts: boolean;
       /** The session's folders' repositories, main first (KOVAN_FOLDERS). */
       folders: string[];
+      pulls: PullLink[];
     };
   }
 }
