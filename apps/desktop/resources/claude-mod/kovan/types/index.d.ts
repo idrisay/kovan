@@ -9,9 +9,12 @@ export type PlanStep = {
   since?: number;
 };
 
-/** A file this session changed, against the repository's HEAD. */
+/** A file this session changed, against its own repository's HEAD. */
 export type FileChange = {
   path: string;
+  /** Its repository's root, absolute; '' for a file in no repository (item 152). */
+  repo: string;
+  /** Relative to `repo`; for a file in no repository, its path with `~` for home. */
   rel: string;
   add: number;
   del: number;
@@ -23,6 +26,8 @@ export type DiffView = {
   path: string;
   text: string;
   note?: string;
+  /** The file itself, not a diff: a file in no repository has nothing to diff against. */
+  plain?: boolean;
 };
 
 /** A test, typecheck or lint run: the agent's own, or Run checks. */
@@ -55,6 +60,8 @@ declare module 'claude-code' {
       checks: Check[];
       usage: Usage;
       scripts: boolean;
+      /** The session's folders' repositories, main first (KOVAN_FOLDERS). */
+      folders: string[];
     };
   }
 }

@@ -67,7 +67,7 @@ export class OpenRequests {
       await rm(file, { force: true });
       const reply: OpenReply = request
         ? await this.handle(request).catch((error: unknown) => ({ ok: false, message: error instanceof Error ? error.message : String(error) }))
-        : { ok: false, message: stale ? 'That request is over a minute old, so Kovan left it.' : "Kovan couldn't read that request." };
+        : { ok: false, message: stale ? 'That request is over a minute old, so Kovan left it.' : "That file isn't inside the repository it came with, so Kovan can't show its diff." };
       const replyFile = file.replace(/\.json$/, '.reply');
       await writeFile(replyFile, JSON.stringify(reply), 'utf8');
       setTimeout(() => { void rm(replyFile, { force: true }); }, STALE_MS);

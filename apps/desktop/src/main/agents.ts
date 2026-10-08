@@ -354,7 +354,12 @@ export class Agents {
       ...modArgs(base.command, claudeModDir())
     ];
     const goalEnv = modArgs(base.command, claudeModDir()).length
-      ? { ...modEnv(modGoal(subject)), KOVAN_OPEN_DIR: claudeModOpenDir() }
+      ? {
+          ...modEnv(modGoal(subject)),
+          KOVAN_OPEN_DIR: claudeModOpenDir(),
+          // The pane lists each folder's changes under its own name (item 152).
+          KOVAN_FOLDERS: JSON.stringify([cwd, ...extras.map((f) => f.path)])
+        }
       : {};
     const result = await this.sessions.run({
       runner: extraArgs.length ? { ...base, leadingArgs: [...base.leadingArgs, ...extraArgs] } : base,

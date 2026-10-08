@@ -29,6 +29,7 @@ const diff = atom({ plugin: 'kovan', key: 'diff' } as const, { path: '', text: '
 const checks = atom({ plugin: 'kovan', key: 'checks' } as const, [])
 const usage = atom({ plugin: 'kovan', key: 'usage' } as const, { model: '', effort: '', ctxWindow: 0 })
 const scripts = atom({ plugin: 'kovan', key: 'scripts' } as const, false)
+const folders = atom({ plugin: 'kovan', key: 'folders' } as const, [])
 
 type $ = EngineInterface
 
@@ -75,7 +76,7 @@ async function observe($: $, tool: string, input: Record<string, unknown>, ran: 
   if (EDIT_TOOLS.has(tool) && !ran.isError) {
     const file = String(input['file_path'] ?? input['notebook_path'] ?? '')
     if (!file) return
-    await update($, files, (list) => (list.some((f) => f.path === file) ? list : [...list, { path: file, rel: file, add: 0, del: 0, isNew: false }]))
+    await update($, files, (list) => (list.some((f) => f.path === file) ? list : [...list, { path: file, repo: '', rel: file, add: 0, del: 0, isNew: false }]))
     await refreshFiles($)
     if ((await read($, open)) === file) await loadDiff($, file)
     return
@@ -136,63 +137,156 @@ async function gitRoot($: $): Promise<string | undefined> {
   return r.exitCode === 0 ? r.stdout.trim() : undefined
 }
 
-function relativeTo(root: string, file: string): string {
-  return file.startsWith(`${root}/`) ? file.slice(root.length + 1) : file
+/** Where a folder sits in its repository: the root, and the folder relative to it ('' at the root). */
+type Place = { root: string; prefix: string }
+
+// A folder's repository doesn't change during a session: asked once per folder.
+const places = new Map<string, Promise<Place | undefined>>()
+
+function dirOf(file: string): string {
+  const i = file.lastIndexOf('/')
+  return i > 0 ? file.slice(0, i) : '/'
 }
 
-/** +/- for every changed file, against HEAD; a file git doesn't track yet is new, all of it added. */
+/**
+ * The repository a folder is in, or undefined outside every one. Asked of
+ * git in that folder, so a session that spans repositories (Kovan's added
+ * folders) counts each file against its own (item 152).
+ */
+function placeOf($: $, dir: string): Promise<Place | undefined> {
+  let found = places.get(dir)
+  if (!found) {
+    found = (async () => {
+      // A folder deleted since: ask its nearest parent that still exists.
+      let at = dir
+      while (at !== '/' && !(await $.fs.exists(at))) at = dirOf(at)
+      if (at !== dir) return placeOf($, at).then((p) => p && { root: p.root, prefix: `${p.prefix}${dir.slice(at.length + 1)}/` })
+      const r = await $.process.run(['git', 'rev-parse', '--show-toplevel', '--show-prefix'], { cwd: dir, timeoutMs: 10_000 })
+      if (r.exitCode !== 0) return undefined
+      const [root = '', prefix = ''] = r.stdout.split('\n')
+      return root ? { root: root.trim(), prefix: prefix.trim() } : undefined
+    })()
+    places.set(dir, found)
+  }
+  return found
+}
+
+/** The Changes section's groups: one per repository, the session's folders first, then files in none. */
+export type ChangeGroups = {
+  /** One repository and nothing else: the plain list, no headings. */
+  flat: boolean;
+  repos: { root: string; name: string; files: FileChange[] }[];
+  others: FileChange[];
+}
+
+export function changeGroups(changed: readonly FileChange[], roots: readonly string[]): ChangeGroups {
+  const order = [...roots]
+  for (const f of changed) if (f.repo && !order.includes(f.repo)) order.push(f.repo)
+  const repos = order.map((root) => ({ root, name: root.slice(root.lastIndexOf('/') + 1) || root, files: changed.filter((f) => f.repo === root) }))
+  const others = changed.filter((f) => !f.repo)
+  return { flat: repos.length <= 1 && others.length === 0, repos, others }
+}
+
+/** A path cut from the front to `room` cells, so the file's own name always shows. */
+export function fitPath(path: string, room: number): string {
+  if (path.length <= room) return path
+  const tail = path.slice(path.length - Math.max(1, room - 1))
+  const slash = tail.indexOf('/')
+  return `…${slash > 0 && tail.length - slash > 8 ? tail.slice(slash) : tail}`
+}
+
+/** A path for a file in no repository: `~` for home, so the row stays readable. */
+export function homeShort(file: string, home: string | undefined): string {
+  return home && file.startsWith(`${home}/`) ? `~${file.slice(home.length)}` : file
+}
+
+/** The repositories of the folders Kovan started the session in, main first. */
+async function refreshFolders($: $) {
+  let list: unknown
+  try { list = JSON.parse((await $.env.get('KOVAN_FOLDERS')) ?? '[]') } catch { list = [] }
+  const roots: string[] = []
+  for (const folder of Array.isArray(list) ? list : []) {
+    if (typeof folder !== 'string' || !folder.startsWith('/')) continue
+    const place = await placeOf($, folder.replace(/\/+$/, ''))
+    if (place && !roots.includes(place.root)) roots.push(place.root)
+  }
+  await update($, folders, () => roots)
+}
+
+/**
+ * +/- for every changed file, each against its own repository's HEAD; a
+ * file git doesn't track yet is new, all of it added. A file in no
+ * repository has no counts.
+ */
 async function refreshFiles($: $) {
   const list = await read($, files)
   if (list.length === 0) return
-  const root = await gitRoot($)
-  if (!root) {
-    await update($, files, (l) => l.map((f) => ({ ...f, rel: f.path })))
-    return
+  // Normally read at session start; a reload or a slow start can miss it.
+  if ((await read($, folders)).length === 0) await refreshFolders($)
+  const home = await $.env.get('HOME')
+  const placed = await Promise.all(list.map(async (f) => ({ f, place: await placeOf($, dirOf(f.path)) })))
+  const byRoot = new Map<string, { f: FileChange; rel: string }[]>()
+  const next = new Map<string, FileChange>()
+  for (const { f, place } of placed) {
+    if (!place) {
+      next.set(f.path, { path: f.path, repo: '', rel: homeShort(f.path, home), add: 0, del: 0, isNew: false })
+      continue
+    }
+    const rel = `${place.prefix}${f.path.slice(f.path.lastIndexOf('/') + 1)}`
+    byRoot.set(place.root, [...(byRoot.get(place.root) ?? []), { f, rel }])
   }
-  const rels = list.map((f) => relativeTo(root, f.path))
-  const tracked = await $.process.run(['git', 'ls-files', '--', ...rels], { cwd: root, timeoutMs: 10_000 })
-  const isTracked = new Set(tracked.stdout.split('\n').map((l) => l.trim()).filter(Boolean))
-  const numstat = await $.process.run(['git', 'diff', '--numstat', 'HEAD', '--', ...rels], { cwd: root, timeoutMs: 10_000 })
-  const counts = new Map<string, { add: number; del: number }>()
-  for (const line of numstat.stdout.split('\n')) {
-    const [a, d, ...p] = line.split('\t')
-    if (!p.length) continue
-    counts.set(p.join('\t'), { add: Number(a) || 0, del: Number(d) || 0 })
-  }
-  const next: FileChange[] = []
-  for (const f of list) {
-    const rel = relativeTo(root, f.path)
-    if (isTracked.has(rel)) {
-      const c = counts.get(rel) ?? { add: 0, del: 0 }
-      next.push({ path: f.path, rel, add: c.add, del: c.del, isNew: false })
-    } else {
-      let lines = 0
-      try { lines = (await $.fs.read(f.path)).split('\n').filter((_, i, all) => i < all.length - 1 || all[i] !== '').length } catch { /* deleted again */ }
-      next.push({ path: f.path, rel, add: lines, del: 0, isNew: true })
+  for (const [root, group] of byRoot) {
+    const rels = group.map((g) => g.rel)
+    const tracked = await $.process.run(['git', 'ls-files', '--', ...rels], { cwd: root, timeoutMs: 10_000 })
+    const isTracked = new Set(tracked.stdout.split('\n').map((l) => l.trim()).filter(Boolean))
+    const numstat = await $.process.run(['git', 'diff', '--numstat', 'HEAD', '--', ...rels], { cwd: root, timeoutMs: 10_000 })
+    const counts = new Map<string, { add: number; del: number }>()
+    for (const line of numstat.stdout.split('\n')) {
+      const [a, d, ...p] = line.split('\t')
+      if (!p.length) continue
+      counts.set(p.join('\t'), { add: Number(a) || 0, del: Number(d) || 0 })
+    }
+    for (const { f, rel } of group) {
+      if (isTracked.has(rel)) {
+        const c = counts.get(rel) ?? { add: 0, del: 0 }
+        next.set(f.path, { path: f.path, repo: root, rel, add: c.add, del: c.del, isNew: false })
+      } else {
+        let lines = 0
+        try { lines = (await $.fs.read(f.path)).split('\n').filter((_, i, all) => i < all.length - 1 || all[i] !== '').length } catch { /* deleted again */ }
+        next.set(f.path, { path: f.path, repo: root, rel, add: lines, del: 0, isNew: true })
+      }
     }
   }
-  await update($, files, () => next)
+  await update($, files, (now) => now.map((f) => next.get(f.path) ?? f))
 }
 
 async function loadDiff($: $, file: string) {
-  const root = await gitRoot($)
   const known = (await read($, files)).find((f) => f.path === file)
+  const root = known?.repo
   let view: DiffView
   if (!root) {
-    view = { path: file, text: '', note: 'Not in a git repository, so there is no diff to show.' }
-  } else if (known?.isNew) {
+    // No repository to diff against: the file as it is now.
+    let content: string | undefined
+    try { content = await $.fs.read(file) } catch { /* gone */ }
+    const lines = (content ?? '').replace(/\n$/, '').split('\n')
+    view = content === undefined
+      ? { path: file, text: '', note: "Not in a git repository, and the file isn't there now." }
+      : {
+          path: file, text: lines.slice(0, DIFF_LINES).join('\n'), plain: true,
+          note: `Not in a git repository: the file as it is now${lines.length > DIFF_LINES ? `, first ${DIFF_LINES} of ${lines.length} lines` : ''}.`
+        }
+  } else if (known.isNew) {
     let content = ''
     try { content = await $.fs.read(file) } catch { /* gone */ }
     const lines = content.replace(/\n$/, '').split('\n')
     const shown = lines.slice(0, DIFF_LINES)
-    const rel = relativeTo(root, file)
     view = {
       path: file,
-      text: [`--- /dev/null`, `+++ b/${rel}`, `@@ -0,0 +1,${shown.length} @@`, ...shown.map((l) => `+${l}`)].join('\n'),
+      text: [`--- /dev/null`, `+++ b/${known.rel}`, `@@ -0,0 +1,${shown.length} @@`, ...shown.map((l) => `+${l}`)].join('\n'),
       ...(lines.length > DIFF_LINES ? { note: `First ${DIFF_LINES} of ${lines.length} lines.` } : {})
     }
   } else {
-    const r = await $.process.run(['git', 'diff', 'HEAD', '--', relativeTo(root, file)], { cwd: root, timeoutMs: 10_000 })
+    const r = await $.process.run(['git', 'diff', 'HEAD', '--', known.rel], { cwd: root, timeoutMs: 10_000 })
     const lines = r.stdout.replace(/\n$/, '').split('\n')
     const body = cutAtHunk(lines, DIFF_LINES).join('\n')
     view = r.stdout.trim()
@@ -228,13 +322,13 @@ async function toggle($: $, file: string) {
 async function openInKovan($: $, file: string) {
   const dir = await $.env.get('KOVAN_OPEN_DIR')
   if (!dir) return
-  const root = await gitRoot($)
-  if (!root) {
-    $.ui.toast('Not in a git repository, so Kovan has no diff to open.')
+  const known = (await read($, files)).find((f) => f.path === file)
+  if (!known?.repo) {
+    $.ui.toast('That file is in no git repository, so Kovan has no diff to open.')
     return
   }
   const id = `${await $.clock.now()}-${Math.random().toString(36).slice(2, 8)}`
-  await $.fs.write(`${dir}/${id}.json`, JSON.stringify({ repo: root, file: `${root}/${relativeTo(root, file)}` }))
+  await $.fs.write(`${dir}/${id}.json`, JSON.stringify({ repo: known.repo, file: `${known.repo}/${known.rel}` }))
   const reply = `${dir}/${id}.reply`
   // Up to 10 s: Kovan looks at least once a second, and a window just
   // coming forward can take a moment.
@@ -372,6 +466,7 @@ export const register: Register = (on) => {
     void $.ui.open({ id: PANE, title: 'Kovan' })
     void refreshUsage($).catch(() => undefined)
     void refreshScripts($).catch(() => undefined)
+    void refreshFolders($).catch(() => undefined)
     // Reset times count down even while nothing happens.
     $.clock.every(60_000, () => { void refreshUsage($).catch(() => undefined) })
     return next(e)
@@ -424,6 +519,7 @@ export const register: Register = (on) => {
       read($, plan), read($, files), read($, open), read($, diff), read($, checks), read($, usage),
       $.clock.now(), read($, scripts)
     ])
+    const groups = changeGroups(changed, await read($, folders))
 
     const head = (label: string, right = '') => {
       const rule = Math.max(2, cols - label.length - right.length - 2)
@@ -433,6 +529,26 @@ export const register: Register = (on) => {
       <Box flexDirection="row" width={cols}>
         <Box flexGrow={1} flexShrink={1}>{left}</Box>
         <Box flexShrink={0}>{right}</Box>
+      </Box>
+    )
+
+    const fileRow = (f: FileChange, indent: string) => (
+      <Box flexDirection="column" width={cols}>
+        {row(
+          <Button key={`file:${f.path}`} plain label={`${indent}${openPath === f.path ? '▾' : '▸'} ${fitPath(f.rel, cols - indent.length - 14)}`} onPress={() => { void toggle($, f.path) }} />,
+          !f.repo
+            ? <Text> </Text>
+            : f.isNew
+              ? <Text color="diffAdded">{` new +${f.add}`}</Text>
+              : <Text><Text color="diffAdded">{` +${f.add}`}</Text><Text color="diffRemoved">{` −${f.del}`}</Text></Text>
+        )}
+        {openPath === f.path && view.path === f.path && view.text
+          ? <Code source={view.text} format={view.plain ? 'source' : 'diff'} path={f.rel} wrap="truncate-end" />
+          : null}
+        {openPath === f.path && view.path === f.path && view.note ? <Text dimColor>{`  ${view.note}`}</Text> : null}
+        {openPath === f.path && openDir && f.repo
+          ? <Box marginLeft={2}><Button key={`kovan:${f.path}`} plain label="Open in Kovan" onPress={() => { void openInKovan($, f.path) }} /></Box>
+          : null}
       </Box>
     )
 
@@ -465,21 +581,32 @@ export const register: Register = (on) => {
 
           {head('CHANGES', changed.length ? `+${added} −${removed}` : '')}
           {changed.length === 0 ? <Text dimColor>No files changed yet.</Text> : null}
-          {changed.map((f) => (
-            <Box flexDirection="column" width={cols}>
-              {row(
-                <Button key={`file:${f.path}`} plain label={`${openPath === f.path ? '▾' : '▸'} ${f.rel}`} onPress={() => { void toggle($, f.path) }} />,
-                f.isNew
-                  ? <Text color="diffAdded">{` new +${f.add}`}</Text>
-                  : <Text><Text color="diffAdded">{` +${f.add}`}</Text><Text color="diffRemoved">{` −${f.del}`}</Text></Text>
-              )}
-              {openPath === f.path && view.path === f.path && view.text ? <Code source={view.text} format="diff" path={f.rel} wrap="truncate-end" /> : null}
-              {openPath === f.path && view.path === f.path && view.note ? <Text dimColor>{`  ${view.note}`}</Text> : null}
-              {openPath === f.path && openDir
-                ? <Box marginLeft={2}><Button key={`kovan:${f.path}`} plain label="Open in Kovan" onPress={() => { void openInKovan($, f.path) }} /></Box>
-                : null}
-            </Box>
-          ))}
+          {groups.flat
+            ? changed.map((f) => fileRow(f, ''))
+            : [
+                ...groups.repos.map((g) => {
+                  const add = g.files.reduce((n, f) => n + f.add, 0)
+                  const del = g.files.reduce((n, f) => n + f.del, 0)
+                  return (
+                    <Box flexDirection="column" width={cols}>
+                      {row(
+                        <Text bold wrap="truncate-end">{g.name}</Text>,
+                        g.files.length ? <Text><Text color="diffAdded">{` +${add}`}</Text><Text color="diffRemoved">{` −${del}`}</Text></Text> : <Text> </Text>
+                      )}
+                      {g.files.length === 0 ? <Text dimColor>  no changes</Text> : null}
+                      {g.files.map((f) => fileRow(f, '  '))}
+                    </Box>
+                  )
+                }),
+                groups.others.length
+                  ? (
+                    <Box flexDirection="column" width={cols}>
+                      <Text dimColor bold>Other files</Text>
+                      {groups.others.map((f) => fileRow(f, '  '))}
+                    </Box>
+                  )
+                  : null
+              ]}
           <Text> </Text>
 
           {head('CHECKS')}

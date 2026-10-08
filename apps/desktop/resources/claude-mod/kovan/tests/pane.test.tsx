@@ -1,6 +1,12 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { checkName, cutAtHunk, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
+import { changeGroups, checkName, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
+
+/** `git rev-parse --show-toplevel --show-prefix` for a folder under /repo. */
+function gitPlace(e: unknown): string {
+  const cwd = (e as { init?: { cwd?: string } }).init?.cwd ?? '/repo'
+  return `/repo\n${cwd === '/repo' ? '' : `${cwd.slice('/repo/'.length)}/`}\n`
+}
 
 const PANE = { component: 'Pane', requestId: 'kovan', props: { title: 'Kovan', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } } } as never
 
@@ -82,10 +88,11 @@ test('an edit lists the file with its counts, and a click opens its diff', async
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
   on('fs.read', () => { throw new Error('no such file') })
+  on('fs.exists', () => ({ value: true }))
   on('process.run', ($, e) => {
     const argv = (e as unknown as { argv: string[] }).argv.join(' ')
     const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-    if (argv.startsWith('git rev-parse')) return out('/repo\n')
+    if (argv.startsWith('git rev-parse')) return out(gitPlace(e))
     if (argv.startsWith('git ls-files')) return out('src/a.ts\n')
     if (argv.startsWith('git diff --numstat')) return out('6\t2\tsrc/a.ts\n')
     if (argv.startsWith('git diff HEAD')) return out(DIFF)
@@ -120,7 +127,7 @@ test('Open in Kovan writes a request into the folder Kovan watches and shows its
   on('process.run', ($, e) => {
     const argv = (e as unknown as { argv: string[] }).argv.join(' ')
     const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-    if (argv.startsWith('git rev-parse')) return out('/repo\n')
+    if (argv.startsWith('git rev-parse')) return out(gitPlace(e))
     if (argv.startsWith('git ls-files')) return out('src/a.ts\n')
     if (argv.startsWith('git diff --numstat')) return out('1\t1\tsrc/a.ts\n')
     if (argv.startsWith('git diff HEAD')) return out(DIFF)
@@ -133,7 +140,10 @@ test('Open in Kovan writes a request into the folder Kovan watches and shows its
     written[path.replace(/\.json$/, '.reply')] = JSON.stringify({ ok: true, message: 'Opened src/a.ts in Kovan.' })
     return { value: undefined }
   })
-  on('fs.exists', ($, e) => ({ value: (e as unknown as { path: string }).path in written }))
+  on('fs.exists', ($, e) => {
+    const p = (e as unknown as { path: string }).path
+    return { value: p in written || !p.startsWith('/kovan/') }
+  })
   on('fs.read', ($, e) => {
     const p = (e as unknown as { path: string }).path
     if (p in written) return { value: written[p] }
@@ -153,3 +163,93 @@ test('Open in Kovan writes a request into the folder Kovan watches and shows its
   await ui.unmount()
 })
 
+
+describe('changes across repositories', () => {
+  const f = (path: string, repo: string, rel: string) => ({ path, repo, rel, add: 1, del: 0, isNew: false })
+
+  test('one repository is the plain list', async () => {
+    expect(changeGroups([f('/r/web/a.ts', '/r/web', 'a.ts')], ['/r/web']).flat).toBe(true)
+    expect(changeGroups([f('/r/web/a.ts', '/r/web', 'a.ts')], []).flat).toBe(true)
+  })
+
+  test("groups by repository, the session's folders first and listed even with no changes, then files in none", async () => {
+    const g = changeGroups([
+      f('/x/other/z.ts', '/x/other', 'z.ts'),
+      f('/r/web/a.ts', '/r/web', 'a.ts'),
+      f('/Users/me/.claude/notes.md', '', '~/.claude/notes.md')
+    ], ['/r/api', '/r/web'])
+    expect(g.flat).toBe(false)
+    expect(g.repos.map((r) => [r.name, r.files.map((x) => x.rel)])).toEqual([['api', []], ['web', ['a.ts']], ['other', ['z.ts']]])
+    expect(g.others.map((x) => x.rel)).toEqual(['~/.claude/notes.md'])
+  })
+
+  test('cuts a long path from the front, keeping the name', async () => {
+    expect(fitPath('src/a.ts', 40)).toBe('src/a.ts')
+    expect(fitPath('~/.claude/projects/-Users-me-Test-api/memory/feedback.md', 30)).toBe('…/memory/feedback.md')
+    expect(fitPath('~/.claude/projects/-Users-me-Test-api/memory/feedback.md', 30).length).toBeLessThanOrEqual(30)
+  })
+
+  test('shortens home to ~', async () => {
+    expect(homeShort('/Users/me/.claude/x.md', '/Users/me')).toBe('~/.claude/x.md')
+    expect(homeShort('/etc/hosts', '/Users/me')).toBe('/etc/hosts')
+  })
+})
+
+test('a session over two repositories counts each file in its own, and a file in none has no Open in Kovan', async ($, on) => {
+  const written: Record<string, string> = {}
+  mock.env(on, { KOVAN_OPEN_DIR: '/kovan/open', HOME: '/Users/me', KOVAN_FOLDERS: JSON.stringify(['/r/api', '/r/web']) })
+  on('clock.now', () => ({ value: 1_000 }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('session.cwd', () => ({ value: '/r/api' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('fs.exists', () => ({ value: true }))
+  on('fs.read', ($, e) => {
+    const p = (e as unknown as { path: string }).path
+    if (p in written) return { value: written[p] }
+    if (p === '/Users/me/.claude/notes.md') return { value: 'remember this\n' }
+    throw new Error('no such file')
+  })
+  on('fs.write', ($, e) => {
+    const { path, text } = e as unknown as { path: string; text: string }
+    written[path] = text
+    written[path.replace(/\.json$/, '.reply')] = JSON.stringify({ ok: true, message: 'Opened.' })
+    return { value: undefined }
+  })
+  on('ui.toast', () => ({ value: undefined }))
+  on('process.run', ($, e) => {
+    const { argv, init } = e as unknown as { argv: string[]; init?: { cwd?: string } }
+    const cmd = argv.join(' ')
+    const cwd = init?.cwd ?? ''
+    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (cmd.startsWith('git rev-parse')) {
+      const root = ['/r/api', '/r/web'].find((r) => cwd === r || cwd.startsWith(`${r}/`))
+      return root ? out(`${root}\n${cwd === root ? '' : `${cwd.slice(root.length + 1)}/`}\n`) : out('', 128)
+    }
+    if (cmd.startsWith('git ls-files') && cwd === '/r/web') return out('src/a.ts\n')
+    if (cmd.startsWith('git diff --numstat') && cwd === '/r/web') return out('3\t1\tsrc/a.ts\n')
+    return out('', cmd.startsWith('git') ? 0 : 1)
+  })
+  on('tool.call', { tool: 'Edit' }, () => ({ result: {} as never }))
+  await $.tool.call({ tool: 'Edit', file_path: '/r/web/src/a.ts', old_string: 'a', new_string: 'b' } as never)
+  await $.tool.call({ tool: 'Edit', file_path: '/Users/me/.claude/notes.md', old_string: 'a', new_string: 'b' } as never)
+
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^api$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /no changes/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^web$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Other files/ })).toBeDefined()
+  expect(await ui.find({ key: 'file:/r/web/src/a.ts' })).toBeDefined()
+
+  await ui.press({ key: 'file:/r/web/src/a.ts' })
+  await ui.press({ key: 'kovan:/r/web/src/a.ts' })
+  const request = Object.entries(written).find(([p]) => p.endsWith('.json'))
+  expect(JSON.parse(request?.[1] ?? '{}')).toEqual({ repo: '/r/web', file: '/r/web/src/a.ts' })
+
+  await ui.press({ key: 'file:/Users/me/.claude/notes.md' })
+  const code = await ui.find({ type: 'Code' })
+  expect(code?.props['format']).toBe('source')
+  expect(code?.props['source']).toBe('remember this')
+  expect(await ui.find({ key: 'kovan:/Users/me/.claude/notes.md' })).toBeUndefined()
+  await ui.unmount()
+})
