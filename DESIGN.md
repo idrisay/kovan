@@ -395,7 +395,7 @@ pane beside Claude, from top to bottom:
 - Claude's own plan, from TodoWrite or TaskCreate/TaskUpdate: ✓ done, the step in progress as Now with its minutes, the one after it as Next.
 - Changes: each file the session edited, +/- against HEAD. A click opens its diff under it, cut at a hunk past 400 lines.
 - Checks: the tests, typechecks and lints the agent ran, from its own Bash calls. Run checks runs the project's `typecheck`, `test` and `lint` scripts, only when pressed.
-- One small dim line on the pane's last row when docked: `Model · Context · Session · Weekly` with reset times.
+- One small line on the pane's last row when docked: `Model · Context · Session · Weekly` with reset times. Labels dim, values in Claude's status-line colors (item 151): model `suggestion`, context `success`, session `warning`, weekly `merged`.
 
 Under an open diff, **Open in Kovan** (item 148) shows that diff in the
 Workspace view and brings the window forward. The pane can't reach the
