@@ -38,13 +38,16 @@ export type Check = {
   detail: string;
 };
 
-/** A pull request a link in the chat named (item 154). */
-export type PullLink = {
+/** A link in the chat the pane lists (item 154): a pull request, a Figma design, a ticket or a local page. */
+export type LinkItem = {
+  kind: 'pull' | 'figma' | 'ticket' | 'page';
   url: string;
-  /** owner/name */
-  repo: string;
-  number: number;
-  /** From `gh`, once it answered; absent before, or when it can't. */
+  /** What the row says: `acme-frontend#2789`, `Contact Us popup`, `ACME-1234`, `app.acme.test/en`. */
+  key: string;
+  /** For a pull request: owner/name and number, to ask gh. */
+  repo?: string;
+  number?: number;
+  /** A pull request's, from gh once it answered. */
   title?: string;
   state?: 'open' | 'merged' | 'closed' | 'draft';
 };
@@ -75,7 +78,7 @@ declare module 'claude-code' {
       scripts: boolean;
       /** The session's folders' repositories, main first (KOVAN_FOLDERS). */
       folders: string[];
-      pulls: PullLink[];
+      links: LinkItem[];
     };
   }
 }

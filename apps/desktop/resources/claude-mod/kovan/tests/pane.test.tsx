@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { changeGroups, checkName, pullKey, pullLinks, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
+import { changeGroups, checkName, findLinks, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
 
 /** `git rev-parse --show-toplevel --show-prefix` for a folder under /repo. */
 function gitPlace(e: unknown): string {
@@ -265,11 +265,21 @@ test('a session over two repositories counts each file in its own, and a file in
   await ui.unmount()
 })
 
-describe('pull requests in the chat', () => {
-  test('finds each linked pull request once, in order', async () => {
-    const text = 'See https://github.com/acme/acme-frontend/pull/2789 and https://github.com/acme/acme-backend/pull/868/files, again https://github.com/acme/acme-frontend/pull/2789#discussion. Not https://github.com/acme/acme-frontend/issues/5.'
-    expect(pullLinks(text).map(pullKey)).toEqual(['acme-frontend#2789', 'acme-backend#868'])
-    expect(pullLinks(text)[1]?.url).toBe('https://github.com/acme/acme-backend/pull/868')
+describe('links in the chat', () => {
+  test('finds pull requests, Figma designs, tickets and local pages, each once, in order', async () => {
+    const text = [
+      'See https://github.com/acme/acme-frontend/pull/2789 and https://github.com/acme/acme-backend/pull/868/files,',
+      'again https://github.com/acme/acme-frontend/pull/2789#discussion. Not https://github.com/acme/acme-frontend/issues/5.',
+      'Design: https://www.figma.com/design/yoC3L27adNyJv9lr8EWg7D/Contact-Us-Popup?node-id=1-2 (the target).',
+      'Ticket https://acme.atlassian.net/browse/ACME-1234. Page: https://app.acme.test/en/ and http://localhost:3000/lesson/12?x=1.',
+      'Not https://api.atlassian.com/ex/jira/x nor https://json-schema.org/draft/2020-12/schema nor https://claude.ai/code/session_1'
+    ].join(' ')
+    expect(findLinks(text).map((l) => `${l.kind} ${l.key}`)).toEqual([
+      'pull acme-frontend#2789', 'pull acme-backend#868', 'figma Contact Us Popup', 'ticket ACME-1234',
+      'page app.acme.test/en', 'page localhost:3000/lesson/12'
+    ])
+    expect(findLinks(text)[1]?.url).toBe('https://github.com/acme/acme-backend/pull/868')
+    expect(findLinks(text, true).map((l) => l.key)).toEqual(['acme-frontend#2789', 'acme-backend#868'])
   })
 })
 
@@ -292,7 +302,7 @@ test("a pull request linked in a command's output shows with its title and state
   // The title is asked of gh in the background, not in the tool call's way.
   for (let i = 0; i < 50; i++) await Promise.resolve()
   const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /^PULL REQUESTS ─+ 1$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^LINKS ─+ 1$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^acme-frontend#2789$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^ open$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^feat\(qa\): lesson\+exercise smoke test$/ })).toBeDefined()

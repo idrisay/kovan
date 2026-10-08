@@ -19,7 +19,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { Check, DiffView, FileChange, PlanStep, PullLink, Usage } from '../types'
+import type { Check, DiffView, FileChange, LinkItem, PlanStep, Usage } from '../types'
 
 const PANE = 'kovan'
 const plan = atom({ plugin: 'kovan', key: 'plan' } as const, [])
@@ -30,7 +30,7 @@ const checks = atom({ plugin: 'kovan', key: 'checks' } as const, [])
 const usage = atom({ plugin: 'kovan', key: 'usage' } as const, { model: '', effort: '', ctxWindow: 0 })
 const scripts = atom({ plugin: 'kovan', key: 'scripts' } as const, false)
 const folders = atom({ plugin: 'kovan', key: 'folders' } as const, [])
-const pulls = atom({ plugin: 'kovan', key: 'pulls' } as const, [])
+const links = atom({ plugin: 'kovan', key: 'links' } as const, [])
 
 type $ = EngineInterface
 
@@ -160,7 +160,7 @@ async function observe($: $, tool: string, input: Record<string, unknown>, ran: 
     const command = String(input['command'] ?? '')
     const said = ran.result as { stdout?: string } | undefined
     // `gh pr create` prints the new one's link.
-    void notePulls($, `${said?.stdout ?? ''}`).catch(() => undefined)
+    void noteLinks($, `${said?.stdout ?? ''}`, true).catch(() => undefined)
     const name = checkName(command)
     if (!name || input['run_in_background']) return
     const r = ran.result as { stdout?: string; stderr?: string; interrupted?: boolean } | undefined
@@ -424,62 +424,114 @@ async function hasScripts($: $): Promise<boolean> {
   }
 }
 
-// ── pull requests in the chat (item 154) ──────────────────────────────────
+// ── links in the chat (item 154) ──────────────────────────────────────────
 
-/** The pull requests a text links to, each once, in the order they first appear. */
-export function pullLinks(text: string): { url: string; repo: string; number: number }[] {
-  const found: { url: string; repo: string; number: number }[] = []
-  for (const m of text.matchAll(/https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/g)) {
-    const repo = `${m[1]}/${m[2]}`
-    const number = Number(m[3])
-    if (!found.some((p) => p.repo === repo && p.number === number)) {
-      found.push({ url: `https://github.com/${repo}/pull/${number}`, repo, number })
+type Found = Omit<LinkItem, 'title' | 'state'>
+
+/** A URL's end as prose leaves it: a full stop, a bracket or a quote after it isn't part of it. */
+function trimUrl(url: string): string {
+  return url.replace(/[).,;:!?'"`\]>*_]+$/, '')
+}
+
+/**
+ * The links a text names that the pane lists, each once, in the order they
+ * first appear:
+ *   pull     github.com/<owner>/<repo>/pull/<n>       acme-frontend#2789
+ *   figma    figma.com/design/<file>/<Name>           Contact Us popup
+ *   ticket   <site>.atlassian.net/browse/<KEY-1>      ACME-1234
+ *   page     a local site: localhost, 127.0.0.1, *.test, *.local, *.localhost
+ * `onlyPulls` for a command's output, where everything else is noise (API
+ * hosts, avatars, schemas) and a pull request is what `gh pr create` prints.
+ */
+export function findLinks(text: string, onlyPulls = false): Found[] {
+  const found: Found[] = []
+  const add = (item: Found) => { if (!found.some((f) => f.key === item.key && f.kind === item.kind)) found.push(item) }
+  for (const m of text.matchAll(/https?:\/\/[^\s<>()"'`\]\[]+/g)) {
+    const url = trimUrl(m[0])
+    // Taken apart by hand: the mod's runtime has no URL.
+    const at = /^(https?:\/\/)([^/?#]+)([^?#]*)/.exec(url)
+    if (!at) continue
+    const u = { origin: `${at[1]}${at[2]}`, host: at[2]!, hostname: at[2]!.replace(/:\d+$/, '').toLowerCase(), pathname: at[3] || '/' }
+    const parts = u.pathname.split('/').filter(Boolean)
+    if (u.hostname === 'github.com' && parts[2] === 'pull' && /^\d+$/.test(parts[3] ?? '')) {
+      const repo = `${parts[0]}/${parts[1]}`
+      const number = Number(parts[3])
+      add({ kind: 'pull', url: `https://github.com/${repo}/pull/${number}`, key: `${parts[1]}#${number}`, repo, number })
+      continue
+    }
+    if (onlyPulls) continue
+    if (/(^|\.)figma\.com$/.test(u.hostname) && ['design', 'file', 'proto', 'board'].includes(parts[0] ?? '') && parts[1]) {
+      const name = parts[2] ? safeDecode(parts[2]).replace(/-+/g, ' ').trim() : parts[1]
+      add({ kind: 'figma', url, key: name || parts[1] })
+      continue
+    }
+    if (/\.atlassian\.net$/.test(u.hostname) && parts[0] === 'browse' && /^[A-Z][A-Z0-9]+-\d+$/.test(parts[1] ?? '')) {
+      add({ kind: 'ticket', url: `${u.origin}/browse/${parts[1]}`, key: parts[1]! })
+      continue
+    }
+    if (/^(localhost|127\.0\.0\.1)$|\.(test|local|localhost)$/.test(u.hostname)) {
+      const path = u.pathname.replace(/\/$/, '')
+      add({ kind: 'page', url: `${u.origin}${u.pathname}`, key: `${u.host}${path}` })
     }
   }
   return found
 }
 
-/** How the pane names one: `acme-frontend#2789`, the way the goal does. */
-export function pullKey(p: { repo: string; number: number }): string {
-  return `${p.repo.slice(p.repo.indexOf('/') + 1)}#${p.number}`
+function safeDecode(s: string): string {
+  try { return decodeURIComponent(s) } catch { return s }
 }
 
 /** Most recent first, and no more than this: the pane is for the few in play. */
-const PULLS_KEPT = 6
+const LINKS_KEPT = 8
 
 /**
- * Notes the pull requests a text links to, newest first, and asks `gh` for
- * the title and state of each new one: one small call per pull request, the
- * first time it is seen, never while drawing.
+ * Notes the links a text names, newest first, the goal's own left out, and
+ * asks `gh` for the title and state of each new pull request: one small call
+ * per pull request the first time it is seen, never while drawing.
  */
-async function notePulls($: $, text: string) {
-  const links = pullLinks(text)
-  if (links.length === 0) return
+async function noteLinks($: $, text: string, onlyPulls = false) {
+  const found = findLinks(text, onlyPulls)
+  if (found.length === 0) return
   const goalKey = await $.env.get('KOVAN_GOAL_KEY')
-  const fresh = links.filter((l) => pullKey(l) !== goalKey)
+  const fresh = found.filter((l) => l.key !== goalKey)
   if (fresh.length === 0) return
-  let added: typeof fresh = []
-  await update($, pulls, (list) => {
-    added = fresh.filter((l) => !list.some((p) => p.repo === l.repo && p.number === l.number))
-    const moved = fresh.map((l) => list.find((p) => p.repo === l.repo && p.number === l.number) ?? l)
-    const rest = list.filter((p) => !fresh.some((l) => l.repo === p.repo && l.number === p.number))
-    return [...moved, ...rest].slice(0, PULLS_KEPT)
+  const same = (a: Found, b: Found) => a.kind === b.kind && a.key === b.key
+  let added: Found[] = []
+  await update($, links, (list) => {
+    added = fresh.filter((l) => !list.some((p) => same(p, l)))
+    const moved = fresh.map((l) => list.find((p) => same(p, l)) ?? l)
+    const rest = list.filter((p) => !fresh.some((l) => same(p, l)))
+    return [...moved, ...rest].slice(0, LINKS_KEPT)
   })
-  for (const link of added) void describePull($, link).catch(() => undefined)
+  for (const link of added) if (link.kind === 'pull') void describePull($, link).catch(() => undefined)
 }
 
-async function describePull($: $, link: { repo: string; number: number }) {
+async function describePull($: $, link: Found) {
+  if (!link.repo || !link.number) return
   const r = await $.process.run(
     ['gh', 'pr', 'view', String(link.number), '--repo', link.repo, '--json', 'title,state,isDraft'],
     { cwd: await $.session.cwd(), timeoutMs: 15_000 }
   )
   if (r.exitCode !== 0) return
   const got = JSON.parse(r.stdout) as { title?: string; state?: string; isDraft?: boolean }
-  const state: PullLink['state'] = got.isDraft && got.state === 'OPEN' ? 'draft'
+  const state: LinkItem['state'] = got.isDraft && got.state === 'OPEN' ? 'draft'
     : got.state === 'MERGED' ? 'merged' : got.state === 'CLOSED' ? 'closed' : got.state === 'OPEN' ? 'open' : undefined
-  await update($, pulls, (list) => list.map((p) => (p.repo === link.repo && p.number === link.number
+  await update($, links, (list) => list.map((p) => (p.kind === 'pull' && p.key === link.key
     ? { ...p, ...(got.title ? { title: got.title } : {}), ...(state ? { state } : {}) }
     : p)))
+}
+
+/**
+ * The links said before the pane loaded: a session that ran a while before
+ * this mod (or a reload of it) still lists what its chat named. Read once, at
+ * the start, in order, so the newest end up first.
+ */
+async function readEarlierLinks($: $) {
+  const messages = await $.session.messages()
+  for (const m of messages) {
+    if (m.text) await noteLinks($, m.text)
+    for (const r of m.toolResults ?? []) if (r.text) await noteLinks($, r.text, true)
+  }
 }
 
 // ── usage ──────────────────────────────────────────────────────────────────
@@ -580,6 +632,7 @@ export const register: Register = (on) => {
     void refreshUsage($).catch(() => undefined)
     void refreshScripts($).catch(() => undefined)
     void refreshFolders($).catch(() => undefined)
+    void readEarlierLinks($).catch(() => undefined)
     // Reset times count down even while nothing happens.
     $.clock.every(60_000, () => { void refreshUsage($).catch(() => undefined) })
     return next(e)
@@ -590,7 +643,7 @@ export const register: Register = (on) => {
   // prompt only: a pane closed by hand stays closed until /kovan.
   let asked = false
   on('prompt.submit', async ($, e, next) => {
-    void notePulls($, e.text).catch(() => undefined)
+    void noteLinks($, e.text).catch(() => undefined)
     if (!asked) {
       asked = true
       void $.ui.open({ id: PANE, title: 'Kovan' }).catch(() => undefined)
@@ -622,19 +675,19 @@ export const register: Register = (on) => {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     void refreshUsage($).catch(() => undefined)
-    void notePulls($, done.text ?? '').catch(() => undefined)
+    void noteLinks($, done.text ?? '').catch(() => undefined)
     return done
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button, Code } = $.ui.resolve(e)
+    const { Box, Text, Button, Code, Link } = $.ui.resolve(e)
     const cols = Math.max(24, e.props.bodyColumns)
     const [goal, goalKey, openDir, steps, changed, openPath, view, ran, u, now, canCheck] = await Promise.all([
       $.env.get('KOVAN_GOAL'), $.env.get('KOVAN_GOAL_KEY'), $.env.get('KOVAN_OPEN_DIR'),
       read($, plan), read($, files), read($, open), read($, diff), read($, checks), read($, usage),
       $.clock.now(), read($, scripts)
     ])
-    const linked = await read($, pulls)
+    const linked = await read($, links)
     const groups = changeGroups(changed, await read($, folders))
 
     const head = (label: string, right = '') => {
@@ -682,16 +735,16 @@ export const register: Register = (on) => {
           {goal ? <Text bold wrap="wrap">{goal}</Text> : null}
           {goal ? <Text> </Text> : null}
 
-          {linked.length ? head('PULL REQUESTS', String(linked.length)) : null}
-          {linked.map((p) => (
+          {linked.length ? head('LINKS', String(linked.length)) : null}
+          {linked.map((l) => (
             <Box flexDirection="column" width={cols}>
               {row(
-                <Text bold wrap="truncate-end">{pullKey(p)}</Text>,
-                p.state
-                  ? <Text color={p.state === 'open' ? 'success' : p.state === 'merged' ? 'merged' : 'subtle'}>{` ${p.state}`}</Text>
-                  : <Text> </Text>
+                <Text bold={l.kind === 'pull'} wrap="truncate-end"><Link href={l.url} label={fitPath(l.key, cols - 12)} /></Text>,
+                l.kind === 'pull'
+                  ? (l.state ? <Text color={l.state === 'open' ? 'success' : l.state === 'merged' ? 'merged' : 'subtle'}>{` ${l.state}`}</Text> : <Text dimColor> pull request</Text>)
+                  : <Text dimColor>{` ${l.kind === 'figma' ? 'figma' : l.kind === 'ticket' ? 'ticket' : 'page'}`}</Text>
               )}
-              {p.title ? <Text wrap="truncate-end">{p.title}</Text> : null}
+              {l.title ? <Text wrap="truncate-end">{l.title}</Text> : null}
             </Box>
           ))}
           {linked.length ? <Text> </Text> : null}

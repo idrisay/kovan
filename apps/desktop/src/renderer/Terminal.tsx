@@ -114,7 +114,15 @@ function create(sessionId: string, host: HTMLElement, fontSize: number): Live {
     cursorBlink: true,
     theme: terminalTheme(),
     scrollback: 10_000,
-    allowProposedApi: true
+    allowProposedApi: true,
+    // A link a program marks (OSC 8: Claude's own, the Links in Kovan's pane,
+    // item 154) opens in the browser on a click. Without this, xterm asks with
+    // a confirm() and then opens it in a bare Electron window.
+    linkHandler: {
+      activate: (_event, uri) => {
+        if (/^https?:\/\//i.test(uri)) void window.kovan.openExternal(uri);
+      }
+    }
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
