@@ -59,6 +59,8 @@ export type Usage = {
   ctxPercent?: number;
   session?: UsageWindow;
   weekly?: UsageWindow;
+  /** US dollars so far, as /cost totals it (item 153). */
+  cost?: number;
 };
 
 declare module 'claude-code' {

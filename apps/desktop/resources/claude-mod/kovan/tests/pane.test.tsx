@@ -53,8 +53,9 @@ describe('helpers', () => {
     expect(usageLine({
       model: 'claude-opus-5-5', effort: 'high', ctxTokens: 402_000, ctxWindow: 1_000_000, ctxPercent: 40,
       session: { percent: 62, resetsAt: new Date(2026, 9, 7, 15, 40).toISOString() },
-      weekly: { percent: 31, resetsAt: new Date(2026, 9, 12, 9, 0).toISOString() }
-    }, now)).toBe('Opus 5.5 · ctx 402k/1M 40% · 5h 62% → 15:40 · wk 31% → Mon')
+      weekly: { percent: 31, resetsAt: new Date(2026, 9, 12, 9, 0).toISOString() },
+      cost: 1.031
+    }, now)).toBe('Opus 5.5 · ctx 402k/1M 40% · 5h 62% → 15:40 · wk 31% → Mon · $1.03')
   })
 })
 

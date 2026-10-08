@@ -520,9 +520,9 @@ function short(n: number): string {
 
 /**
  * The usage line's parts, short enough for one row of the pane (item 153):
- * `Opus 5.5 · ctx 97k/1M 10% · 5h 19% → 17:00 · wk 40% → Mon`. Each value
+ * `Opus 5.5 · ctx 97k/1M 10% · 5h 19% → 17:00 · wk 40% → Mon · $1.03`. Each value
  * in the color Claude's own status line gives it: model blue, context green,
- * session amber, weekly purple. Theme keys, so a light theme gets its own
+ * session amber, weekly purple; the cost in Claude's orange. Theme keys, so a light theme gets its own
  * shades.
  */
 export function usageParts(u: Usage, now: number): UsagePart[] {
@@ -542,6 +542,8 @@ export function usageParts(u: Usage, now: number): UsagePart[] {
     const when = resets(w.resetsAt, now)
     parts.push({ label, value: `${Math.round(w.percent)}%${when ? ` → ${when}` : ''}`, color })
   }
+  // Last, in Kovan's own cost color: the first thing to go when the row is short.
+  if (u.cost !== undefined) parts.push({ label: '', value: `$${u.cost.toFixed(2)}`, color: 'claude' })
   return parts
 }
 
@@ -564,7 +566,8 @@ async function refreshUsage($: $, effort?: string) {
     ...(u.context.tokens !== undefined ? { ctxTokens: u.context.tokens } : {}),
     ...(u.context.percent !== undefined ? { ctxPercent: u.context.percent } : {}),
     ...(session ? { session } : {}),
-    ...(weekly ? { weekly } : {})
+    ...(weekly ? { weekly } : {}),
+    ...(u.cost ? { cost: u.cost.usd } : {})
   }))
 }
 
