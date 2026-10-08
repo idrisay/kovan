@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { checkName, cutAtHunk, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
 
-const PANE = { component: 'Pane', requestId: 'kovan', props: { title: 'Kovan', isFocused: false, bodyColumns: 60, placement: 'dock' } } as never
+const PANE = { component: 'Pane', requestId: 'kovan', props: { title: 'Kovan', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } } } as never
 
 describe('helpers', () => {
   test('names checks by what the command runs', async () => {

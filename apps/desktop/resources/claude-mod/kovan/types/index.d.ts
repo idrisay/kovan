@@ -54,6 +54,7 @@ declare module 'claude-code' {
       diff: DiffView;
       checks: Check[];
       usage: Usage;
+      scripts: boolean;
     };
   }
 }

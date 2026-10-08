@@ -28,6 +28,7 @@ const open = atom({ plugin: 'kovan', key: 'open' } as const, '')
 const diff = atom({ plugin: 'kovan', key: 'diff' } as const, { path: '', text: '' })
 const checks = atom({ plugin: 'kovan', key: 'checks' } as const, [])
 const usage = atom({ plugin: 'kovan', key: 'usage' } as const, { model: '', effort: '', ctxWindow: 0 })
+const scripts = atom({ plugin: 'kovan', key: 'scripts' } as const, false)
 
 type $ = EngineInterface
 
@@ -264,6 +265,16 @@ async function runChecks($: $) {
   }
 }
 
+/**
+ * Whether Run checks has anything to run. Worked out at the start, never
+ * while drawing: a git call inside a draw is cut off when the next draw
+ * starts, and the pane then fails to draw at all.
+ */
+async function refreshScripts($: $) {
+  const has = await hasScripts($)
+  await update($, scripts, () => has)
+}
+
 async function hasScripts($: $): Promise<boolean> {
   const root = (await gitRoot($)) ?? (await $.session.cwd())
   try {
@@ -344,8 +355,21 @@ export const register: Register = (on) => {
     await $.command.register({ name: 'kovan', description: "Open Kovan's pane: the goal, plan, changes, checks and usage" })
     void $.ui.open({ id: PANE, title: 'Kovan' })
     void refreshUsage($).catch(() => undefined)
+    void refreshScripts($).catch(() => undefined)
     // Reset times count down even while nothing happens.
     $.clock.every(60_000, () => { void refreshUsage($).catch(() => undefined) })
+    return next(e)
+  })
+
+  // The prompt Kovan starts the session with counts as the person asking, so
+  // the pane opens at any width with nothing to type (item 149). The first
+  // prompt only: a pane closed by hand stays closed until /kovan.
+  let asked = false
+  on('prompt.submit', async ($, e, next) => {
+    if (!asked) {
+      asked = true
+      void $.ui.open({ id: PANE, title: 'Kovan' }).catch(() => undefined)
+    }
     return next(e)
   })
 
@@ -379,10 +403,10 @@ export const register: Register = (on) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button, Code } = $.ui.resolve(e)
     const cols = Math.max(24, e.props.bodyColumns)
-    const [goal, goalKey, openDir, steps, changed, openPath, view, ran, u, now, scripts] = await Promise.all([
+    const [goal, goalKey, openDir, steps, changed, openPath, view, ran, u, now, canCheck] = await Promise.all([
       $.env.get('KOVAN_GOAL'), $.env.get('KOVAN_GOAL_KEY'), $.env.get('KOVAN_OPEN_DIR'),
       read($, plan), read($, files), read($, open), read($, diff), read($, checks), read($, usage),
-      $.clock.now(), hasScripts($)
+      $.clock.now(), read($, scripts)
     ])
 
     const head = (label: string, right = '') => {
@@ -402,52 +426,55 @@ export const register: Register = (on) => {
     const added = changed.reduce((n, f) => n + f.add, 0)
     const removed = changed.reduce((n, f) => n + f.del, 0)
 
+    // Docked, the usage line sits on the pane's last row, however little is above it.
     return (
-      <Box flexDirection="column" width={cols}>
-        {goal ? <Text dimColor bold>{`GOAL${goalKey ? ` · ${goalKey}` : ''}`}</Text> : null}
-        {goal ? <Text bold wrap="wrap">{goal}</Text> : null}
-        {goal ? <Text> </Text> : null}
+      <Box flexDirection="column" width={cols} minHeight={e.props.placement === 'dock' ? e.props.scroll?.bodyRows : undefined}>
+        <Box flexDirection="column" width={cols} flexGrow={1}>
+          {goal ? <Text dimColor bold>{`GOAL${goalKey ? ` · ${goalKey}` : ''}`}</Text> : null}
+          {goal ? <Text bold wrap="wrap">{goal}</Text> : null}
+          {goal ? <Text> </Text> : null}
 
-        {head('PLAN', steps.length ? `${done} of ${steps.length} done` : '')}
-        {steps.length === 0 ? <Text dimColor>No plan yet: it shows once Claude makes one.</Text> : null}
-        {steps.map((s, i) => {
-          if (s.status === 'completed') return row(<Text dimColor wrap="truncate-end">{`✓ ${s.text}`}</Text>, <Text> </Text>)
-          if (i === doing) {
-            const mins = s.since ? Math.floor((now - s.since) / 60_000) : 0
-            return row(<Text color="warning" bold wrap="truncate-end">{`● ${s.text}`}</Text>, <Text color="warning">{mins > 0 ? ` now · ${mins}m` : ' now'}</Text>)
-          }
-          if (i === nextIdx) return row(<Text wrap="truncate-end">{`○ ${s.text}`}</Text>, <Text dimColor> next</Text>)
-          return row(<Text dimColor wrap="truncate-end">{`○ ${s.text}`}</Text>, <Text> </Text>)
-        })}
-        <Text> </Text>
+          {head('PLAN', steps.length ? `${done} of ${steps.length} done` : '')}
+          {steps.length === 0 ? <Text dimColor>No plan yet: it shows once Claude makes one.</Text> : null}
+          {steps.map((s, i) => {
+            if (s.status === 'completed') return row(<Text dimColor wrap="truncate-end">{`✓ ${s.text}`}</Text>, <Text> </Text>)
+            if (i === doing) {
+              const mins = s.since ? Math.floor((now - s.since) / 60_000) : 0
+              return row(<Text color="warning" bold wrap="truncate-end">{`● ${s.text}`}</Text>, <Text color="warning">{mins > 0 ? ` now · ${mins}m` : ' now'}</Text>)
+            }
+            if (i === nextIdx) return row(<Text wrap="truncate-end">{`○ ${s.text}`}</Text>, <Text dimColor> next</Text>)
+            return row(<Text dimColor wrap="truncate-end">{`○ ${s.text}`}</Text>, <Text> </Text>)
+          })}
+          <Text> </Text>
 
-        {head('CHANGES', changed.length ? `+${added} −${removed}` : '')}
-        {changed.length === 0 ? <Text dimColor>No files changed yet.</Text> : null}
-        {changed.map((f) => (
-          <Box flexDirection="column" width={cols}>
-            {row(
-              <Button key={`file:${f.path}`} plain label={`${openPath === f.path ? '▾' : '▸'} ${f.rel}`} onPress={() => { void toggle($, f.path) }} />,
-              f.isNew
-                ? <Text color="diffAdded">{` new +${f.add}`}</Text>
-                : <Text><Text color="diffAdded">{` +${f.add}`}</Text><Text color="diffRemoved">{` −${f.del}`}</Text></Text>
-            )}
-            {openPath === f.path && view.path === f.path && view.text ? <Code source={view.text} format="diff" path={f.rel} wrap="truncate-end" /> : null}
-            {openPath === f.path && view.path === f.path && view.note ? <Text dimColor>{`  ${view.note}`}</Text> : null}
-            {openPath === f.path && openDir
-              ? <Box marginLeft={2}><Button key={`kovan:${f.path}`} plain label="Open in Kovan" onPress={() => { void openInKovan($, f.path) }} /></Box>
-              : null}
-          </Box>
-        ))}
-        <Text> </Text>
+          {head('CHANGES', changed.length ? `+${added} −${removed}` : '')}
+          {changed.length === 0 ? <Text dimColor>No files changed yet.</Text> : null}
+          {changed.map((f) => (
+            <Box flexDirection="column" width={cols}>
+              {row(
+                <Button key={`file:${f.path}`} plain label={`${openPath === f.path ? '▾' : '▸'} ${f.rel}`} onPress={() => { void toggle($, f.path) }} />,
+                f.isNew
+                  ? <Text color="diffAdded">{` new +${f.add}`}</Text>
+                  : <Text><Text color="diffAdded">{` +${f.add}`}</Text><Text color="diffRemoved">{` −${f.del}`}</Text></Text>
+              )}
+              {openPath === f.path && view.path === f.path && view.text ? <Code source={view.text} format="diff" path={f.rel} wrap="truncate-end" /> : null}
+              {openPath === f.path && view.path === f.path && view.note ? <Text dimColor>{`  ${view.note}`}</Text> : null}
+              {openPath === f.path && openDir
+                ? <Box marginLeft={2}><Button key={`kovan:${f.path}`} plain label="Open in Kovan" onPress={() => { void openInKovan($, f.path) }} /></Box>
+                : null}
+            </Box>
+          ))}
+          <Text> </Text>
 
-        {head('CHECKS')}
-        {ran.length === 0 ? <Text dimColor>None yet: tests and typechecks show here when they run.</Text> : null}
-        {ran.map((c) => row(
-          <Text wrap="truncate-end"><Text color={c.ok === null ? 'subtle' : c.ok ? 'success' : 'error'}>{c.ok === null ? '… ' : '● '}</Text>{c.name}</Text>,
-          <Text dimColor wrap="truncate-end">{` ${c.detail}`}</Text>
-        ))}
-        {scripts ? <Box marginTop={1}><Button key="run-checks" label="Run checks" onPress={() => { void runChecks($) }} /></Box> : null}
-        <Text> </Text>
+          {head('CHECKS')}
+          {ran.length === 0 ? <Text dimColor>None yet: tests and typechecks show here when they run.</Text> : null}
+          {ran.map((c) => row(
+            <Text wrap="truncate-end"><Text color={c.ok === null ? 'subtle' : c.ok ? 'success' : 'error'}>{c.ok === null ? '… ' : '● '}</Text>{c.name}</Text>,
+            <Text dimColor wrap="truncate-end">{` ${c.detail}`}</Text>
+          ))}
+          {canCheck ? <Box marginTop={1}><Button key="run-checks" label="Run checks" onPress={() => { void runChecks($) }} /></Box> : null}
+          <Text> </Text>
+        </Box>
 
         <Text dimColor wrap="truncate-end">{usageLine(u, now)}</Text>
       </Box>

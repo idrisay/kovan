@@ -395,7 +395,7 @@ pane beside Claude, from top to bottom:
 - Claude's own plan, from TodoWrite or TaskCreate/TaskUpdate: ✓ done, the step in progress as Now with its minutes, the one after it as Next.
 - Changes: each file the session edited, +/- against HEAD. A click opens its diff under it, cut at a hunk past 400 lines.
 - Checks: the tests, typechecks and lints the agent ran, from its own Bash calls. Run checks runs the project's `typecheck`, `test` and `lint` scripts, only when pressed.
-- One small dim line: `Model · Context · Session · Weekly` with reset times.
+- One small dim line on the pane's last row when docked: `Model · Context · Session · Weekly` with reset times.
 
 Under an open diff, **Open in Kovan** (item 148) shows that diff in the
 Workspace view and brings the window forward. The pane can't reach the
@@ -406,8 +406,13 @@ it, and answers in `<id>.reply` with one line the pane shows as a toast.
 only a repository inside a workspace, the rule every workspace read follows.
 Requests older than a minute, or left from before Kovan started, are
 dropped, not acted on.
-It opens by itself on a terminal of 144+ columns and with `/kovan` at any
-width. The mod has its own tests (`claude plugin test <dir>`) and must pass
+It opens on the session's first prompt (item 149): Claude counts a
+`prompt.submit` as the person asking, so it is placed at any width, and later
+prompts don't reopen a pane closed by hand; `/kovan` does. Kovan never types
+`/kovan` into the terminal: sent mid-turn with "send now", it stopped
+Claude's turn. Nothing runs a process while the pane draws (a draw cut off
+by the next one failed with "process.run aborted"): what drawing needs is
+worked out before, into state. The mod has its own tests (`claude plugin test <dir>`) and must pass
 `claude plugin validate <dir>`.
 
 **Hover card (item 115).** A session or Quick model row shows `HoverCard`
