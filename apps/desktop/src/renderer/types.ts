@@ -312,6 +312,8 @@ export interface KovanApi {
   workspaceRevert(repo: string, changes: FileChange[]): Promise<void>;
   workspaceTree(dir: string): Promise<Entry[]>;
   workspaceRead(file: string): Promise<FileBody>;
+  /** A workspace image as a data URL, for the Markdown preview (item 161). */
+  workspaceImage(file: string): Promise<string | undefined>;
   workspaceWrite(file: string, text: string, expected?: FileStamp): Promise<WriteResult>;
 
   sessions(): Promise<SessionInfo[]>;

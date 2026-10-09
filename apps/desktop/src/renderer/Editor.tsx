@@ -142,10 +142,13 @@ export function Editor({
   onCursor,
   registerSave,
   onSaved,
+  onText,
   goto
 }: {
   path: string;
   body: FileBody;
+  /** Every change to the text, saved or not: the Markdown preview follows it (item 161). */
+  onText?: (text: string) => void;
   /** Lines that differ from git's copy, for the change bars. */
   marks?: ChangeMark[];
   /** Bumped when the workspace re-reads git; the editor then checks the disk. */
@@ -178,6 +181,7 @@ export function Editor({
       onCursor={onCursor}
       registerSave={registerSave}
       onSaved={onSaved}
+      {...(onText ? { onText } : {})}
       {...(goto ? { goto } : {})}
     />
   );
@@ -192,10 +196,12 @@ function CodeEditor({
   onCursor,
   registerSave,
   onSaved,
+  onText,
   goto
 }: {
   path: string;
   body: Extract<FileBody, { kind: 'text' }>;
+  onText?: (text: string) => void;
   marks?: ChangeMark[];
   revision: number;
   onDirtyChange: (dirty: boolean) => void;
@@ -255,7 +261,9 @@ function CodeEditor({
 
     const report = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        onDirtyChange(update.state.doc.toString() !== saved.current);
+        const text = update.state.doc.toString();
+        onDirtyChange(text !== saved.current);
+        onText?.(text);
       }
       if (update.selectionSet || update.docChanged) {
         const head = update.state.selection.main;

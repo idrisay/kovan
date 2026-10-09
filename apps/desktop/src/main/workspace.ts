@@ -109,6 +109,14 @@ export type WriteResult =
  */
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
+/** A screenshot is a few MB; past this the preview says the image is missing. */
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+const IMAGE_TYPES: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml'
+};
+
 /** Enough to catch a NUL in any real binary's header. */
 const SNIFF_BYTES = 8192;
 
@@ -462,6 +470,22 @@ export class Workspaces {
       truncated: false,
       ...stamp
     };
+  }
+
+  /**
+   * An image a Markdown preview shows (item 161), as a data URL: only inside
+   * a workspace, like every read here, only image types, and at most
+   * `MAX_IMAGE_BYTES`. Undefined for anything else, which the preview shows
+   * as a missing image.
+   */
+  async image(file: string): Promise<string | undefined> {
+    const type = IMAGE_TYPES[path.extname(file).toLowerCase()];
+    if (!type) return undefined;
+    const resolved = await this.inside(file).catch(() => undefined);
+    if (!resolved) return undefined;
+    const info = await stat(resolved).catch(() => undefined);
+    if (!info?.isFile() || info.size > MAX_IMAGE_BYTES) return undefined;
+    return `data:${type};base64,${(await readFile(resolved)).toString('base64')}`;
   }
 
   /**

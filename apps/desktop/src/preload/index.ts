@@ -232,6 +232,7 @@ const api = {
     ipcRenderer.invoke('kovan:workspace-revert', repo, changes),
   workspaceTree: (dir: string) => ipcRenderer.invoke('kovan:workspace-tree', dir),
   workspaceRead: (file: string) => ipcRenderer.invoke('kovan:workspace-read', file),
+  workspaceImage: (file: string) => ipcRenderer.invoke('kovan:workspace-image', file),
   workspaceWrite: (file: string, text: string, expected?: unknown) =>
     ipcRenderer.invoke('kovan:workspace-write', file, text, expected),
 

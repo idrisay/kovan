@@ -977,6 +977,7 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle('kovan:workspace-tree', (_event, dir: string) => workspaces.tree(dir));
   ipcMain.handle('kovan:workspace-read', (_event, file: string) => workspaces.read(file));
+  ipcMain.handle('kovan:workspace-image', (_event, file: string) => workspaces.image(String(file)));
   ipcMain.handle(
     'kovan:workspace-write',
     (_event, file: string, text: string, expected?: { mtimeMs: number; bytes: number }) =>

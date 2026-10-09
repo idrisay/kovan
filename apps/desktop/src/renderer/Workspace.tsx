@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { changeMarks, moveBy, moveItem, type ChangeMark } from '@kovan/core';
 import { useMenuDismiss } from './menuDismiss';
 import { Editor, formatBytes, statusFor } from './Editor';
+import { MarkdownPreview } from './MarkdownPreview';
 import { rememberFile } from './QuickOpen';
 import { Diff } from './Diff';
 import { Resizer } from './Resizer';
@@ -1427,6 +1428,17 @@ function NoWorkspace({ onCreate }: { onCreate: () => void }) {
 const WHOLE_FILE = 1_000_000;
 const WHOLE_KEY = 'kovan.diff-whole-file';
 
+type MdMode = 'source' | 'split' | 'preview';
+const MD_MODE_KEY = 'kovan.markdown-mode';
+const MD_MODES: [MdMode, string][] = [['source', 'Source'], ['split', 'Split'], ['preview', 'Preview']];
+
+function loadMdMode(): MdMode {
+  try {
+    const saved = localStorage.getItem(MD_MODE_KEY);
+    return saved === 'split' || saved === 'preview' ? saved : 'source';
+  } catch { return 'source'; }
+}
+
 function loadWhole(): boolean {
   try { return localStorage.getItem(WHOLE_KEY) === '1'; } catch { return false; }
 }
@@ -1462,6 +1474,38 @@ function TabBody({
   // Remembered across tabs and launches: someone who reads diffs in full
   // wants the next one in full too.
   const [whole, setWhole] = useState(loadWhole);
+
+  // Markdown (item 161): the source, the preview, or both side by side. The
+  // last choice is kept, so someone who reads notes rendered gets them so.
+  const markdown = tab.kind === 'file' && /\.(md|markdown|mdx)$/i.test(tab.path);
+  const [mdMode, setMdMode] = useState<MdMode>(loadMdMode);
+  const chooseMd = useCallback((mode: MdMode) => {
+    setMdMode(mode);
+    try { localStorage.setItem(MD_MODE_KEY, mode); } catch { /* this window only */ }
+  }, []);
+  // What the editor holds, unsaved edits included, a beat behind the typing.
+  const [text, setText] = useState<string>();
+  const pending = useRef<ReturnType<typeof setTimeout>>();
+  const onText = useCallback((next: string) => {
+    clearTimeout(pending.current);
+    pending.current = setTimeout(() => setText(next), 150);
+  }, []);
+  useEffect(() => () => clearTimeout(pending.current), []);
+  const bodyBox = useRef<HTMLDivElement>(null);
+  // ⌘⇧V, as in VS Code: preview, or back to the source. Only the tab on
+  // screen: the Workspace view stays mounted when hidden.
+  useEffect(() => {
+    if (!markdown) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      const mod = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+      if (!mod || !event.shiftKey || event.altKey || event.key.toLowerCase() !== 'v') return;
+      if (!bodyBox.current?.offsetParent) return;
+      event.preventDefault();
+      chooseMd(mdMode === 'preview' ? 'source' : 'preview');
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [markdown, mdMode, chooseMd]);
 
   const toggleWhole = () => setWhole((w) => {
     try { localStorage.setItem(WHOLE_KEY, w ? '0' : '1'); } catch { /* this window only */ }
@@ -1511,18 +1555,41 @@ function TabBody({
 
   if (error) return <p className="quiet centred error">{error}</p>;
 
+  const previewable = markdown && body?.kind === 'text';
+  const mode = previewable ? mdMode : 'source';
+
   return (
-    <div className="tab-body">
-      <div className="tab-path">
-        <bdi>{tab.kind === 'file' ? tab.path : `${tab.repo}/${tab.path}`}</bdi>
+    <div className="tab-body" ref={bodyBox}>
+      <div className="tab-bar">
+        <div className="tab-path">
+          <bdi>{tab.kind === 'file' ? tab.path : `${tab.repo}/${tab.path}`}</bdi>
+        </div>
+        {previewable && (
+          <div className="segmented md-modes" role="tablist" aria-label="Markdown view">
+            {MD_MODES.map(([id, label]) => (
+              <button
+                key={id} role="tab" aria-selected={mode === id}
+                className={mode === id ? 'seg on' : 'seg'}
+                title={id === 'preview' ? `Preview (${isMac ? '⌘⇧V' : 'Ctrl+Shift+V'})` : undefined}
+                onClick={() => chooseMd(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {tab.kind === 'file' ? (
         body ? (
           <>
+            <div className={`md-panes mode-${mode}`}>
+            {/* Kept mounted in Preview: it holds the unsaved edits. */}
+            <div className="md-source">
             <Editor
               path={tab.path} body={body} marks={marks} revision={revision}
               onDirtyChange={onDirty} onCursor={onCursor} registerSave={registerSave}
+              {...(previewable ? { onText } : {})}
               {...(goto ? { goto } : {})}
               onSaved={(next) => {
                 setBytes(next.bytes);
@@ -1531,6 +1598,17 @@ function TabBody({
                 onStatus();
               }}
             />
+            </div>
+            {previewable && mode !== 'source' && (
+              <div className="md-preview-scroll">
+                <MarkdownPreview
+                  path={tab.path}
+                  text={text ?? (body.kind === 'text' ? body.text : '')}
+                  onOpenFile={onOpenFile}
+                />
+              </div>
+            )}
+            </div>
             <div className="status-bar">
               {cursor && <span>Ln {cursor.line}, Col {cursor.column}</span>}
               {cursor && cursor.selected > 0 && <span>Sel {cursor.selected}</span>}

@@ -489,7 +489,13 @@ go-to-file (`QuickOpen.tsx`, item 100) from anywhere: recent files first
 (`rememberFile` records every file opened, however), fuzzy matching over the
 active workspace's files (`main/fileIndex.ts` — `git ls-files` inside a repo,
 listed on the first ⌘P, never before), `name:42` for a line; the file opens
-in the Workspace view. Terminals draw inline images (item 160,
+in the Workspace view. A Markdown file's tab has Source, Split and Preview
+(item 161, `MarkdownPreview.tsx`; ⌘⇧V toggles Preview, the last choice is
+kept). The preview follows the editor, unsaved edits included; it goes
+through its own DOMPurify instance like `Prose`; relative images are read by
+main (`workspaceImage`: inside a workspace, image types, ≤ 10 MB) and never
+fetched by the page; `#heading` links scroll, relative links open the file in
+a tab, web links open in the browser. Terminals draw inline images (item 160,
 `@xterm/addon-image`): iTerm2's protocol, as `imgcat` writes it, and Sixel,
 up to 32 MB of images per terminal. ⌘J (item 158, `terminalToggle.ts`), as in VS Code,
 shows or hides the terminal of the view on screen: in the Workspace view a

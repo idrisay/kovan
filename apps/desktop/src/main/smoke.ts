@@ -672,6 +672,9 @@ export async function smokeUi(
   if (process.env['KOVAN_SMOKE_ITEM136'] && mode === 'seeded') {
     return { item136: await driveItem136(win, process.env['KOVAN_SMOKE_ITEM136']) };
   }
+  if (process.env['KOVAN_SMOKE_ITEM161'] && mode === 'seeded') {
+    return { item161: await driveItem161(win, process.env['KOVAN_SMOKE_ITEM161']) };
+  }
   if (process.env['KOVAN_SMOKE_ITEM160'] && mode === 'seeded' && sessions) {
     return { item160: await driveItem160(win, sessions, process.env['KOVAN_SMOKE_ITEM160']) };
   }
@@ -4229,6 +4232,79 @@ async function driveItem135(win: BrowserWindow, prefix: string): Promise<Record<
   win.webContents.invalidate();
   await pause(300);
   await writeFile(`${prefix}-later.png`, (await win.webContents.capturePage()).toPNG());
+  return report;
+}
+
+/**
+ * Item 161: a Markdown file's preview. Opens `notes/report.md` in the seeded
+ * workspace: Preview renders it with its local image read through main, a
+ * `#heading` link scrolls, script is gone, typing shows in Split before a
+ * save, and a link to another note opens it in a tab.
+ */
+async function driveItem161(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const clickRow = (name: string) => read(win, `[...document.querySelectorAll('.tree-row')].find((r) => r.innerText.trim() === '${name}')?.click()`);
+  const mode = (label: string) => read(win, `[...document.querySelectorAll('.md-modes .seg')].find((b) => b.textContent.trim() === '${label}').click()`);
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="workspace"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="workspace"]').click()`);
+  await until(win, `[...document.querySelectorAll('.tree-row')].some((r) => r.innerText.trim() === 'notes')`, 8_000);
+  await clickRow('notes');
+  await until(win, `[...document.querySelectorAll('.tree-row')].some((r) => r.innerText.trim() === 'report.md')`, 8_000);
+  await clickRow('report.md');
+  await until(win, `document.querySelector('.md-modes')`, 8_000);
+  const report: Record<string, unknown> = {};
+  report['modes'] = await read(win, `[...document.querySelectorAll('.md-modes .seg')].map((b) => b.innerText + (b.classList.contains('on') ? ' (on)' : ''))`);
+  await mode('Preview');
+  await pause(1_200);
+  report['preview'] = await read(win, `(() => {
+    const p = document.querySelector('.md-preview');
+    const imgs = [...p.querySelectorAll('img')].map((i) => ({ alt: i.alt, loaded: i.naturalWidth, missing: i.classList.contains('missing'), onerror: i.hasAttribute('onerror') }));
+    return {
+      editorHidden: document.querySelector('.md-source').offsetParent === null,
+      h1: p.querySelector('h1')?.id, h2: p.querySelector('h2')?.id,
+      tableRows: p.querySelectorAll('table tr').length, checkboxes: p.querySelectorAll('input[type=checkbox]').length,
+      code: Boolean(p.querySelector('pre code')), quote: Boolean(p.querySelector('blockquote')),
+      script: Boolean(p.querySelector('script')), imgs
+    };
+  })()`);
+  await shot('preview');
+  await read(win, `[...document.querySelectorAll('.md-preview a')].find((a) => a.innerText === 'the status').click()`);
+  await pause(500);
+  report['anchorScrolled'] = await read(win, `({ down: document.querySelector('.md-preview-scroll').scrollTop > 0, sideways: document.querySelector('.md-preview-scroll').scrollLeft })`);
+  await shot('anchor');
+
+  // Split: an unsaved edit shows in the preview.
+  await mode('Split');
+  await pause(500);
+  await read(win, `(() => { const v = document.querySelector('.md-source .cm-content').cmView?.view ?? null; return Boolean(v); })()`);
+  win.webContents.focus();
+  await read(win, `document.querySelector('.md-source .cm-content').focus()`);
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Up', modifiers: ['meta'] });
+  for (const ch of '## Typed live\n') {
+    if (ch === '\n') win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+    else win.webContents.sendInputEvent({ type: 'char', keyCode: ch });
+  }
+  await pause(800);
+  report['split'] = await read(win, `({ both: document.querySelector('.md-source').offsetParent !== null && Boolean(document.querySelector('.md-preview')), typed: [...document.querySelectorAll('.md-preview h1, .md-preview h2')].some((h) => h.innerText === 'Typed live'), unsaved: Boolean(document.querySelector('.tab-dirty')) })`);
+  await shot('split');
+
+  // ⌘⇧V back to the source, and a relative link opens the other note.
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'V', modifiers: ['meta', 'shift'] });
+  await pause(400);
+  report['afterShortcut'] = await read(win, `[...document.querySelectorAll('.md-modes .seg')].find((b) => b.classList.contains('on'))?.innerText`);
+  await mode('Preview');
+  await pause(500);
+  await read(win, `[...document.querySelectorAll('.md-preview a')].find((a) => a.innerText === 'other note').click()`);
+  await pause(1_000);
+  report['tabs'] = await read(win, `[...document.querySelectorAll('.tabs .tab')].map((t) => t.innerText.trim())`);
   return report;
 }
 
