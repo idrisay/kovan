@@ -1,9 +1,10 @@
 /**
  * The Dock icon's right-click menu (item 135), the way VS Code's lists recent
  * folders: your workspaces, the active one ticked, then the active
- * workspace's folders with their Finder icons. Picking one brings Kovan
- * forward on the Workspace view, switched to that workspace and, for a
- * folder, opened at it.
+ * workspace's folders with their Finder icons, then New Window (item 157).
+ * Picking a workspace brings forward the window on it, or opens a new window
+ * for it; a folder also opens at that folder. macOS adds the open windows
+ * itself, by title, below these.
  *
  * Rebuilt when the workspaces or the active one change, never on a timer: the
  * menu is read from settings that are already in memory.
@@ -20,9 +21,11 @@ export function dockTemplate(
   list: readonly Workspace[],
   activeId: string | undefined,
   open: (id: string, folder?: string) => void,
-  icons: ReadonlyMap<string, NativeImage> = new Map()
+  icons: ReadonlyMap<string, NativeImage> = new Map(),
+  newWindow?: () => void
 ): MenuItemConstructorOptions[] {
-  if (list.length === 0) return [];
+  const tail: MenuItemConstructorOptions[] = newWindow ? [{ label: 'New Window', click: newWindow }] : [];
+  if (list.length === 0) return tail;
   const items: MenuItemConstructorOptions[] = list.map((w) => ({
     label: w.name,
     type: 'checkbox',
@@ -42,6 +45,7 @@ export function dockTemplate(
       });
     }
   }
+  if (tail.length > 0) items.push({ type: 'separator' }, ...tail);
   return items;
 }
 
@@ -58,14 +62,15 @@ export class DockMenu {
   constructor(
     private readonly list: () => Workspace[],
     private readonly activeId: () => string | undefined,
-    private readonly open: (id: string, folder?: string) => void
+    private readonly open: (id: string, folder?: string) => void,
+    private readonly newWindow?: () => void
   ) {
     latest = this;
   }
 
   /** The template as it stands, for the smoke run to read. */
   template(): MenuItemConstructorOptions[] {
-    return dockTemplate(this.list(), this.activeId(), this.open, this.icons);
+    return dockTemplate(this.list(), this.activeId(), this.open, this.icons, this.newWindow);
   }
 
   async refresh(): Promise<void> {

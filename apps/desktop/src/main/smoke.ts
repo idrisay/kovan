@@ -20,7 +20,7 @@
  * `KOVAN_SHOT=<path>` also writes a PNG of the window.
  */
 
-import { app, clipboard, ClipboardItem, type BrowserWindow } from 'electron';
+import { app, BrowserWindow, clipboard, ClipboardItem } from 'electron';
 import { latestDockMenu } from './dockMenu';
 import { existsSync, readdirSync } from 'node:fs';
 import * as os from 'node:os';
@@ -671,6 +671,9 @@ export async function smokeUi(
   }
   if (process.env['KOVAN_SMOKE_ITEM136'] && mode === 'seeded') {
     return { item136: await driveItem136(win, process.env['KOVAN_SMOKE_ITEM136']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM157'] && mode === 'seeded') {
+    return { item157: await driveItem157(win, process.env['KOVAN_SMOKE_ITEM157']) };
   }
   if (process.env['KOVAN_SMOKE_ITEM135'] && mode === 'seeded') {
     return { item135: await driveItem135(win, process.env['KOVAN_SMOKE_ITEM135']) };
@@ -4220,6 +4223,89 @@ async function driveItem135(win: BrowserWindow, prefix: string): Promise<Record<
   win.webContents.invalidate();
   await pause(300);
   await writeFile(`${prefix}-later.png`, (await win.webContents.capturePage()).toPNG());
+  return report;
+}
+
+/**
+ * Item 157: one window per workspace. Seed settings.json with three
+ * workspaces before launch. New Window from the Dock menu opens a second one
+ * on a workspace no window shows; each window keeps its own workspace when the
+ * other switches; a Dock pick of a shown workspace brings its window forward
+ * instead of opening another; ⌘⇧N opens one more; and the open windows are
+ * saved for the next launch.
+ */
+async function driveItem157(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const menu = latestDockMenu();
+  if (!menu) return { menu: null };
+  await menu.refresh();
+  const click = (label: string) => (menu.template().find((i) => i.label === label)?.click as (() => void) | undefined)?.();
+  const windows = () => BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).sort((a, b) => a.id - b.id);
+  const each = async () => Promise.all(windows().map(async (w) => ({
+    title: w.getTitle(),
+    workspace: await read(w, `window.kovan.workspaces().then((r) => r.list.find((w) => w.id === r.active)?.name ?? null)`),
+    shown: await read(w, `document.querySelector('.ws-main')?.innerText.split('\\n')[0] ?? null`),
+    focused: w.isFocused()
+  })));
+  const saved = async () => JSON.parse(await readFile(path.join(app.getPath('userData'), 'settings.json'), 'utf8'))['windows.workspaces'];
+  const waitFor = async (count: number) => {
+    const deadline = Date.now() + 15_000;
+    while (windows().length < count && Date.now() < deadline) await pause(100);
+    const last = windows().at(-1)!;
+    // Seeded runs have no poller; the new window gets the fixture like the first.
+    await until(last, `document.querySelector('#root')?.children.length > 0`, 15_000);
+    last.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+    await until(last, `document.querySelector('.rail')`, 15_000);
+    return last;
+  };
+  const toWorkspace = async (w: BrowserWindow) => {
+    await read(w, `document.querySelector('.rail-item[data-view="workspace"]').click()`);
+    await until(w, `document.querySelector('.ws-main')`, 8_000);
+    await pause(400);
+  };
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await toWorkspace(win);
+  const report: Record<string, unknown> = {};
+  report['menu'] = menu.template().map((i) => i.type === 'separator' ? '---' : `${i.checked ? '✓ ' : ''}${i.label}`);
+  report['start'] = await each();
+
+  click('New Window');
+  const second = await waitFor(2);
+  await toWorkspace(second);
+  report['afterNewWindow'] = await each();
+
+  // The second window switches to the third workspace; the first keeps its own.
+  await read(second, `document.querySelector('.ws-row [aria-label="Workspace actions"]').click()`);
+  await pause(200);
+  await read(second, `[...document.querySelectorAll('.ws-row .menu button')].find((b) => b.innerText.startsWith('notes'))?.click()`);
+  await pause(800);
+  report['afterSwitch'] = await each();
+
+  // A Dock pick of a workspace a window shows: that window, no new one.
+  const firstName = (report['start'] as { workspace: string }[])[0]!.workspace;
+  click(firstName);
+  await pause(800);
+  report['afterPickShown'] = { count: windows().length, windows: await each() };
+
+  // ⌘⇧N in a window.
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'N', modifiers: ['meta', 'shift'] });
+  const third = await waitFor(3);
+  await toWorkspace(third);
+  report['afterShortcut'] = await each();
+  report['saved'] = await saved();
+
+  third.close();
+  await pause(500);
+  report['savedAfterClose'] = await saved();
+
+  for (const [i, w] of windows().entries()) {
+    w.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-window${i + 1}.png`, (await w.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-window${i + 1}.png`);
+  }
   return report;
 }
 

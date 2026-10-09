@@ -212,6 +212,7 @@ const api = {
   workspaces: () => ipcRenderer.invoke('kovan:workspaces'),
   workspaceCreate: () => ipcRenderer.invoke('kovan:workspace-create'),
   workspaceActivate: (id: string) => ipcRenderer.invoke('kovan:workspace-activate', id),
+  newWindow: () => ipcRenderer.invoke('kovan:window-new'),
   workspaceAddFolder: (id: string) => ipcRenderer.invoke('kovan:workspace-add-folder', id),
   workspaceRemoveFolder: (id: string, folder: string) =>
     ipcRenderer.invoke('kovan:workspace-remove-folder', id, folder),

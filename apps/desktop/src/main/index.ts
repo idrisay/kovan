@@ -25,6 +25,7 @@ import type { ProviderId, SpeechProviderId, ThemeId } from '@kovan/core';
 import { DEFAULT_SETTINGS, resolveTheme, themeInfo, type ReviewTool } from '@kovan/core';
 import type { ChangeKind } from '@kovan/git';
 import { KovanTray } from './tray';
+import { OPEN_WINDOWS_SETTING, Windows, windowsToRestore } from './windows';
 import { Activity } from './notify';
 import { ActivityFeed } from './activityFeed';
 import { Dictation } from './dictation';
@@ -107,8 +108,8 @@ const activity = new Activity(host);
 let pendingActivityOpen: string | undefined;
 
 function deliverActivity(inbox: ActivityEvent[], fresh: ActivityEvent[], quiet: boolean): void {
-  const live = window && !window.isDestroyed() ? window : undefined;
-  live?.webContents.send('kovan:activity', inbox);
+  windows.send('kovan:activity', inbox);
+  const live = windows.focused() ?? windows.front();
   if (quiet || fresh.length === 0) return;
 
   // In front: a toast in the window. Anywhere else — closed, hidden, behind
@@ -127,13 +128,10 @@ function deliverActivity(inbox: ActivityEvent[], fresh: ActivityEvent[], quiet: 
   if (notify.length === 0) return;
   const open = (subject: string) => {
     pendingActivityOpen = subject;
-    if (window && !window.isDestroyed()) {
-      window.show();
-      window.focus();
+    const { window, fresh } = windows.show();
+    if (!fresh) {
       window.webContents.send('kovan:activity-open', subject);
       pendingActivityOpen = undefined;
-    } else {
-      createWindow();
     }
   };
   if (notify.length <= 2) {
@@ -192,27 +190,28 @@ const quick = new QuickModel(host, {
 const usage = new Usage(host, sessions, () => quick.listJobs());
 const agents = new Agents(host, sessions, quick);
 const running = new RunningAgents(host, sessions, () => {
-  createWindow();
-  window?.webContents.send('kovan:show-agents');
+  windows.show().window.webContents.send('kovan:show-agents');
 });
 const workspaces = new Workspaces(host);
 /**
- * A pick from the Dock menu while no window was open: the new window's
- * renderer asks for it once it is listening (item 135), since a message sent
- * now would arrive before anything could hear it.
+ * A Dock pick that opened a new window, by window id: the new renderer asks
+ * for it once it is listening (item 135), since a message sent now would
+ * arrive before anything could hear it.
  */
-let pendingWorkspaceOpen: { id: string; folder?: string } | undefined;
+const pendingWorkspaceOpen = new Map<number, { id: string; folder?: string }>();
+// One window per workspace (item 157): a pick brings forward the window on
+// that workspace, or opens a new one for it, as VS Code does.
 const dockMenu = new DockMenu(() => workspaces.list(), () => workspaces.activeId(), (id, folder) => {
   void (async () => {
     await workspaces.activate(id);
-    const fresh = !window || window.isDestroyed();
-    createWindow();
-    if (fresh) pendingWorkspaceOpen = { id, ...(folder ? { folder } : {}) };
-    else window?.webContents.send('kovan:open-workspace', id, folder);
+    const { window, fresh } = windows.showWorkspace(id);
+    if (fresh) pendingWorkspaceOpen.set(window.id, { id, ...(folder ? { folder } : {}) });
+    else window.webContents.send('kovan:open-workspace', id, folder);
   })();
-});
+}, () => void newWindow());
 host.config.onChange((key) => {
   if (key === 'workspaces' || key === 'workspace.active') void dockMenu.refresh();
+  if (key === 'workspaces') windows.retitleAll();
 });
 
 /**
@@ -229,12 +228,13 @@ const openRequests = new OpenRequests(claudeModOpenDir(), async ({ repo, file })
   const side = diffSideFor(await workspaces.status(root), file);
   if (!side) return { ok: false, message: `${file} has no changes now.` };
   const target = { repo: root, file, side };
-  const fresh = !window || window.isDestroyed();
-  createWindow();
+  // The window on the workspace that has the repository, else the one in front.
+  const owner = workspaces.list().find((w) => w.folders.some((f) => root === f || root.startsWith(f + path.sep)));
+  const { window, fresh } = owner ? windows.showWorkspace(owner.id) : windows.show();
   // The click came from a terminal, maybe another app's: bring Kovan to the front.
   app.focus({ steal: true });
   if (fresh) pendingDiffOpen = target;
-  else window?.webContents.send('kovan:open-diff', target);
+  else window.webContents.send('kovan:open-diff', target);
   return { ok: true, message: `Opened ${file} in Kovan.` };
 }, (message) => host.log.info(message));
 
@@ -426,18 +426,31 @@ async function nameTerminal(cwd: string, subject?: string): Promise<{ title: str
   return { title: branch && branch !== 'HEAD' ? `${label} (${branch})` : label };
 }
 
-let window: BrowserWindow | undefined;
 let tray: KovanTray | undefined;
 let firstRefresh = true;
 
-function createWindow(): void {
-  if (window && !window.isDestroyed()) {
-    window.show();
-    window.focus();
-    return;
-  }
+const windows = new Windows({
+  build: buildWindow,
+  list: () => workspaces.list(),
+  active: () => workspaces.activeId(),
+  setActive: (id) => workspaces.activate(id),
+  save: (ids) => void host.config.set(OPEN_WINDOWS_SETTING, ids)
+});
 
-  window = new BrowserWindow({
+/** Shows the window in front, or opens one when none is open. */
+function createWindow(): void {
+  windows.show();
+}
+
+/** ⌘⇧N, and New Window in the Dock menu and the workspace menu (item 157). */
+function newWindow(): BrowserWindow {
+  const window = windows.open();
+  window.focus();
+  return window;
+}
+
+function buildWindow(): BrowserWindow {
+  const window = new BrowserWindow({
     width: 1080,
     height: 720,
     minWidth: 720,
@@ -464,7 +477,7 @@ function createWindow(): void {
     }
   });
 
-  window.once('ready-to-show', () => window?.show());
+  window.once('ready-to-show', () => window.show());
 
   if (process.env['KOVAN_SMOKE']) {
     window.webContents.on('console-message', (event) => {
@@ -478,10 +491,8 @@ function createWindow(): void {
   });
   window.on('unresponsive', () => host.log.warn('Window stopped responding'));
 
-  // Destroy, don't hide. See the note at the top of this file.
-  window.on('closed', () => {
-    window = undefined;
-  });
+  // Destroy, don't hide. See the note at the top of this file. `Windows`
+  // forgets a window when it closes.
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     void openLink(url, (m) => host.log.warn(m));
@@ -499,12 +510,15 @@ function createWindow(): void {
     // ⌘ on macOS, Ctrl on Linux, as everywhere else in Kovan.
     const mod = process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta;
     if (input.type !== 'keyDown' || !mod || input.alt) return;
-    if (input.key === '=' || input.key === '+') {
+    if (input.shift && input.key.toLowerCase() === 'n') {
       event.preventDefault();
-      window?.webContents.send('kovan:font-size-step', 1);
+      newWindow();
+    } else if (input.key === '=' || input.key === '+') {
+      event.preventDefault();
+      window.webContents.send('kovan:font-size-step', 1);
     } else if (input.key === '-') {
       event.preventDefault();
-      window?.webContents.send('kovan:font-size-step', -1);
+      window.webContents.send('kovan:font-size-step', -1);
     }
   });
 
@@ -514,6 +528,7 @@ function createWindow(): void {
   } else {
     void window.loadFile(path.join(dirname, '../renderer/index.html'));
   }
+  return window;
 }
 
 /**
@@ -577,9 +592,7 @@ function launchBackground(): string {
 
 function broadcast(snapshot: Snapshot): void {
   tray?.update(snapshot);
-  if (window && !window.isDestroyed()) {
-    window.webContents.send('kovan:snapshot', snapshot);
-  }
+  windows.send('kovan:snapshot', snapshot);
 }
 
 app.whenReady().then(async () => {
@@ -641,7 +654,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:snapshot', () => poller.current());
   ipcMain.handle('kovan:problems', () => problems.list());
   problems.onDidChange(({ log, started }) => {
-    if (window && !window.isDestroyed()) window.webContents.send('kovan:problems', { log, started });
+    windows.send('kovan:problems', { log, started });
   });
   ipcMain.handle('kovan:refresh', () => poller.refresh(true));
   ipcMain.handle('kovan:refresh-provider', (_event, id: PolledProvider) => poller.refreshProvider(id));
@@ -698,14 +711,10 @@ app.whenReady().then(async () => {
 
   // --- Quick model ----------------------------------------------------------
   quick.onChange((kind, subject, state) => {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send('kovan:quick', kind, subject, state);
-    }
+    windows.send('kovan:quick', kind, subject, state);
   });
   quick.onJobs((jobs) => {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send('kovan:quick-jobs', jobs);
-    }
+    windows.send('kovan:quick-jobs', jobs);
     void usage.quickChanged();
   });
   ipcMain.handle('kovan:quick-jobs', () => quick.listJobs());
@@ -728,18 +737,14 @@ app.whenReady().then(async () => {
 
   // --- Token usage ----------------------------------------------------------
   usage.onChange((records) => {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send('kovan:usage', records);
-    }
+    windows.send('kovan:usage', records);
   });
   ipcMain.handle('kovan:usage', () => usage.list());
   usage.start();
 
   // --- Running agents -------------------------------------------------------
   running.onChange((report) => {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send('kovan:running-agents', report);
-    }
+    windows.send('kovan:running-agents', report);
   });
   ipcMain.handle('kovan:running-agents', () => running.current());
   ipcMain.handle('kovan:running-agents-watch', (_event, on: boolean) => running.watch(on));
@@ -844,8 +849,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:command-duplicate', (_event, id: string) => quickCommands.duplicate(String(id)));
   ipcMain.handle('kovan:command-delete', (_event, id: string) => quickCommands.remove(String(id)));
   ipcMain.handle('kovan:command-run', (_event, id: string) => quickCommands.run(String(id)));
-  ipcMain.handle('kovan:command-folder', async () => {
+  ipcMain.handle('kovan:command-folder', async (event) => {
     const options = { properties: ['openDirectory', 'createDirectory'] as ('openDirectory' | 'createDirectory')[], title: 'Run the command in' };
+    const window = windows.windowOf(event.sender);
     const picked = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
     return picked.canceled ? '' : picked.filePaths[0] ?? '';
   });
@@ -900,13 +906,16 @@ app.whenReady().then(async () => {
   // --- Workspace ------------------------------------------------------------
   // Every path-taking channel below is resolved against the workspace folders
   // inside `Workspaces`; see the note at the top of workspace.ts.
-  ipcMain.handle('kovan:workspaces', () => ({
+  // `active` is the asking window's own workspace (item 157).
+  ipcMain.handle('kovan:workspaces', (event) => ({
     list: workspaces.list(),
-    active: workspaces.activeId()
+    active: windows.workspaceOf(event.sender)
   }));
-  // ⌘P (item 100): the active workspace's files, listed on demand.
-  ipcMain.handle('kovan:quick-open-files', async (_event, force?: boolean) => {
-    const active = workspaces.list().find((w) => w.id === workspaces.activeId());
+  ipcMain.handle('kovan:window-new', () => void newWindow());
+  // ⌘P (item 100): the window's workspace's files, listed on demand.
+  ipcMain.handle('kovan:quick-open-files', async (event, force?: boolean) => {
+    const id = windows.workspaceOf(event.sender);
+    const active = workspaces.list().find((w) => w.id === id);
     if (!active || active.folders.length === 0) return { workspace: null, files: [] };
     return { workspace: active.name, files: await fileIndex.files(active.folders, force === true) };
   });
@@ -915,15 +924,21 @@ app.whenReady().then(async () => {
     pendingDiffOpen = undefined;
     return pending;
   });
-  ipcMain.handle('kovan:open-workspace-pending', () => {
-    const pending = pendingWorkspaceOpen;
-    pendingWorkspaceOpen = undefined;
+  ipcMain.handle('kovan:open-workspace-pending', (event) => {
+    const window = windows.windowOf(event.sender);
+    if (!window) return undefined;
+    const pending = pendingWorkspaceOpen.get(window.id);
+    pendingWorkspaceOpen.delete(window.id);
     return pending;
   });
-  ipcMain.handle('kovan:workspace-create', () => workspaces.create(window));
-  ipcMain.handle('kovan:workspace-activate', (_event, id: string) => workspaces.activate(id));
-  ipcMain.handle('kovan:workspace-add-folder', (_event, id: string) =>
-    workspaces.addFolder(id, window)
+  ipcMain.handle('kovan:workspace-create', async (event) => {
+    const made = await workspaces.create(windows.windowOf(event.sender));
+    if (made) await windows.switchTo(event.sender, made.id);
+    return made;
+  });
+  ipcMain.handle('kovan:workspace-activate', (event, id: string) => windows.switchTo(event.sender, String(id)));
+  ipcMain.handle('kovan:workspace-add-folder', (event, id: string) =>
+    workspaces.addFolder(id, windows.windowOf(event.sender))
   );
   ipcMain.handle('kovan:workspace-remove-folder', (_event, id: string, folder: string) =>
     workspaces.removeFolder(id, folder)
@@ -993,16 +1008,8 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle('kovan:shells', () => listShells());
 
-  sessions.onOutput(({ id, data }) => {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send('kovan:session-output', id, data);
-    }
-  });
-  sessions.onDidChange((list) => {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send('kovan:sessions', list);
-    }
-  });
+  sessions.onOutput(({ id, data }) => windows.send('kovan:session-output', id, data));
+  sessions.onDidChange((list) => windows.send('kovan:sessions', list));
 
   // Before the first poll, so an imported token is used on the very first
   // refresh rather than showing "not connected" for a cycle.
@@ -1027,8 +1034,7 @@ app.whenReady().then(async () => {
   poller.start();
 
   if (process.env['KOVAN_SMOKE']) {
-    createWindow();
-    const win = window!;
+    const win = windows.open(workspaces.activeId());
     win.webContents.once('did-finish-load', async () => {
       const mode = process.env['KOVAN_SMOKE'] as SmokeMode;
       // A throw in here used to reject into nothing: `app.exit` never ran and
@@ -1055,12 +1061,16 @@ app.whenReady().then(async () => {
   // Cmd+Tab to Kovan with its window closed: `activate` only fires for a Dock
   // click, so switching to it would show a menu bar and nothing else.
   app.on('did-become-active', () => {
-    if (!window || window.isDestroyed()) createWindow();
+    if (!windows.front()) createWindow();
   });
 
-  // Opened from Finder, Spotlight or the Dock: show the window. Only a login
-  // launch stays in the background.
-  if (!app.getLoginItemSettings().wasOpenedAtLogin && !process.argv.includes(HIDDEN_FLAG)) createWindow();
+  // Opened from Finder, Spotlight or the Dock: the windows open when Kovan
+  // last quit, each on its workspace (item 157). Only a login launch stays in
+  // the background.
+  if (!app.getLoginItemSettings().wasOpenedAtLogin && !process.argv.includes(HIDDEN_FLAG)) {
+    const restore = windowsToRestore(workspaces.list(), host.config.get<unknown>(OPEN_WINDOWS_SETTING, []), workspaces.activeId());
+    for (const id of restore) windows.open(id);
+  }
 });
 
 async function seedWorkspace(folder: string): Promise<void> {
@@ -1107,6 +1117,10 @@ app.on('before-quit', (event) => {
     return;
   }
   quitConfirmed = true;
+});
+// After the question above: a cancelled quit keeps the windows' list live.
+app.on('before-quit', (event) => {
+  if (!event.defaultPrevented) windows.markQuitting();
 });
 
 app.on('will-quit', () => {

@@ -528,6 +528,19 @@ visible focus state.
    it. The menu is rebuilt when the `workspaces` or `workspace.active`
    settings change. A pick made while no window is open waits in main until
    the new window asks for it.
+   **One window per workspace** (item 157, `main/windows.ts`), as in VS Code.
+   Each window has its own workspace: the Workspace view, ⌘P and its dialogs
+   work in it, and switching workspace in one window leaves the others alone.
+   The window's title is its workspace's name, so macOS's own window list at
+   the bottom of the Dock menu names them. A Dock pick of a workspace brings
+   forward the window on it, or opens a new window for it. New Window (Dock
+   menu, the workspace's ⋯ menu, ⌘⇧N) opens one on a workspace no window
+   shows yet. Everything else is shared: one poller, one list of sessions,
+   one tray, and every window gets the same messages. The window in front
+   sets `workspace.active`, so the pull request queue scopes to it at the
+   next poll. The open windows' workspaces are saved (`windows.workspaces`)
+   and a normal launch reopens them; closing a window yourself takes it off,
+   quitting doesn't.
 8. **Everything in the main process keeps working with no window open.**
    Poller, sessions, quick jobs and notifications live in `src/main`. The
    renderer only asks and listens.

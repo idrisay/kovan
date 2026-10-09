@@ -18,7 +18,7 @@
  * as one over an empty directory.
  */
 
-import { keyLabel } from './platform';
+import { isMac, keyLabel } from './platform';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { changeMarks, moveBy, moveItem, type ChangeMark } from '@kovan/core';
 import { useMenuDismiss } from './menuDismiss';
@@ -831,6 +831,10 @@ function WorkspaceRow({
             )}
             <button role="menuitem" onClick={() => { setMenu(false); onCreate(); }}>
               New workspace…
+            </button>
+            <button role="menuitem" onClick={() => { setMenu(false); void window.kovan.newWindow(); }}>
+              New window
+              <span className="menu-note">{isMac ? '⌘⇧N' : 'Ctrl+Shift+N'}</span>
             </button>
             {/* "Close", not "Delete": this forgets a list of folders and
                 leaves every file where it is. */}
