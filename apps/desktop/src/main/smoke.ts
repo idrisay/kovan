@@ -4331,32 +4331,40 @@ async function driveItem157(win: BrowserWindow, prefix: string): Promise<Record<
   report['menu'] = menu.template().map((i) => i.type === 'separator' ? '---' : `${i.checked ? '✓ ' : ''}${i.label}`);
   report['start'] = await each();
 
+  // New Window: an empty one on its start page (item 159).
   click('New Window');
   const second = await waitFor(2);
-  await toWorkspace(second);
+  await until(second, `document.querySelector('.ws-start')`, 8_000);
+  await pause(400);
   report['afterNewWindow'] = await each();
+  report['startPage'] = await read(second, `document.querySelector('.ws-start').innerText`);
+  second.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-empty.png`, (await second.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-empty.png`);
 
-  // The second window switches to the third workspace; the first keeps its own.
-  await read(second, `document.querySelector('.ws-row [aria-label="Workspace actions"]').click()`);
-  await pause(200);
-  await read(second, `[...document.querySelectorAll('.ws-row .menu button')].find((b) => b.innerText.startsWith('notes'))?.click()`);
-  await pause(800);
-  report['afterSwitch'] = await each();
+  // It picks beta on the start page; the first window keeps alpha.
+  await read(second, `[...document.querySelectorAll('.ws-start-link')].find((b) => b.innerText === 'beta').click()`);
+  await until(second, `document.querySelector('.ws-main')`, 8_000);
+  await pause(600);
+  report['afterPick'] = await each();
 
-  // A Dock pick of a workspace a window shows: that window, no new one.
-  const firstName = (report['start'] as { workspace: string }[])[0]!.workspace;
-  click(firstName);
-  await pause(800);
-  report['afterPickShown'] = { count: windows().length, windows: await each() };
-
-  // ⌘⇧N in a window.
+  // ⌘⇧N, then alpha on its start page: alpha's window comes forward and the
+  // new one stays empty.
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'N', modifiers: ['meta', 'shift'] });
   const third = await waitFor(3);
-  await toWorkspace(third);
-  report['afterShortcut'] = await each();
+  await until(third, `document.querySelector('.ws-start')`, 8_000);
+  await read(third, `[...document.querySelectorAll('.ws-start-link')].find((b) => b.innerText === 'alpha').click()`);
+  await pause(800);
+  report['afterPickShownElsewhere'] = { count: windows().length, windows: await each() };
+
+  // A Dock pick of a workspace a window shows: that window, no new one.
+  click('beta');
+  await pause(800);
+  report['afterDockPickShown'] = { count: windows().length, windows: await each() };
   report['saved'] = await saved();
 
-  third.close();
+  second.close();
   await pause(500);
   report['savedAfterClose'] = await saved();
 

@@ -442,9 +442,14 @@ function createWindow(): void {
   windows.show();
 }
 
-/** ⌘⇧N, and New Window in the Dock menu and the workspace menu (item 157). */
+/**
+ * ⌘⇧N, and New Window in the Dock menu and the workspace menu (item 157): an
+ * empty window on the Workspace view, to pick a folder or a workspace in
+ * (item 159).
+ */
 function newWindow(): BrowserWindow {
-  const window = windows.open();
+  const window = windows.open(undefined);
+  pendingWorkspaceOpen.set(window.id, { id: '' });
   window.focus();
   return window;
 }

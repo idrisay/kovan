@@ -268,6 +268,12 @@ export function WorkspaceView({ sessions, visible, openRequest, showRequest }: {
     void loadRoots(active, true).then(() => setRevision((r) => r + 1));
   }, [active, loadRoots]);
 
+  // Main brings forward another window that already shows it (item 159);
+  // this one only switches when it didn't.
+  const switchWorkspace = useCallback((id: string) => {
+    void window.kovan.workspaceActivate(id).then((here) => { if (here) setActive(id); });
+  }, []);
+
   const createWorkspace = useCallback(() => {
     void window.kovan.workspaceCreate().then(async (made) => {
       if (!made) return;
@@ -556,7 +562,7 @@ export function WorkspaceView({ sessions, visible, openRequest, showRequest }: {
                 open={!shutRoot}
                 onToggle={() => setShutRoot((v) => !v)}
                 onAddFolder={addFolder}
-                onSwitch={(id) => { setActive(id); void window.kovan.workspaceActivate(id); }}
+                onSwitch={switchWorkspace}
                 onCreate={createWorkspace}
                 onRename={renameWorkspace}
                 onForget={forgetWorkspace}
@@ -627,7 +633,9 @@ export function WorkspaceView({ sessions, visible, openRequest, showRequest }: {
       <main className="pane editor-pane">
         <div className="detail-shell">
         <div className="ws-editor-area">
-        {tabs.length === 0 ? (
+        {!workspace && list.length > 0 ? (
+          <StartPage workspaces={list} onOpenFolder={createWorkspace} onOpen={switchWorkspace} />
+        ) : tabs.length === 0 ? (
           <p className="quiet centred">
             {workspace
               ? 'Pick a file to read or edit it, or a change to see the diff.'
@@ -1359,6 +1367,43 @@ function Skeleton({ rows = 3, label, inline = false }: {
         <span key={i} className="shimmer" style={{ width: `${70 - i * 12}%` }} />
       ))}
       {label && <p className="tree-note">{label}</p>}
+    </div>
+  );
+}
+
+/** "/Users/me/code/x" as "~/code/x". */
+const homeShort = (folder: string) => folder.replace(/^\/(Users|home)\/[^/]+/, '~');
+
+/**
+ * An empty window's editor area (item 159), after VS Code's Welcome page:
+ * open a folder as a new workspace, or pick one you have. A workspace open in
+ * another window brings that window forward instead.
+ */
+function StartPage({ workspaces, onOpenFolder, onOpen }: {
+  workspaces: Workspace[];
+  onOpenFolder: () => void;
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <div className="ws-start">
+      <h1>Kovan</h1>
+      <p className="quiet">No workspace in this window yet.</p>
+      <h2>Start</h2>
+      <button className="ws-start-link" onClick={onOpenFolder}>
+        <AddFolderIcon size={14} /> Open Folder…
+      </button>
+      <h2>Workspaces</h2>
+      <ul>
+        {workspaces.map((w) => (
+          <li key={w.id}>
+            <button className="ws-start-link" onClick={() => onOpen(w.id)}>{w.name}</button>
+            <span className="ws-start-path">
+              {w.folders[0] ? homeShort(w.folders[0]) : 'no folders'}
+              {w.folders.length > 1 ? ` +${w.folders.length - 1}` : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

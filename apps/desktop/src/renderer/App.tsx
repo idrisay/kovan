@@ -791,6 +791,8 @@ export function App() {
   const [showWorkspace, setShowWorkspace] = useState<{ id: string; folder?: string; nonce: number }>();
   useEffect(() => window.kovan.onOpenWorkspace((id, folder) => {
     setView('workspace');
+    // A new, empty window (item 159): its start page, nothing to switch to.
+    if (!id) return;
     setShowWorkspace({ id, ...(folder ? { folder } : {}), nonce: Date.now() });
   }), []);
   // "Open in Kovan" from the pane beside Claude (item 148).

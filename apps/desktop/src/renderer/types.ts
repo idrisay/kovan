@@ -289,8 +289,11 @@ export interface KovanApi {
 
   workspaces(): Promise<{ list: Workspace[]; active?: string }>;
   workspaceCreate(): Promise<Workspace | undefined>;
-  /** Switches this window's workspace; other windows keep theirs (item 157). */
-  workspaceActivate(id: string): Promise<void>;
+  /**
+   * Switches this window's workspace; other windows keep theirs (item 157).
+   * False when another window already shows it and came forward instead.
+   */
+  workspaceActivate(id: string): Promise<boolean>;
   /** Another window, on a workspace no window shows yet (item 157). */
   newWindow(): Promise<void>;
   workspaceAddFolder(id: string): Promise<Workspace | undefined>;

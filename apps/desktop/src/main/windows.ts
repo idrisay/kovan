@@ -7,6 +7,9 @@
  * dialogs work in. The window in front decides `workspace.active`, so the
  * pull request queue scopes to the workspace you are looking at.
  *
+ * New Window opens an empty one (item 159), as VS Code does: the Workspace
+ * view shows Open Folder and the workspaces you have, and you pick.
+ *
  * Which workspaces had windows is saved, and a normal launch opens them again.
  * Quitting closes every window, so the list is frozen once quitting starts;
  * closing one window yourself takes it off.
@@ -16,20 +19,6 @@ import type { BrowserWindow, WebContents } from 'electron';
 import type { Workspace } from './workspace';
 
 export const OPEN_WINDOWS_SETTING = 'windows.workspaces';
-
-/**
- * The workspace a new window starts on: one no window shows yet, in the
- * order of the list, so ⌘⇧N twice gives two different workspaces. With every
- * workspace already showing, the active one again.
- */
-export function workspaceForNewWindow(
-  all: readonly Pick<Workspace, 'id'>[],
-  shown: readonly (string | undefined)[],
-  active: string | undefined
-): string | undefined {
-  if (shown.length === 0) return active ?? all[0]?.id;
-  return all.find((w) => !shown.includes(w.id))?.id ?? active ?? all[0]?.id;
-}
 
 /** The workspaces to reopen at launch: saved ones that still exist, once each. */
 export function windowsToRestore(
@@ -100,31 +89,44 @@ export class Windows {
     return undefined;
   }
 
-  /** The workspace the window that sent an IPC message is on, if it still exists. */
+  /**
+   * The workspace the window that sent an IPC message is on. An empty window
+   * has none; a sender that isn't one of these windows gets the active one.
+   */
   workspaceOf(sender: WebContents): string | undefined {
     const s = [...this.shown.values()].find((v) => !v.window.isDestroyed() && v.window.webContents === sender);
-    const list = this.deps.list();
-    return s?.workspace && list.some((w) => w.id === s.workspace) ? s.workspace : this.deps.active();
+    if (!s) return this.deps.active();
+    return s.workspace && this.deps.list().some((w) => w.id === s.workspace) ? s.workspace : undefined;
   }
 
   windowOf(sender: WebContents): BrowserWindow | undefined {
     return this.all().find((w) => w.webContents === sender);
   }
 
-  /** A window switched workspace from its own switcher. */
-  async switchTo(sender: WebContents, id: string): Promise<void> {
+  /**
+   * A window picked a workspace. When another window already shows it, that
+   * window comes forward instead and this one stays as it was (false), as
+   * VS Code does with a folder that is open elsewhere.
+   */
+  async switchTo(sender: WebContents, id: string): Promise<boolean> {
     const s = [...this.shown.values()].find((v) => v.window.webContents === sender);
+    const elsewhere = this.withWorkspace(id);
+    if (s && elsewhere && elsewhere !== s.window) {
+      elsewhere.show();
+      elsewhere.focus();
+      return false;
+    }
     if (s) {
       s.workspace = id;
       this.retitle(s);
       this.persist();
     }
     await this.deps.setActive(id);
+    return true;
   }
 
-  /** A new window on a workspace; `undefined` picks one no window shows. */
-  open(workspace?: string): BrowserWindow {
-    const id = workspace ?? workspaceForNewWindow(this.deps.list(), this.workspaces(), this.deps.active());
+  /** A new window on a workspace, or an empty one with `undefined`. */
+  open(workspace: string | undefined): BrowserWindow {
     const from = this.front();
     const window = this.deps.build();
     // Cascaded from the window in front, as macOS places a new document window.
@@ -132,7 +134,7 @@ export class Windows {
       const b = from.getBounds();
       window.setBounds({ x: b.x + 28, y: b.y + 28, width: b.width, height: b.height });
     }
-    const entry: Shown = { window, workspace: id };
+    const entry: Shown = { window, workspace };
     const key = window.id;
     this.shown.set(key, entry);
     this.recent.unshift(key);
@@ -177,12 +179,12 @@ export class Windows {
 
   /**
    * The workspaces changed: a renamed one retitles its windows, and a window
-   * whose workspace was closed moves to the one its view falls back to.
+   * whose workspace was closed is left empty.
    */
   retitleAll(): void {
     const list = this.deps.list();
     for (const s of this.shown.values()) {
-      if (s.workspace && !list.some((w) => w.id === s.workspace)) s.workspace = this.deps.active();
+      if (s.workspace && !list.some((w) => w.id === s.workspace)) s.workspace = undefined;
       this.retitle(s);
     }
     this.persist();

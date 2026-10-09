@@ -541,8 +541,12 @@ visible focus state.
    The window's title is its workspace's name, so macOS's own window list at
    the bottom of the Dock menu names them. A Dock pick of a workspace brings
    forward the window on it, or opens a new window for it. New Window (Dock
-   menu, the workspace's ⋯ menu, ⌘⇧N) opens one on a workspace no window
-   shows yet. Everything else is shared: one poller, one list of sessions,
+   menu, the workspace's ⋯ menu, ⌘⇧N) opens an empty window (item 159) on
+   the Workspace view's start page, after VS Code's Welcome: Open Folder…
+   (a new workspace) and the workspaces you have. Picking one that another
+   window shows brings that window forward and leaves this one empty; the
+   same goes for the ⋯ menu's Switch to. Closing a window's workspace leaves
+   that window empty. Everything else is shared: one poller, one list of sessions,
    one tray, and every window gets the same messages. The window in front
    sets `workspace.active`, so the pull request queue scopes to it at the
    next poll. The open windows' workspaces are saved (`windows.workspaces`)

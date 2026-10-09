@@ -1,24 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { windowTitle, windowsToRestore, workspaceForNewWindow } from '../src/main/windows';
+import { windowTitle, windowsToRestore } from '../src/main/windows';
 
 const all = [{ id: 'acme' }, { id: 'kovan' }, { id: 'notes' }];
-
-describe('workspaceForNewWindow', () => {
-  it('opens the first window on the active workspace', () => {
-    expect(workspaceForNewWindow(all, [], 'kovan')).toBe('kovan');
-    expect(workspaceForNewWindow(all, [], undefined)).toBe('acme');
-  });
-
-  it('picks a workspace no window shows yet, in list order', () => {
-    expect(workspaceForNewWindow(all, ['acme'], 'acme')).toBe('kovan');
-    expect(workspaceForNewWindow(all, ['kovan', 'acme'], 'kovan')).toBe('notes');
-  });
-
-  it('falls back to the active one when every workspace has a window', () => {
-    expect(workspaceForNewWindow(all, ['acme', 'kovan', 'notes'], 'notes')).toBe('notes');
-    expect(workspaceForNewWindow([], [undefined], undefined)).toBeUndefined();
-  });
-});
 
 describe('windowsToRestore', () => {
   it('reopens the saved workspaces that still exist, once each', () => {
