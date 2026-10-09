@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { fetchPullDetail } from '../src/github/detail';
-import type { HttpClient } from '../src/http';
+import { fetchPullDetail, fetchPullDiff } from '../src/github/detail';
+import { HttpError, type HttpClient } from '../src/http';
 
 /** Just enough of `HttpClient` for `fetchPullDetail` to run against, no network. */
 function fakeHttp(data: unknown): HttpClient {
@@ -81,5 +81,46 @@ describe('reviewers (item 106)', () => {
     expect(by['newcomer']?.previous).toBeUndefined();
     expect(by['bob-dev']).toMatchObject({ turn: 'approved' });
     expect(detail.reviewers).toHaveLength(3);
+  });
+});
+
+describe('fetchPullDiff', () => {
+  it("puts the diff together from the file list when GitHub won't send one that big (item 155)", async () => {
+    const asked: string[] = [];
+    const page = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ filename: `src/f${i}.ts`, status: 'modified', patch: `@@ -1 +1 @@\n-a\n+b` }));
+    const http = {
+      binary: async (url: string) => {
+        throw new HttpError(406, url, '{"message":"Sorry, the diff exceeded the maximum number of files (300)."}');
+      },
+      json: async (url: string) => {
+        asked.push(url);
+        if (url.endsWith('page=1')) return page(100);
+        return [
+          { filename: 'src/new.ts', status: 'added', patch: '@@ -0,0 +1 @@\n+x' },
+          { filename: 'src/b.ts', previous_filename: 'src/a.ts', status: 'renamed' },
+          { filename: 'logo.png', status: 'modified' }
+        ];
+      }
+    } as unknown as HttpClient;
+
+    const diff = await fetchPullDiff(http, 'https://api.github.com/', 'token', 'acme/web', 7);
+
+    expect(asked).toEqual([
+      'https://api.github.com/repos/acme/web/pulls/7/files?per_page=100&page=1',
+      'https://api.github.com/repos/acme/web/pulls/7/files?per_page=100&page=2'
+    ]);
+    expect(diff.match(/^diff --git /gm)).toHaveLength(103);
+    expect(diff).toContain('diff --git a/src/new.ts b/src/new.ts\n--- /dev/null\n+++ b/src/new.ts\n@@ -0,0 +1 @@\n+x\n');
+    expect(diff).toContain('diff --git a/src/a.ts b/src/b.ts\nrename from src/a.ts\nrename to src/b.ts\n--- a/src/a.ts\n+++ b/src/b.ts\n');
+    expect(diff).toContain('+++ b/logo.png\n(GitHub sent no patch for this file: too large, or binary.)\n');
+  });
+
+  it('passes any other failure on', async () => {
+    const http = {
+      binary: async (url: string) => { throw new HttpError(404, url, ''); },
+      json: async () => { throw new Error('must not be asked'); }
+    } as unknown as HttpClient;
+    await expect(fetchPullDiff(http, 'https://api.github.com', 'token', 'acme/web', 7)).rejects.toThrow('HTTP 404');
   });
 });

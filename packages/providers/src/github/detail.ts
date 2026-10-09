@@ -9,7 +9,7 @@
 
 import type { CancelSignal } from '@kovan/host';
 import { graphqlEndpoint } from '@kovan/core';
-import type { HttpClient } from '../http';
+import { HttpError, type HttpClient } from '../http';
 
 export interface ReviewComment {
   author: string;
@@ -333,11 +333,63 @@ export async function fetchPullDiff(
   repo: string,
   number: number
 ): Promise<string> {
-  const { bytes } = await http.binary(`${baseUrl.replace(/\/$/, '')}/repos/${repo}/pulls/${number}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3.diff' },
-    timeoutMs: 60_000
-  });
-  return new TextDecoder().decode(bytes);
+  const api = baseUrl.replace(/\/$/, '');
+  try {
+    const { bytes } = await http.binary(`${api}/repos/${repo}/pulls/${number}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3.diff' },
+      timeoutMs: 60_000
+    });
+    return new TextDecoder().decode(bytes);
+  } catch (err) {
+    // GitHub won't send the diff of a pull request over 300 files ("the diff
+    // exceeded the maximum number of files", 406): a release merge like
+    // staging into master (item 155). Its file list still has each file's
+    // patch, up to 3000 files, so the diff is put together from that.
+    if (err instanceof HttpError && err.status === 406) return diffFromFiles(http, api, token, repo, number);
+    throw err;
+  }
+}
+
+/** One entry of GitHub's "list pull request files". */
+interface PullFile {
+  filename: string;
+  previous_filename?: string;
+  status: string;
+  patch?: string;
+}
+
+/** The most GitHub's file list gives: 30 pages of 100. */
+const FILE_PAGES = 30;
+
+/**
+ * A unified diff put together from a pull request's file list, for one too
+ * big for GitHub's own diff. A file whose patch GitHub leaves out (too large,
+ * or binary) is named, with a line saying so, rather than skipped.
+ */
+export async function diffFromFiles(http: HttpClient, api: string, token: string, repo: string, number: number): Promise<string> {
+  const files: PullFile[] = [];
+  for (let page = 1; page <= FILE_PAGES; page++) {
+    const batch = await http.json<PullFile[]>(`${api}/repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+      timeoutMs: 60_000
+    });
+    files.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return diffText(files);
+}
+
+export function diffText(files: readonly PullFile[]): string {
+  const out: string[] = [];
+  for (const f of files) {
+    const before = f.previous_filename ?? f.filename;
+    out.push(`diff --git a/${before} b/${f.filename}`);
+    if (f.status === 'renamed') out.push(`rename from ${before}`, `rename to ${f.filename}`);
+    out.push(f.status === 'added' ? '--- /dev/null' : `--- a/${before}`, f.status === 'removed' ? '+++ /dev/null' : `+++ b/${f.filename}`);
+    if (f.patch) out.push(f.patch.replace(/\n$/, ''));
+    else if (f.status !== 'renamed') out.push('(GitHub sent no patch for this file: too large, or binary.)');
+  }
+  return out.length ? `${out.join('\n')}\n` : '';
 }
 
 /**
