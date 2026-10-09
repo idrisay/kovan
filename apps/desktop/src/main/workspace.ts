@@ -114,7 +114,8 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 const IMAGE_TYPES: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml'
+  '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp', '.ico': 'image/x-icon', '.avif': 'image/avif'
 };
 
 /** Enough to catch a NUL in any real binary's header. */
@@ -473,7 +474,7 @@ export class Workspaces {
   }
 
   /**
-   * An image a Markdown preview shows (item 161), as a data URL: only inside
+   * An image a Markdown preview or an image tab shows (items 161, 162), as a data URL: only inside
    * a workspace, like every read here, only image types, and at most
    * `MAX_IMAGE_BYTES`. Undefined for anything else, which the preview shows
    * as a missing image.

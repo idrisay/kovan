@@ -16,7 +16,7 @@ import { OPEN_SETTINGS } from './Reviewers';
 import { levelTone, PullPane, SentryPane, TicketPane } from './Detail';
 import { RunSheet } from './RunSheet';
 import { GroupHead, PullRow, repoName } from './rows';
-import { WorkspaceView } from './Workspace';
+import { WorkspaceView, WORKSPACE_SWITCHED } from './Workspace';
 import { QuickJobRow, QuickJobView, useQuickJobs } from './QuickJobs';
 import { UsageOverview, UsageRow } from './Usage';
 import { RunningAgentsPane, RunningAgentsRow, idleAgents, useRunningAgents } from './RunningAgents';
@@ -62,6 +62,9 @@ import {
 } from './icons';
 
 type ViewId = 'pulls' | 'tickets' | 'sentry' | 'activity' | 'workspace' | 'sessions' | 'agents';
+
+/** Where each window was, per workspace (item 163). */
+const PLACE_KEY = 'kovan.place';
 
 const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JSX.Element }[] = [
   { id: 'pulls', label: 'Pull requests', icon: PullRequestIcon },
@@ -829,6 +832,47 @@ export function App() {
     }
   }, []);
   const nav = useNavHistory(place, placeKey, goTo, placeRefines);
+
+  // Where you were (item 163): the view, the pull request, ticket or Sentry
+  // issue open in it, and the session on screen, saved per workspace (the
+  // windows reopen by workspace) and put back at launch. A subject waits for
+  // the first snapshot that has it; nothing is saved until then, so the
+  // empty first render can't overwrite it.
+  const placeStore = useRef<string>();
+  const pendingSubject = useRef<string>();
+  const [placeReady, setPlaceReady] = useState(false);
+  const readPlaceKey = useCallback(async (restore: boolean) => {
+    const { list, active } = await window.kovan.workspaces();
+    // A new, empty window (item 159) starts on its start page.
+    if (!active && list.length > 0) { placeStore.current = undefined; return; }
+    placeStore.current = `${PLACE_KEY}.${active ?? 'none'}`;
+    if (!restore) return;
+    let saved: Partial<Place> | undefined;
+    try { saved = JSON.parse(localStorage.getItem(placeStore.current) ?? 'null') ?? undefined; } catch { saved = undefined; }
+    if (!saved || !VIEWS.some((v) => v.id === saved!.view)) return;
+    setView(saved.view!);
+    if (saved.session) setActiveSession(saved.session);
+    if (saved.subject) pendingSubject.current = saved.subject;
+  }, []);
+  useEffect(() => {
+    void readPlaceKey(true).finally(() => setPlaceReady(true));
+    // A window that switches workspace keeps its place under the new one.
+    const onSwitch = () => void readPlaceKey(false);
+    window.addEventListener(WORKSPACE_SWITCHED, onSwitch);
+    return () => window.removeEventListener(WORKSPACE_SWITCHED, onSwitch);
+  }, [readPlaceKey]);
+  useEffect(() => {
+    const subject = pendingSubject.current;
+    if (!subject) return;
+    const found = findSubject(subject, snapshot);
+    if (found) setSelected(found);
+    // Found, or the first real snapshot hasn't got it any more: stop waiting.
+    if (found || snapshot.at > 0) pendingSubject.current = undefined;
+  }, [snapshot]);
+  useEffect(() => {
+    if (!placeReady || !placeStore.current || pendingSubject.current) return;
+    try { localStorage.setItem(placeStore.current, JSON.stringify(place)); } catch { /* this launch only */ }
+  }, [place, placeReady]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!isAppShortcut(event)) return;
@@ -1076,10 +1120,12 @@ export function App() {
    * type into, which is what "it still shows it" was.
    */
   useEffect(() => {
-    if (activeSession && !sessions.some((s) => s.id === activeSession)) {
+    // Not before the list has arrived: the session put back at launch (item
+    // 163) isn't in an empty list yet.
+    if (sessionsReady && activeSession && !sessions.some((s) => s.id === activeSession)) {
       setActiveSession(undefined);
     }
-  }, [sessions, activeSession]);
+  }, [sessions, sessionsReady, activeSession]);
 
   /**
    * Opening Sessions with something already running shows the first one

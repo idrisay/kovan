@@ -38,6 +38,25 @@ import type {
 import { InlineTerminal } from './Detail';
 import { useTerminalToggle } from './terminalToggle';
 
+/** A window's workspace changed; App files its place under the new one (item 163). */
+export const WORKSPACE_SWITCHED = 'kovan-workspace-switched';
+
+/** What a workspace looked like when you left it (item 163): open tabs, open folders. */
+const STATE_KEY = 'kovan.workspace-state';
+interface SavedState {
+  tabs: Tab[];
+  current?: string;
+  expanded: string[];
+  pane: 'files' | 'changes';
+}
+
+function loadState(id: string): SavedState | undefined {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`${STATE_KEY}.${id}`) ?? 'null') as SavedState | null;
+    return raw && Array.isArray(raw.tabs) && Array.isArray(raw.expanded) ? raw : undefined;
+  } catch { return undefined; }
+}
+
 interface Tab {
   key: string;
   kind: 'file' | 'diff';
@@ -194,8 +213,10 @@ export function WorkspaceView({ sessions, visible, openRequest, showRequest }: {
       setRoots(found);
       // Every folder of the workspace starts open. That is the whole point of
       // a multi-folder workspace: you see all of them at once, without
-      // switching anything.
-      setExpanded(new Set(found.map((r) => r.folder)));
+      // switching anything. Unless you were here before: then the folders
+      // you had open (item 163).
+      const saved = loadState(active);
+      setExpanded(new Set(saved ? saved.expanded : found.map((r) => r.folder)));
       const pairs = await Promise.all(
         reposOf(found).map(
           async (r) => [r.path, await window.kovan.workspaceStatus(r.path)] as const
@@ -274,6 +295,33 @@ export function WorkspaceView({ sessions, visible, openRequest, showRequest }: {
   const switchWorkspace = useCallback((id: string) => {
     void window.kovan.workspaceActivate(id).then((here) => { if (here) setActive(id); });
   }, []);
+  useEffect(() => {
+    if (active) window.dispatchEvent(new Event(WORKSPACE_SWITCHED));
+  }, [active]);
+
+  // The open tabs come back once, at launch, for the workspace the window
+  // opened on (item 163). Switching later leaves the tabs as they are: one
+  // might hold unsaved edits.
+  const restoredFor = useRef<string>();
+  useEffect(() => {
+    if (!active) return;
+    const first = restoredFor.current === undefined;
+    restoredFor.current = active;
+    if (!first) return;
+    const saved = loadState(active);
+    if (!saved) return;
+    setTabs((existing) => (existing.length > 0 ? existing : saved.tabs));
+    setCurrent((existing) => existing ?? saved.current);
+    setPane(saved.pane === 'changes' ? 'changes' : 'files');
+  }, [active]);
+  useEffect(() => {
+    if (!active || restoredFor.current !== active || roots === undefined) return undefined;
+    const timer = setTimeout(() => {
+      const state: SavedState = { tabs, ...(current ? { current } : {}), expanded: [...expanded], pane };
+      try { localStorage.setItem(`${STATE_KEY}.${active}`, JSON.stringify(state)); } catch { /* this launch only */ }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [active, tabs, current, expanded, pane, roots]);
 
   const createWorkspace = useCallback(() => {
     void window.kovan.workspaceCreate().then(async (made) => {
@@ -1428,6 +1476,39 @@ function NoWorkspace({ onCreate }: { onCreate: () => void }) {
 const WHOLE_FILE = 1_000_000;
 const WHOLE_KEY = 'kovan.diff-whole-file';
 
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i;
+
+/**
+ * An image file (item 162): fitted to the pane on a checkerboard, so
+ * transparency shows; a click toggles its actual size.
+ */
+function ImageView({ url, bytes, onSize }: {
+  url: string | null;
+  bytes: number;
+  onSize: (size: { width: number; height: number }) => void;
+}) {
+  const [actual, setActual] = useState(false);
+  if (!url) {
+    return (
+      <p className="quiet centred">
+        {bytes > 10 * 1024 * 1024
+          ? `${formatBytes(bytes)} is too large to show here (over 10 MB).`
+          : 'Kovan can’t show this image.'}
+      </p>
+    );
+  }
+  return (
+    <div className={actual ? 'image-view checker actual' : 'image-view checker'}>
+      <img
+        src={url} alt=""
+        title={actual ? 'Click to fit' : 'Click for actual size'}
+        onClick={() => setActual((v) => !v)}
+        onLoad={(e) => onSize({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
+      />
+    </div>
+  );
+}
+
 type MdMode = 'source' | 'split' | 'preview';
 const MD_MODE_KEY = 'kovan.markdown-mode';
 const MD_MODES: [MdMode, string][] = [['source', 'Source'], ['split', 'Split'], ['preview', 'Preview']];
@@ -1478,6 +1559,21 @@ function TabBody({
   // Markdown (item 161): the source, the preview, or both side by side. The
   // last choice is kept, so someone who reads notes rendered gets them so.
   const markdown = tab.kind === 'file' && /\.(md|markdown|mdx)$/i.test(tab.path);
+  // An SVG is text you may edit, so it gets the same switch, its preview the picture.
+  const svg = tab.kind === 'file' && /\.svg$/i.test(tab.path);
+  // Any other image opens as the picture (item 162), read by main like a
+  // Markdown preview's: `null` when it can't be shown.
+  const picture = tab.kind === 'file' && IMAGE_EXT.test(tab.path);
+  const [image, setImage] = useState<string | null>();
+  useEffect(() => {
+    if (!picture) return undefined;
+    let cancelled = false;
+    void window.kovan.workspaceImage(tab.path)
+      .then((url) => { if (!cancelled) setImage(url ?? null); })
+      .catch(() => { if (!cancelled) setImage(null); });
+    return () => { cancelled = true; };
+  }, [picture, tab]);
+  const [size, setSize] = useState<{ width: number; height: number }>();
   const [mdMode, setMdMode] = useState<MdMode>(loadMdMode);
   const chooseMd = useCallback((mode: MdMode) => {
     setMdMode(mode);
@@ -1495,7 +1591,7 @@ function TabBody({
   // ⌘⇧V, as in VS Code: preview, or back to the source. Only the tab on
   // screen: the Workspace view stays mounted when hidden.
   useEffect(() => {
-    if (!markdown) return undefined;
+    if (!markdown && !svg) return undefined;
     const onKey = (event: KeyboardEvent) => {
       const mod = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
       if (!mod || !event.shiftKey || event.altKey || event.key.toLowerCase() !== 'v') return;
@@ -1505,7 +1601,7 @@ function TabBody({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [markdown, mdMode, chooseMd]);
+  }, [markdown, svg, mdMode, chooseMd]);
 
   const toggleWhole = () => setWhole((w) => {
     try { localStorage.setItem(WHOLE_KEY, w ? '0' : '1'); } catch { /* this window only */ }
@@ -1555,7 +1651,7 @@ function TabBody({
 
   if (error) return <p className="quiet centred error">{error}</p>;
 
-  const previewable = markdown && body?.kind === 'text';
+  const previewable = (markdown || svg) && body?.kind === 'text';
   const mode = previewable ? mdMode : 'source';
 
   return (
@@ -1580,7 +1676,18 @@ function TabBody({
         )}
       </div>
 
-      {tab.kind === 'file' ? (
+      {picture ? (
+        body && image !== undefined ? (
+          <>
+            <ImageView url={image} bytes={body.bytes} onSize={setSize} />
+            <div className="status-bar">
+              <span>{tab.path.split('.').pop()!.toUpperCase()} image</span>
+              {size && <span>{size.width} × {size.height}</span>}
+              <span>{formatBytes(body.bytes)}</span>
+            </div>
+          </>
+        ) : <Skeleton rows={4} label="Reading…" />
+      ) : tab.kind === 'file' ? (
         body ? (
           <>
             <div className={`md-panes mode-${mode}`}>
@@ -1600,13 +1707,23 @@ function TabBody({
             />
             </div>
             {previewable && mode !== 'source' && (
-              <div className="md-preview-scroll">
-                <MarkdownPreview
-                  path={tab.path}
-                  text={text ?? (body.kind === 'text' ? body.text : '')}
-                  onOpenFile={onOpenFile}
-                />
-              </div>
+              svg ? (
+                <div className="image-view checker">
+                  <img
+                    alt={tab.title}
+                    // As an <img>, an SVG's scripts never run.
+                    src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(text ?? (body.kind === 'text' ? body.text : ''))}`}
+                  />
+                </div>
+              ) : (
+                <div className="md-preview-scroll">
+                  <MarkdownPreview
+                    path={tab.path}
+                    text={text ?? (body.kind === 'text' ? body.text : '')}
+                    onOpenFile={onOpenFile}
+                  />
+                </div>
+              )
             )}
             </div>
             <div className="status-bar">

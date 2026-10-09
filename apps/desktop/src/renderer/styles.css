@@ -2007,6 +2007,22 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .md-preview img.missing { min-width: 160px; min-height: 40px; border: 1px dashed var(--hair-strong); }
 .md-preview h1, .md-preview h2 { scroll-margin-top: 12px; }
 
+/* An image file's tab (item 162), and an SVG's preview. */
+.image-view {
+  flex: 1; min-width: 0; min-height: 0; overflow: auto; display: flex; padding: 24px;
+  scrollbar-width: thin; scrollbar-color: var(--hair-strong) transparent;
+}
+.image-view img { margin: auto; max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; box-shadow: 0 0 0 1px var(--hair); }
+.image-view.actual img { max-width: none; max-height: none; cursor: zoom-out; }
+.md-panes.mode-split .image-view { border-left: 1px solid var(--hair); }
+.checker {
+  background-color: var(--editor);
+  background-image:
+    linear-gradient(45deg, var(--wash) 25%, transparent 25%), linear-gradient(-45deg, var(--wash) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--wash) 75%), linear-gradient(-45deg, transparent 75%, var(--wash) 75%);
+  background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
 /* --- Editor --- */
 
 .cm-host { flex: 1; min-height: 0; overflow: hidden; }

@@ -495,7 +495,10 @@ kept). The preview follows the editor, unsaved edits included; it goes
 through its own DOMPurify instance like `Prose`; relative images are read by
 main (`workspaceImage`: inside a workspace, image types, ≤ 10 MB) and never
 fetched by the page; `#heading` links scroll, relative links open the file in
-a tab, web links open in the browser. Terminals draw inline images (item 160,
+a tab, web links open in the browser. An image file opens as the picture
+(item 162): fitted on a checkerboard, a click for actual size, its size in
+the status bar, read through `workspaceImage`; an SVG gets Source / Split /
+Preview like Markdown. Terminals draw inline images (item 160,
 `@xterm/addon-image`): iTerm2's protocol, as `imgcat` writes it, and Sixel,
 up to 32 MB of images per terminal. ⌘J (item 158, `terminalToggle.ts`), as in VS Code,
 shows or hides the terminal of the view on screen: in the Workspace view a
@@ -717,6 +720,13 @@ main and `isMac` (`renderer/platform.ts`) in the window. Nothing else forks.
 
 ### Preferences vs settings
 
+- **Where you were** (item 163) is localStorage too, keyed by workspace,
+  since windows reopen by workspace: `kovan.place.<id>` (the view, the
+  subject open in it, the session) and `kovan.workspace-state.<id>` (open
+  tabs, the current one, open folders, Files or Changes). Put back at
+  launch; a subject waits for the first snapshot that has it, and nothing is
+  saved before that. Tabs come back only at launch, never on a workspace
+  switch, which could drop unsaved edits.
 - **localStorage**: per-window visual preferences (sizes, dock, sidebar width,
   last picker choice). Wrap every read and write in `try`. The app must work
   without it.

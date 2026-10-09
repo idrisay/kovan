@@ -672,6 +672,9 @@ export async function smokeUi(
   if (process.env['KOVAN_SMOKE_ITEM136'] && mode === 'seeded') {
     return { item136: await driveItem136(win, process.env['KOVAN_SMOKE_ITEM136']) };
   }
+  if (process.env['KOVAN_SMOKE_ITEM163'] && mode === 'seeded') {
+    return { item163: await driveItem163(win, process.env['KOVAN_SMOKE_ITEM163'], process.env['KOVAN_PHASE'] ?? '1') };
+  }
   if (process.env['KOVAN_SMOKE_ITEM161'] && mode === 'seeded') {
     return { item161: await driveItem161(win, process.env['KOVAN_SMOKE_ITEM161']) };
   }
@@ -4232,6 +4235,76 @@ async function driveItem135(win: BrowserWindow, prefix: string): Promise<Record<
   win.webContents.invalidate();
   await pause(300);
   await writeFile(`${prefix}-later.png`, (await win.webContents.capturePage()).toPNG());
+  return report;
+}
+
+/**
+ * Items 162 and 163, over two launches. Phase 1 opens `notes/report.md` and
+ * the PNG beside it (it must show as the picture, not "Binary file"), then
+ * flushes storage. Phase 2, a fresh launch on the same profile, must land on
+ * the Workspace view with both tabs back, the PNG current, and the folders
+ * that were open still open.
+ */
+async function driveItem163(win: BrowserWindow, prefix: string, phase: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const state = () => read(win, `({
+    view: document.querySelector('.rail-item.active')?.dataset.view,
+    tabs: [...document.querySelectorAll('.tabs .tab')].map((t) => t.querySelector('.tab-label').innerText.trim() + (t.classList.contains('active') ? ' (current)' : '')),
+    open: [...document.querySelectorAll('.tree-row')].map((r) => r.textContent.trim()),
+    image: (() => { const i = document.querySelector('.image-view img'); return i ? { width: i.naturalWidth, height: i.naturalHeight } : null; })(),
+    binaryText: document.body.innerText.includes('Binary file'),
+    status: document.querySelector('.tab-body .status-bar')?.innerText.replace(/\\s+/g, ' ')
+  })`);
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  const pane = () => read(win, `({ view: document.querySelector('.rail-item.active')?.dataset.view, selected: document.querySelector('.queue .row.selected, .queue .row[aria-selected="true"], .queue .row.active')?.innerText.split('\\n').slice(0, 2).join(' '), title: document.querySelector('.pane h1, .pane h2')?.innerText })`);
+  if (phase === 'p1') {
+    await read(win, `document.querySelector('.rail-item[data-view="pulls"]').click()`);
+    await until(win, `document.querySelectorAll('.queue .row').length > 1`, 8_000);
+    await read(win, `document.querySelectorAll('.queue .row')[1].click()`);
+    await pause(800);
+    const report = { beforeQuit: await pane() };
+    const { session } = await import('electron');
+    await session.defaultSession.flushStorageData();
+    await pause(500);
+    return report;
+  }
+  if (phase === 'p2') {
+    await until(win, `document.querySelector('.pane h1, .pane h2')`, 10_000);
+    await pause(800);
+    return { afterRelaunch: await pane() };
+  }
+  if (phase === '2') {
+    await until(win, `document.querySelector('.image-view img')?.naturalWidth > 0`, 10_000);
+    await pause(800);
+    const report = { afterRelaunch: await state() };
+    await shot('relaunch');
+    return report;
+  }
+  const clickRow = (name: string) => read(win, `[...document.querySelectorAll('.tree-row')].find((r) => r.textContent.trim() === '${name}')?.click()`);
+  await read(win, `document.querySelector('.rail-item[data-view="workspace"]').click()`);
+  await until(win, `[...document.querySelectorAll('.tree-row')].some((r) => r.textContent.trim() === 'notes')`, 8_000);
+  await clickRow('notes');
+  await until(win, `[...document.querySelectorAll('.tree-row')].some((r) => r.textContent.trim() === 'images')`, 8_000);
+  await clickRow('report.md');
+  await pause(500);
+  await clickRow('images');
+  await until(win, `[...document.querySelectorAll('.tree-row')].some((r) => r.textContent.trim().endsWith('.png'))`, 8_000);
+  await read(win, `[...document.querySelectorAll('.tree-row')].find((r) => r.textContent.trim().endsWith('.png')).click()`);
+  await until(win, `document.querySelector('.image-view img')?.naturalWidth > 0`, 8_000);
+  await pause(800);
+  const report = { beforeQuit: await state() };
+  await shot('image');
+  const { session } = await import('electron');
+  await session.defaultSession.flushStorageData();
+  await pause(500);
   return report;
 }
 
