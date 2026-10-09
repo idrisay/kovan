@@ -672,6 +672,9 @@ export async function smokeUi(
   if (process.env['KOVAN_SMOKE_ITEM136'] && mode === 'seeded') {
     return { item136: await driveItem136(win, process.env['KOVAN_SMOKE_ITEM136']) };
   }
+  if (process.env['KOVAN_SMOKE_ITEM160'] && mode === 'seeded' && sessions) {
+    return { item160: await driveItem160(win, sessions, process.env['KOVAN_SMOKE_ITEM160']) };
+  }
   if (process.env['KOVAN_SMOKE_ITEM158'] && mode === 'seeded' && sessions) {
     return { item158: await driveItem158(win, sessions, process.env['KOVAN_SMOKE_ITEM158']) };
   }
@@ -4227,6 +4230,43 @@ async function driveItem135(win: BrowserWindow, prefix: string): Promise<Record<
   await pause(300);
   await writeFile(`${prefix}-later.png`, (await win.webContents.capturePage()).toPNG());
   return report;
+}
+
+/**
+ * Item 160: inline images. A session runs `KOVAN_IMGCAT` (an imgcat that
+ * writes iTerm2's image escape) on `KOVAN_IMAGE`; the terminal must draw it
+ * on its image layer instead of printing the escape as text.
+ */
+async function driveItem160(win: BrowserWindow, sessions: Sessions, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="sessions"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]').click()`);
+  await pause(500);
+  const before = sessions.list().length;
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'J', modifiers: ['meta'] });
+  for (let i = 0; i < 60 && sessions.list().length === before; i++) await pause(250);
+  await pause(1_500);
+  const session = sessions.list().at(-1);
+  if (!session) return { session: null, before };
+  sessions.write(session.id, `clear; ${process.env['KOVAN_IMGCAT']} ${process.env['KOVAN_IMAGE']}; echo after-image\r`);
+  await pause(2_500);
+  const report = await read(win, `(() => {
+    const layer = [...document.querySelectorAll('.xterm-image-layer')].find((c) => c.offsetParent !== null);
+    const text = [...document.querySelectorAll('.xterm-rows')].map((r) => r.innerText).join('\\n');
+    let painted = 0;
+    if (layer) {
+      const data = layer.getContext('2d').getImageData(0, 0, layer.width, layer.height).data;
+      for (let i = 3; i < data.length; i += 4) if (data[i] > 0) painted++;
+    }
+    return { layer: Boolean(layer), painted, after: text.includes('after-image'), escapeAsText: text.includes('1337;File') };
+  })()`);
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-image.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-image.png`);
+  return report as Record<string, unknown>;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Terminal as Xterm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { ImageAddon } from '@xterm/addon-image';
 import { shellPath } from '@kovan/core';
 import '@xterm/xterm/css/xterm.css';
 import { getAppearance, subscribeAppearance } from './appearance';
@@ -126,6 +127,10 @@ function create(sessionId: string, host: HTMLElement, fontSize: number): Live {
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  // Inline images (item 160): `imgcat` and anything else speaking iTerm2's
+  // image protocol, and Sixel. A session's images keep at most 32 MB, so a
+  // screenshot-heavy agent can't grow every open terminal without bound.
+  term.loadAddon(new ImageAddon({ storageLimit: 32, sixelSupport: true, iipSupport: true }));
   term.open(box);
 
   // Output that arrives before the replay is in the replay already: the

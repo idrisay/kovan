@@ -489,7 +489,9 @@ go-to-file (`QuickOpen.tsx`, item 100) from anywhere: recent files first
 (`rememberFile` records every file opened, however), fuzzy matching over the
 active workspace's files (`main/fileIndex.ts` — `git ls-files` inside a repo,
 listed on the first ⌘P, never before), `name:42` for a line; the file opens
-in the Workspace view. ⌘J (item 158, `terminalToggle.ts`), as in VS Code,
+in the Workspace view. Terminals draw inline images (item 160,
+`@xterm/addon-image`): iTerm2's protocol, as `imgcat` writes it, and Sixel,
+up to 32 MB of images per terminal. ⌘J (item 158, `terminalToggle.ts`), as in VS Code,
 shows or hides the terminal of the view on screen: in the Workspace view a
 terminal docked under the editor (the same `InlineTerminal` a ticket docks),
 opened in the open file's repository or the first folder, one per workspace;
@@ -696,6 +698,9 @@ main and `isMac` (`renderer/platform.ts`) in the window. Nothing else forks.
   CommonJS (`index.cjs`) because a sandboxed preload can't be an ES module,
   and it may only use `contextBridge`, `ipcRenderer` and `webUtils`. Keep
   Electron within the three supported majors.
+- **The page's CSP allows WebAssembly, not eval** (`'wasm-unsafe-eval'`,
+  item 160): the terminal's image add-on decodes Sixel in wasm. Scripts still
+  load only from the app itself, and images also from `blob:`.
 - **Links open through `openLink` (`main/external.ts`), never
   `shell.openExternal` directly.** Only `https`, `http` and `mailto` reach the
   OS; `file:` and custom schemes can launch things. A fixed URL of our own

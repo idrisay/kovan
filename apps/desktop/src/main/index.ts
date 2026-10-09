@@ -14,7 +14,7 @@
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, Notification, shell, systemPreferences } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1002,10 +1002,9 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'kovan:open-terminal',
     async (_event, cwd?: string, subject?: string, title?: string) => {
-      const target = cwd ?? (await agents.defaultCwd());
-      if (!target) {
-        throw new Error('No folder to open a terminal in');
-      }
+      // With no repository to start in, the home folder, as Terminal.app does
+      // (item 160: ⌘J in Sessions on a fresh profile did nothing).
+      const target = cwd ?? (await agents.defaultCwd()) ?? homedir();
       const named = title ? { title, subject } : await nameTerminal(target, subject);
       const shell = chosenShell(host.config.get<string>(SHELL_SETTING, ''));
       return sessions.open({ cwd: target, title: named.title, runnerName: 'Shell', subject: named.subject, shell });
