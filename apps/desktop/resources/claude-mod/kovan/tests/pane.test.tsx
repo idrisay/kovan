@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { changeGroups, checkName, findLinks, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
+import { changeGroups, checkName, chipLabels, findLinks, packChips, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
 
 /** `git rev-parse --show-toplevel --show-prefix` for a folder under /repo. */
 function gitPlace(e: unknown): string {
@@ -266,6 +266,16 @@ test('a session over two repositories counts each file in its own, and a file in
 })
 
 describe('links in the chat', () => {
+  test('chips drop the shared repo start and pack into rows', async () => {
+    const pulls = ['acme-frontend#2736', 'acme-frontend#2680', 'acme-backend#821'].map((key) => ({ kind: 'pull' as const, key }))
+    const labels = chipLabels([...pulls, { kind: 'page' as const, key: 'app.acme.test/en' }])
+    expect(labels).toEqual(['frontend#2736', 'frontend#2680', 'backend#821', 'app.acme.test/en'])
+    expect(chipLabels([{ kind: 'pull', key: 'cli#9000' }, { kind: 'pull', key: 'acme-backend#1' }])).toEqual(['cli#9000', 'acme-backend#1'])
+    // 13 + 3 + 13 + 3 + 11 = 43 fits 45; the page goes on the next row.
+    expect(packChips(labels, 45)).toEqual([[0, 1, 2], [3]])
+    expect(packChips(labels, 10)).toEqual([[0], [1], [2], [3]])
+  })
+
   test('finds pull requests, Figma designs, tickets and local pages, each once, in order', async () => {
     const text = [
       'See https://github.com/acme/acme-frontend/pull/2789 and https://github.com/acme/acme-backend/pull/868/files,',
@@ -283,7 +293,7 @@ describe('links in the chat', () => {
   })
 })
 
-test("a pull request linked in a command's output shows with its title and state, the goal's own left out", async ($, on) => {
+test("a pull request linked in a command's output shows in its state's color, the goal's own left out", async ($, on) => {
   mock.env(on, { KOVAN_GOAL_KEY: 'acme-backend#868' })
   on('clock.now', () => ({ value: 1_000 }))
   on('session.cwd', () => ({ value: '/repo' }))
@@ -304,8 +314,10 @@ test("a pull request linked in a command's output shows with its title and state
   const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
   expect(await ui.find({ type: 'Text', text: /^LINKS ─+ 1$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^acme-frontend#2789$/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^ open$/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^feat\(qa\): lesson\+exercise smoke test$/ })).toBeDefined()
+  // Design C: the chip takes its state's color, and shows no title.
+  const chip = JSON.stringify(await ui.find({ type: 'Text', text: /^acme-frontend#2789$/ }))
+  expect(chip).toContain('{"type":"Text","props":{"color":"success"},"children":[{"type":"Link","props":{"href":"https://github.com/acme/acme-frontend/pull/2789"')
+  expect(await ui.find({ type: 'Text', text: /lesson\+exercise smoke test/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /acme-backend#868/ })).toBeUndefined()
   await ui.unmount()
 })

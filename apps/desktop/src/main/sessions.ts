@@ -251,6 +251,11 @@ export class Sessions {
         // Tells a prompt or a wrapper that it is inside Kovan, the way
         // TERM_PROGRAM does for other terminals.
         TERM_PROGRAM: 'Kovan',
+        // Kovan's terminal opens a link a program marks (OSC 8), but programs
+        // that check for it don't know Kovan's: Claude printed the whole
+        // address after each link's name instead, and nothing was clickable
+        // (item 156). This tells them, through the variable they read.
+        FORCE_HYPERLINK: '1',
         // macOS's bash 3.2 otherwise opens every terminal with "The default
         // interactive shell is now zsh" — chosen on purpose here (item 126).
         ...(options.shell && path.basename(options.shell) === 'bash' ? { BASH_SILENCE_DEPRECATION_WARNING: '1' } : {}),

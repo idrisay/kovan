@@ -481,6 +481,42 @@ function safeDecode(s: string): string {
   try { return decodeURIComponent(s) } catch { return s }
 }
 
+/**
+ * What each link's chip says (item 156, design C): its key, with the repo
+ * name's shared start (`acme-`) taken off when every pull request has it,
+ * so `frontend#2736 · backend#821` rather than the full names.
+ */
+export function chipLabels(list: readonly Pick<LinkItem, 'kind' | 'key'>[]): string[] {
+  const repos = list.filter((l) => l.kind === 'pull').map((l) => l.key.slice(0, l.key.lastIndexOf('#')))
+  let common = ''
+  // One pull request alone keeps its full name: there is nothing to tell it apart from.
+  if (repos.length > 1) {
+    const first = repos[0]!
+    const dash = first.indexOf('-')
+    const prefix = dash > 0 ? first.slice(0, dash + 1) : ''
+    if (prefix && repos.every((r) => r.startsWith(prefix) && r.length > prefix.length)) common = prefix
+  }
+  return list.map((l) => (l.kind === 'pull' && common && l.key.startsWith(common) ? l.key.slice(common.length) : l.key))
+}
+
+/** The chips packed into rows of `room` cells, ` · ` between them: the indexes on each row. */
+export function packChips(labels: readonly string[], room: number): number[][] {
+  const rows: number[][] = []
+  let width = 0
+  labels.forEach((label, i) => {
+    const w = Math.min(label.length, room)
+    const row = rows[rows.length - 1]
+    if (row && width + 3 + w <= room) {
+      row.push(i)
+      width += 3 + w
+    } else {
+      rows.push([i])
+      width = w
+    }
+  })
+  return rows
+}
+
 /** Most recent first, and no more than this: the pane is for the few in play. */
 const LINKS_KEPT = 8
 
@@ -688,6 +724,7 @@ export const register: Register = (on) => {
       $.clock.now(), read($, scripts)
     ])
     const linked = await read($, links)
+    const labels = chipLabels(linked)
     const groups = changeGroups(changed, await read($, folders))
 
     const head = (label: string, right = '') => {
@@ -736,16 +773,21 @@ export const register: Register = (on) => {
           {goal ? <Text> </Text> : null}
 
           {linked.length ? head('LINKS', String(linked.length)) : null}
-          {linked.map((l) => (
-            <Box flexDirection="column" width={cols}>
-              {row(
-                <Text bold={l.kind === 'pull'} wrap="truncate-end"><Link href={l.url} label={fitPath(l.key, cols - 12)} /></Text>,
-                l.kind === 'pull'
-                  ? (l.state ? <Text color={l.state === 'open' ? 'success' : l.state === 'merged' ? 'merged' : 'subtle'}>{` ${l.state}`}</Text> : <Text dimColor> pull request</Text>)
-                  : <Text dimColor>{` ${l.kind === 'figma' ? 'figma' : l.kind === 'ticket' ? 'ticket' : 'page'}`}</Text>
-              )}
-              {l.title ? <Text wrap="truncate-end">{l.title}</Text> : null}
-            </Box>
+          {/* Chips, design C (item 156): each a link, a pull request in its state's color. */}
+          {packChips(labels, cols).map((rowOf) => (
+            <Text>
+              {rowOf.map((i, n) => {
+                const l = linked[i]!
+                const color = l.kind !== 'pull' ? undefined
+                  : l.state === 'open' ? 'success' : l.state === 'merged' ? 'merged' : l.state ? 'subtle' : undefined
+                return (
+                  <Text>
+                    {n ? <Text dimColor> · </Text> : null}
+                    <Text {...(color ? { color } : {})}><Link href={l.url} label={fitPath(labels[i]!, cols)} /></Text>
+                  </Text>
+                )
+              })}
+            </Text>
           ))}
           {linked.length ? <Text> </Text> : null}
 
@@ -763,7 +805,7 @@ export const register: Register = (on) => {
           <Text> </Text>
 
           {head('CHANGES', changed.length ? `+${added} −${removed}` : '')}
-          {changed.length === 0 ? <Text dimColor>No files changed yet.</Text> : null}
+          {changed.length === 0 && groups.flat ? <Text dimColor>No files changed yet.</Text> : null}
           {groups.flat
             ? changed.map((f) => fileRow(f, ''))
             : [
