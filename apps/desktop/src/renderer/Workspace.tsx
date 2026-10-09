@@ -32,8 +32,10 @@ import {
 } from './icons';
 import type {
   ChangeKind, DiffSide, Entry, FileBody, FileChange, FileDiff, Root, Workspace, WorkspaceRepo,
-  WorkspaceStatus
+  SessionInfo, WorkspaceStatus
 } from './types';
+import { InlineTerminal } from './Detail';
+import { useTerminalToggle } from './terminalToggle';
 
 interface Tab {
   key: string;
@@ -61,8 +63,9 @@ export interface OpenRequest {
   nonce: number;
 }
 
-export function WorkspaceView({ onTerminal, visible, openRequest, showRequest }: {
-  onTerminal: (cwd: string) => void;
+export function WorkspaceView({ sessions, visible, openRequest, showRequest }: {
+  /** For the terminal docked under the editor (item 158). */
+  sessions: SessionInfo[];
   /** The Dock menu (item 135): switch to this workspace, opened at `folder`. */
   showRequest?: { id: string; folder?: string; nonce: number };
   /** ⌘P picked a file (item 100): open it, at a line if one was typed. */
@@ -429,6 +432,35 @@ export function WorkspaceView({ onTerminal, visible, openRequest, showRequest }:
   );
   const repoOf = (file: string) => repoPaths.find((r) => file.startsWith(`${r}/`));
 
+  /**
+   * The terminal docked under the editor (item 158), one per workspace, as
+   * VS Code's panel: ⌘J and the folder rows' terminal buttons open it here
+   * instead of sending you to Sessions. Hiding it leaves the shell running;
+   * its close button ends it.
+   */
+  const [terminals, setTerminals] = useState<Record<string, string>>({});
+  const [terminalShown, setTerminalShown] = useState(true);
+  const terminal = active ? sessions.find((s) => s.id === terminals[active]) : undefined;
+  // A second ⌘J while a shell is still starting would start another.
+  const opening = useRef(false);
+  const openTerminalAt = useCallback((cwd: string) => {
+    const ws = active;
+    if (!ws || opening.current) return;
+    opening.current = true;
+    void window.kovan.openTerminal(cwd).then((session) => {
+      setTerminals((t) => ({ ...t, [ws]: session.id }));
+      setTerminalShown(true);
+    }).finally(() => { opening.current = false; });
+  }, [active]);
+  useTerminalToggle(() => {
+    if (terminal?.running) { setTerminalShown((v) => !v); return; }
+    // Where you are: the open file's repository, else the first folder.
+    const here = tab ? (tab.kind === 'file' ? repoOf(tab.path) : tab.repo) : undefined;
+    const first = roots?.[0];
+    const cwd = here ?? first?.repo?.path ?? first?.folder;
+    if (cwd) openTerminalAt(cwd);
+  }, visible);
+
   const markDirty = useCallback((key: string, value: boolean) => {
     setDirty((d) => {
       if (d.has(key) === value) return d;
@@ -547,7 +579,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest, showRequest }:
                       expanded={expanded}
                       onToggle={toggle}
                       onRemove={() => removeFolder(root.folder)}
-                      onTerminal={onTerminal}
+                      onTerminal={openTerminalAt}
                       drop={rootDrag.drop?.target === root.folder ? (rootDrag.drop.after ? 'after' : 'before') : undefined}
                       dragging={rootDrag.drop?.id === root.folder}
                       onDragStart={(e) => rootDrag.start(root.folder, e)}
@@ -593,6 +625,8 @@ export function WorkspaceView({ onTerminal, visible, openRequest, showRequest }:
       <Resizer />
 
       <main className="pane editor-pane">
+        <div className="detail-shell">
+        <div className="ws-editor-area">
         {tabs.length === 0 ? (
           <p className="quiet centred">
             {workspace
@@ -653,6 +687,11 @@ export function WorkspaceView({ onTerminal, visible, openRequest, showRequest }:
             )}
           </>
         )}
+        </div>
+        {terminal?.running && terminalShown && (
+          <InlineTerminal session={terminal} onHide={() => setTerminalShown(false)} />
+        )}
+        </div>
       </main>
     </>
   );

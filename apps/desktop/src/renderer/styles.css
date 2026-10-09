@@ -1930,6 +1930,9 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .editor-pane {
   padding: 0; display: flex; flex-direction: column; background: var(--editor); overflow: hidden;
 }
+/* The editor beside the terminal docked in the Workspace view (item 158),
+   in the slot `.detail-scroll` takes in a ticket. */
+.ws-editor-area { flex: 1; min-width: 0; min-height: 0; order: 2; display: flex; flex-direction: column; }
 .tabs {
   display: flex; flex: none; overflow-x: auto; overflow-y: hidden;
   background: var(--sidebar); border-bottom: 1px solid var(--hair); scrollbar-width: none;

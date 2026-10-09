@@ -26,6 +26,7 @@ import type {
   SentryIssue, SessionInfo, Snapshot
 } from './types';
 import { useQuickButtons } from './quickButtons';
+import { useTerminalToggle } from './terminalToggle';
 
 /** A stand-in for a real photo: initials on a colour picked from the name
  *  itself, so the same person is always the same colour without anyone
@@ -829,7 +830,7 @@ const DOCK_OPTIONS: { id: DockPosition; label: string; Icon: (p: { size?: number
  * borders the reading area, the same pointer-capture technique as `Resizer`
  * but generalised to whichever axis the current dock position resizes along.
  */
-function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () => void }) {
+export function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () => void }) {
   const [fontSize] = useTerminalFontSize();
   const [dock, setDock] = useState<DockPosition>(storedDock);
   const [height, setHeight] = useState(() => storedSize(HEIGHT_KEY, DEFAULT_HEIGHT));
@@ -963,10 +964,14 @@ function useQuickTerminal(
   subject: string,
   onOpenSession: (id: string) => void
 ): () => void {
+  // A second press while the shell is still starting would start another.
+  const opening = useRef(false);
   return useCallback(() => {
+    if (opening.current) return;
+    opening.current = true;
     void window.kovan.defaultCwd(cwdHint).then((cwd) =>
       window.kovan.openTerminal(cwd, subject, `Terminal — ${subject}`)
-    ).then((session) => onOpenSession(session.id));
+    ).then((session) => onOpenSession(session.id)).finally(() => { opening.current = false; });
   }, [cwdHint, subject, onOpenSession]);
 }
 
@@ -1040,6 +1045,12 @@ export function PullPane({
   }, [inlineSession?.id]);
 
   const openQuickTerminal = useQuickTerminal(pull.repo, subject, onOpenSession);
+  // ⌘J (item 158): this pane's terminal, hidden or shown, or one opened here.
+  useTerminalToggle(() => {
+    if (inlineSession) { setShowTerminal((v) => !v); return; }
+    const own = sessions.find((s) => s.running && s.subject === subject);
+    if (own) onOpenSession(own.id); else openQuickTerminal();
+  });
 
   // The same priority order the queue row's own state chips already use —
   // `pullFlags` puts the one thing that matters most first, so the header
@@ -1342,6 +1353,12 @@ export function TicketPane({
   }, [inlineSession?.id]);
 
   const openQuickTerminal = useQuickTerminal(undefined, issue.key, onOpenSession);
+  // ⌘J (item 158): this pane's terminal, hidden or shown, or one opened here.
+  useTerminalToggle(() => {
+    if (inlineSession) { setShowTerminal((v) => !v); return; }
+    const own = sessions.find((s) => s.running && s.subject === issue.key);
+    if (own) onOpenSession(own.id); else openQuickTerminal();
+  });
   // The pull requests that belong to this ticket — the other direction of the
   // link a pull request's own header follows back to its ticket.
   const relatedPulls = findRelatedPulls(issue.key, snapshot);
@@ -1537,6 +1554,12 @@ export function SentryPane({
   }, [inlineSession?.id]);
 
   const openQuickTerminal = useQuickTerminal(undefined, issue.shortId, onOpenSession);
+  // ⌘J (item 158): this pane's terminal, hidden or shown, or one opened here.
+  useTerminalToggle(() => {
+    if (inlineSession) { setShowTerminal((v) => !v); return; }
+    const own = sessions.find((s) => s.running && s.subject === issue.shortId);
+    if (own) onOpenSession(own.id); else openQuickTerminal();
+  });
 
   const compact = useAppearance().density === 'compact';
   const head: HeadParts = {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { isAppShortcut, keyLabel } from './platform';
+import { toggleTerminal } from './terminalToggle';
 import { createPortal } from 'react-dom';
 import { useMenuDismiss } from './menuDismiss';
 import {
@@ -1042,6 +1043,19 @@ export function App() {
     });
   }, []);
 
+  // ⌘J (item 158): the terminal of the view on screen, shown or hidden; a new
+  // session where nothing has one. Capture, so a focused terminal or editor
+  // can't swallow it.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!isAppShortcut(event) || event.key.toLowerCase() !== 'j') return;
+      event.preventDefault();
+      if (!toggleTerminal()) openTerminal();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [openTerminal]);
+
   /**
    * Bringing a session into view, from wherever it is found. Deliberately
    * does not change `view` — called from a pull request or ticket's own
@@ -1380,7 +1394,7 @@ export function App() {
               aside and main as the body's own flex items. */}
           {workspaceSeen && (
             <div className={view === 'workspace' ? 'keep-alive' : 'keep-alive hidden'}>
-              <WorkspaceView onTerminal={openTerminal} visible={view === 'workspace'} openRequest={openRequest} showRequest={showWorkspace} />
+              <WorkspaceView sessions={sessions} visible={view === 'workspace'} openRequest={openRequest} showRequest={showWorkspace} />
             </div>
           )}
 

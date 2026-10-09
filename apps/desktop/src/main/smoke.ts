@@ -672,6 +672,9 @@ export async function smokeUi(
   if (process.env['KOVAN_SMOKE_ITEM136'] && mode === 'seeded') {
     return { item136: await driveItem136(win, process.env['KOVAN_SMOKE_ITEM136']) };
   }
+  if (process.env['KOVAN_SMOKE_ITEM158'] && mode === 'seeded' && sessions) {
+    return { item158: await driveItem158(win, sessions, process.env['KOVAN_SMOKE_ITEM158']) };
+  }
   if (process.env['KOVAN_SMOKE_ITEM157'] && mode === 'seeded') {
     return { item157: await driveItem157(win, process.env['KOVAN_SMOKE_ITEM157']) };
   }
@@ -4223,6 +4226,63 @@ async function driveItem135(win: BrowserWindow, prefix: string): Promise<Record<
   win.webContents.invalidate();
   await pause(300);
   await writeFile(`${prefix}-later.png`, (await win.webContents.capturePage()).toPNG());
+  return report;
+}
+
+/**
+ * Item 158: ⌘J, as in VS Code. In the Workspace view it docks a terminal
+ * under the editor in the open file's repository, hides it, and shows the same
+ * one again; on a pull request it docks that pull request's terminal; in
+ * Sessions it starts a new session.
+ */
+async function driveItem158(win: BrowserWindow, sessions: Sessions, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const cmdJ = async () => {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'J', modifiers: ['meta'] });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'J', modifiers: ['meta'] });
+    await pause(3_000);
+  };
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const docked = () => read(win, `(() => {
+    const t = [...document.querySelectorAll('.detail-terminal')].find((e) => e.offsetParent !== null);
+    return t ? { where: t.closest('.editor-pane') ? 'workspace' : t.closest('.pane') ? 'pane' : 'other', xterm: Boolean(t.querySelector('.xterm')), head: t.querySelector('.term-head')?.innerText ?? '' } : null;
+  })()`);
+  const count = () => sessions.list().length;
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="workspace"]')`, 15_000);
+  const report: Record<string, unknown> = { sessionsAtStart: count() };
+
+  await read(win, `document.querySelector('.rail-item[data-view="workspace"]').click()`);
+  await until(win, `[...document.querySelectorAll('.tree-row')].some((r) => r.innerText.includes('README.md'))`, 8_000);
+  await read(win, `[...document.querySelectorAll('.tree-row')].find((r) => r.innerText.includes('README.md')).click()`);
+  await pause(600);
+  await cmdJ();
+  report['workspaceOpen'] = { docked: await docked(), sessions: count(), cwd: sessions.list().at(-1)?.cwd };
+  await shot('workspace');
+  await cmdJ();
+  report['workspaceHidden'] = { docked: await docked(), sessions: count() };
+  await cmdJ();
+  report['workspaceAgain'] = { docked: await docked(), sessions: count() };
+
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]').click()`);
+  await until(win, `document.querySelector('.queue .row')`, 8_000);
+  await read(win, `document.querySelector('.queue .row').click()`);
+  await pause(800);
+  await cmdJ();
+  report['pull'] = { docked: await docked(), sessions: count(), subject: sessions.list().at(-1)?.subject };
+  await shot('pull');
+
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]').click()`);
+  await pause(600);
+  const before = count();
+  await cmdJ();
+  report['sessionsView'] = { before, after: count() };
   return report;
 }
 

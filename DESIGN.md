@@ -489,7 +489,14 @@ go-to-file (`QuickOpen.tsx`, item 100) from anywhere: recent files first
 (`rememberFile` records every file opened, however), fuzzy matching over the
 active workspace's files (`main/fileIndex.ts` — `git ls-files` inside a repo,
 listed on the first ⌘P, never before), `name:42` for a line; the file opens
-in the Workspace view. ⌘+ and ⌘−
+in the Workspace view. ⌘J (item 158, `terminalToggle.ts`), as in VS Code,
+shows or hides the terminal of the view on screen: in the Workspace view a
+terminal docked under the editor (the same `InlineTerminal` a ticket docks),
+opened in the open file's repository or the first folder, one per workspace;
+the folder rows' terminal buttons open there too instead of switching to
+Sessions. On a pull request, ticket or Sentry issue it is that item's own
+terminal. Where no view answers (Sessions, Agents, Activity, nothing
+selected) it starts a new session. Hiding leaves the shell running. ⌘+ and ⌘−
 resize as above. Every icon-only control is reachable by Tab and has a
 visible focus state.
 
