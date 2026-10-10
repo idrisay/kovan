@@ -218,7 +218,7 @@ const SENTRY_ISSUE = {
 export function sentryFramesFixture(_issueId: string) {
   return [
     { filename: 'node_modules/react-dom/cjs/react-dom.production.js', function: 'commitRoot', lineNo: 12, inApp: false },
-    { filename: 'checkout/summary.tsx', function: 'renderCheckoutSummary', lineNo: 41, resolvedPath: '/Users/idrisay/Desktop/coding/ikatia/app/baton/checkout/summary.tsx', inApp: true },
+    { filename: 'checkout/summary.tsx', function: 'renderCheckoutSummary', lineNo: 41, resolvedPath: '/Users/idrisay/Desktop/coding/ikatia/app/kovan/checkout/summary.tsx', inApp: true },
     { filename: 'checkout/total.ts', function: 'formatTotal', lineNo: 9, inApp: true }
   ];
 }

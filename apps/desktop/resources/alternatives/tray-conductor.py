@@ -8,7 +8,7 @@ recolours for light and dark menu bars.
 """
 from PIL import Image, ImageDraw
 
-OUT = '/Users/idrisay/Desktop/coding/ikatia/app/baton/apps/desktop/resources'
+OUT = '/Users/idrisay/Desktop/coding/ikatia/app/kovan/apps/desktop/resources'
 N = 512  # drawn big, then shrunk
 
 def qcurve(p0, p1, p2, steps=60):
