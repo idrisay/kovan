@@ -79,6 +79,10 @@ declare module 'claude-code' {
       /** The session's folders' repositories, main first (KOVAN_FOLDERS). */
       folders: string[];
       links: LinkItem[];
+      /** Per repository root, the paths git called changed when the session started (item 165). */
+      baseline: Record<string, string[]>;
+      /** Every changed file's diff for the Changes pane, by path. */
+      diffs: Record<string, DiffView>;
     };
   }
 }

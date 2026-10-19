@@ -710,6 +710,9 @@ export async function smokeUi(
   if (process.env['KOVAN_SMOKE_ITEM136'] && mode === 'seeded') {
     return { item136: await driveItem136(win, process.env['KOVAN_SMOKE_ITEM136']) };
   }
+  if (process.env['KOVAN_SMOKE_ITEM165'] && mode === 'seeded') {
+    return { item165: await driveItem165(win, process.env['KOVAN_SMOKE_ITEM165']) };
+  }
   if (process.env['KOVAN_SMOKE_ITEM164'] && mode === 'seeded') {
     return { item164: await driveItem164(win, process.env['KOVAN_SMOKE_ITEM164']) };
   }
@@ -4961,6 +4964,56 @@ async function driveItem124(win: BrowserWindow, prefix: string): Promise<Record<
   report['cardsWhenOff'] = await cards();
   report['saved'] = await read(win, `window.kovan.settings().then((s) => ({ summarize: s['buttons.summarize'], review: s['buttons.review'], condense: s['buttons.condense'] }))`);
   return report;
+}
+
+/**
+ * Item 165: Open in Kovan for a repository on another workspace than the
+ * window's opens the diff in that same window, not in a new one for the
+ * other workspace.
+ */
+async function driveItem165(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, writeFileSync, existsSync: exists, readFileSync } = await import('node:fs');
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="workspace"]')`, 15_000);
+  const repoIn = (name: string) => {
+    const repo = mkdtempSync(path.join(os.tmpdir(), `kovan-165-${name}-`));
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+    git('init', '-q');
+    writeFileSync(path.join(repo, 'a.ts'), 'export const a = 1\n');
+    git('add', '.');
+    git('-c', 'user.email=smoke@kovan', '-c', 'user.name=smoke', 'commit', '-qm', 'init');
+    writeFileSync(path.join(repo, 'a.ts'), 'export const a = 2\n');
+    return repo;
+  };
+  const backend = repoIn('backend');
+  const frontend = repoIn('frontend');
+  await read(win, `window.kovan.setSetting('workspaces', [
+    { id: 'w-back', name: 'Backend', folders: [${JSON.stringify(backend)}] },
+    { id: 'w-front', name: 'Frontend', folders: [${JSON.stringify(frontend)}] }
+  ])`);
+  await read(win, `window.kovan.setSetting('workspace.active', 'w-back')`);
+  await pause(500);
+  // The window on Backend, as the session's window is.
+  await read(win, `document.querySelector('.rail-item[data-view="workspace"]').click()`);
+  await until(win, `[...document.querySelectorAll('a, button')].some((b) => b.innerText.trim() === 'Backend')`, 8_000);
+  await read(win, `[...document.querySelectorAll('a, button')].find((b) => b.innerText.trim() === 'Backend').click()`);
+  await until(win, `document.querySelectorAll('.tree-row, .repo-row').length > 0`, 8_000).catch(() => undefined);
+  await pause(800);
+  const dir = path.join(app.getPath('userData'), 'open');
+  writeFileSync(path.join(dir, 'r165.json'), JSON.stringify({ repo: frontend, file: path.join(frontend, 'a.ts') }));
+  const replyFile = path.join(dir, 'r165.reply');
+  for (let i = 0; i < 50 && !exists(replyFile); i++) await pause(100);
+  const reply = exists(replyFile) ? JSON.parse(readFileSync(replyFile, 'utf8')) : 'no reply';
+  await pause(1_500);
+  const tabs = await read(win, `Array.from(document.querySelectorAll('.tabs [role="tab"], .tabs .tab')).map((t) => t.innerText.replace(/\\s+/g, ' ').trim())`);
+  const diff = await read(win, `document.querySelector('.diff, .diff-view')?.innerText.slice(0, 200) ?? ''`);
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-same-window.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-same-window.png`);
+  return { reply, windows: BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length, tabs, diff };
 }
 
 async function driveItem148(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {

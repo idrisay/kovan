@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { changeGroups, checkName, chipLabels, findLinks, packChips, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
+import { changeGroups, checkName, porcelainPaths, chipLabels, findLinks, packChips, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
 
 /** `git rev-parse --show-toplevel --show-prefix` for a folder under /repo. */
 function gitPlace(e: unknown): string {
@@ -320,4 +320,74 @@ test("a pull request linked in a command's output shows in its state's color, th
   expect(await ui.find({ type: 'Text', text: /lesson\+exercise smoke test/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /acme-backend#868/ })).toBeUndefined()
   await ui.unmount()
+})
+
+describe('item 165', () => {
+  test("reads git status's paths, a rename's new one only", async () => {
+    expect(porcelainPaths(' M src/a.ts\0?? new file.ts\0R  b.ts\0old b.ts\0 D gone.ts\0')).toEqual(['src/a.ts', 'new file.ts', 'b.ts', 'gone.ts'])
+    expect(porcelainPaths('')).toEqual([])
+  })
+})
+
+test("a file a shell command changed is listed, what was changed before the session isn't, and Changes shows every diff", async ($, on) => {
+  mock.env(on, { KOVAN_OPEN_DIR: '/kovan/open', HOME: '/Users/me', KOVAN_FOLDERS: JSON.stringify(['/r/api', '/r/web']) })
+  let status = ' M old-work.ts\0'
+  on('clock.now', () => ({ value: 1_000 }))
+  on('session.cwd', () => ({ value: '/r/api' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('fs.exists', () => ({ value: true }))
+  on('fs.read', () => { throw new Error('no such file') })
+  on('ui.panes', () => ({ value: [{ id: 'kovan', title: 'Kovan' }, { id: 'kovan-changes', title: 'Changes' }] as never }))
+  on('process.run', ($, e) => {
+    const { argv, init } = e as unknown as { argv: string[]; init?: { cwd?: string } }
+    const cmd = argv.join(' ')
+    const cwd = init?.cwd ?? ''
+    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (cmd.startsWith('git rev-parse')) {
+      const root = ['/r/api', '/r/web'].find((r) => cwd === r || cwd.startsWith(`${r}/`))
+      return root ? out(`${root}\n${cwd === root ? '' : `${cwd.slice(root.length + 1)}/`}\n`) : out('', 128)
+    }
+    if (cmd.startsWith('git status')) return out(cwd === '/r/web' ? status : '')
+    if (cmd.startsWith('git ls-files') && cwd === '/r/web') return out('src/a.ts\nsrc/b.ts\n')
+    if (cmd.startsWith('git diff --numstat') && cwd === '/r/web') return out('1\t1\tsrc/a.ts\n2\t0\tsrc/b.ts\n')
+    if (cmd === 'git diff HEAD -- src/a.ts') return out('@@ -1 +1 @@\n-a\n+b\n')
+    if (cmd === 'git diff HEAD -- src/b.ts') return out('@@ -1 +1,3 @@\n x\n+y\n+z\n')
+    return out('', cmd.startsWith('git') ? 0 : 1)
+  })
+  on('tool.call', { tool: 'Edit' }, () => ({ result: {} as never }))
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false } as never }))
+
+  // The first edit reads the session's folders, and what git calls changed then.
+  await $.tool.call({ tool: 'Edit', file_path: '/r/web/src/a.ts', old_string: 'a', new_string: 'b' } as never)
+  status = ' M old-work.ts\0 M src/a.ts\0 M src/b.ts\0'
+  await $.tool.call({ tool: 'Bash', command: "python3 - <<'EOF'\nopen('src/b.ts','a').write('y\\nz\\n')\nEOF" } as never)
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ key: 'file:/r/web/src/b.ts' })).toBeDefined()
+  expect(await ui.find({ key: 'file:/r/web/old-work.ts' })).toBeUndefined()
+  await ui.unmount()
+
+  const changes = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', component: 'Pane', requestId: 'kovan-changes', props: { title: 'Changes', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } } } as never)
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+  expect(await changes.find({ type: 'Text', text: /^web$/ })).toBeDefined()
+  const json = JSON.stringify(await changes.find({ type: 'Box' }))
+  expect(json).toContain('-a\\n+b')
+  expect(json).toContain('+y\\n+z')
+  expect(await changes.find({ key: 'changes-kovan:/r/web/src/b.ts' })).toBeDefined()
+  await changes.unmount()
+})
+
+test('Kovan sessions are asked to keep a task list the pane can show', async ($, on) => {
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'You are Claude.', scope: 'shared' as const }] }))
+  const composed = await $.prompt.compose({ model: 'claude-opus-5-5', promptModel: 'claude-opus-5-5', surfaces: [], tools: ['TaskCreate', 'TaskUpdate'], outputStyle: null, traits: [] })
+  const mine = composed.sections.find((x) => x.id === 'kovan:plan')
+  expect(mine?.scope).toBe('session')
+  expect(mine?.text).toContain('TaskCreate')
+  // Added after the engine's own sections, never in place of them.
+  expect(composed.sections.length).toBeGreaterThan(1)
+  expect(composed.sections.at(-1)?.id).toBe('kovan:plan')
 })

@@ -216,7 +216,7 @@ host.config.onChange((key) => {
 
 /**
  * "Open in Kovan" from the pane beside Claude (item 148): the file's diff in
- * the Workspace view, with the window brought forward. Only for a repository
+ * the Workspace view of the window in front, brought forward. Only for a repository
  * in one of Kovan's workspaces, the same rule every workspace read follows.
  */
 let pendingDiffOpen: { repo: string; file: string; side: 'staged' | 'unstaged' | 'untracked' } | undefined;
@@ -228,9 +228,11 @@ const openRequests = new OpenRequests(claudeModOpenDir(), async ({ repo, file })
   const side = diffSideFor(await workspaces.status(root), file);
   if (!side) return { ok: false, message: `${file} has no changes now.` };
   const target = { repo: root, file, side };
-  // The window on the workspace that has the repository, else the one in front.
-  const owner = workspaces.list().find((w) => w.folders.some((f) => root === f || root.startsWith(f + path.sep)));
-  const { window, fresh } = owner ? windows.showWorkspace(owner.id) : windows.show();
+  // The window in front: the one the session was clicked in (item 165). A
+  // repository on another workspace opens there too, beside the session,
+  // rather than in a new window for that workspace; diffs read from any
+  // workspace's folders.
+  const { window, fresh } = windows.show();
   // The click came from a terminal, maybe another app's: bring Kovan to the front.
   app.focus({ steal: true });
   if (fresh) pendingDiffOpen = target;

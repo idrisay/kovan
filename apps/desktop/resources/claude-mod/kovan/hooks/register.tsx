@@ -6,7 +6,8 @@
  *   Plan       Claude's own plan (TodoWrite, or TaskCreate/TaskUpdate), with
  *              the step in progress as Now and the one after it as Next
  *   Changes    every file this session edited, +/- against HEAD; a click
- *              opens its diff under it
+ *              opens its diff under it. Files a shell command changed count
+ *              too, by git status against the session's start (item 165)
  *   Checks     the tests, typechecks and lints the agent ran, and Run checks
  *   one line   model, context, session and weekly usage
  *
@@ -14,6 +15,10 @@
  * hands it the goal in KOVAN_GOAL / KOVAN_GOAL_KEY. Nothing here runs on its
  * own except git reads after an edit: tests run only when the agent runs
  * them or the person presses Run checks.
+ *
+ * A second pane, Changes, shows every changed file's diff at once, in every
+ * folder of the session: Claude Code's own Diff tab only knows the folder the
+ * session started in (item 165).
  */
 
 import { atom, read, update } from 'claude-code'
@@ -22,6 +27,7 @@ import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 import type { Check, DiffView, FileChange, LinkItem, PlanStep, Usage } from '../types'
 
 const PANE = 'kovan'
+const CHANGES = 'kovan-changes'
 const plan = atom({ plugin: 'kovan', key: 'plan' } as const, [])
 const files = atom({ plugin: 'kovan', key: 'files' } as const, [])
 const open = atom({ plugin: 'kovan', key: 'open' } as const, '')
@@ -31,6 +37,17 @@ const usage = atom({ plugin: 'kovan', key: 'usage' } as const, { model: '', effo
 const scripts = atom({ plugin: 'kovan', key: 'scripts' } as const, false)
 const folders = atom({ plugin: 'kovan', key: 'folders' } as const, [])
 const links = atom({ plugin: 'kovan', key: 'links' } as const, [])
+/** Per repository, what was already changed when the session started: not this session's. */
+const baseline = atom({ plugin: 'kovan', key: 'baseline' } as const, {})
+/** Every changed file's diff, for the Changes pane, by path. */
+const diffs = atom({ plugin: 'kovan', key: 'diffs' } as const, {})
+
+/**
+ * Asks Claude to keep its plan where the pane can show it (item 165): without
+ * a task list the Plan section has nothing to read. The same words every
+ * session, so the prompt cache keeps it.
+ */
+const PLAN_NOTE = "Kovan shows your plan in a pane beside this session, read from your task list. For work of more than a couple of steps, keep the steps as a task list (TaskCreate and TaskUpdate, or TodoWrite), and mark each one in progress and completed as you go."
 
 type $ = EngineInterface
 
@@ -157,6 +174,7 @@ async function observe($: $, tool: string, input: Record<string, unknown>, ran: 
   }
 
   if (tool === 'Bash') {
+    void noteShellChanges($).catch(() => undefined)
     const command = String(input['command'] ?? '')
     const said = ran.result as { stdout?: string } | undefined
     // `gh pr create` prints the new one's link.
@@ -256,6 +274,62 @@ async function refreshFolders($: $) {
     if (place && !roots.includes(place.root)) roots.push(place.root)
   }
   await update($, folders, () => roots)
+  const known = await read($, baseline)
+  for (const root of roots) {
+    if (known[root]) continue
+    const dirty = await changedPaths($, root)
+    await update($, baseline, (b) => (b[root] ? b : { ...b, [root]: dirty }))
+  }
+}
+
+/** Paths git reports changed in a repository, untracked files included; [] when git can't say. */
+async function changedPaths($: $, root: string): Promise<string[]> {
+  const r = await $.process.run(['git', 'status', '--porcelain', '-z', '-uall'], { cwd: root, timeoutMs: 10_000 })
+  return r.exitCode === 0 ? porcelainPaths(r.stdout) : []
+}
+
+/**
+ * `git status --porcelain -z`'s paths. A rename or copy is followed by its
+ * old path, which is skipped: the file is where it is now.
+ */
+export function porcelainPaths(out: string): string[] {
+  const parts = out.split('\0')
+  const paths: string[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const entry = parts[i]!
+    if (entry.length < 4) continue
+    paths.push(entry.slice(3))
+    if (entry[0] === 'R' || entry[0] === 'C') i++
+  }
+  return paths
+}
+
+/**
+ * Files a shell command changed (`sed -i`, a script, a formatter): what git
+ * now reports changed in the session's repositories that wasn't at the
+ * start and isn't listed yet. Edit and Write report themselves; this is
+ * for everything else.
+ */
+async function noteShellChanges($: $) {
+  const roots = await read($, folders)
+  if (roots.length === 0) return
+  const before = await read($, baseline)
+  const listed = new Set((await read($, files)).map((f) => f.path))
+  const found: string[] = []
+  for (const root of roots) {
+    if (!before[root]) continue
+    const was = new Set(before[root])
+    for (const rel of await changedPaths($, root)) {
+      const file = `${root}/${rel}`
+      if (!was.has(rel) && !listed.has(file)) found.push(file)
+    }
+  }
+  if (found.length === 0) return
+  await update($, files, (list) => [
+    ...list,
+    ...found.filter((p) => !list.some((f) => f.path === p)).map((p) => ({ path: p, repo: '', rel: p, add: 0, del: 0, isNew: false }))
+  ])
+  await refreshFiles($)
 }
 
 /**
@@ -303,9 +377,22 @@ async function refreshFiles($: $) {
     }
   }
   await update($, files, (now) => now.map((f) => next.get(f.path) ?? f))
+  if ((await $.ui.panes()).some((pane) => pane.id === CHANGES)) await loadAllDiffs($)
+}
+
+/** Every listed file's diff, for the Changes pane: asked when it opens and after each change. */
+async function loadAllDiffs($: $) {
+  const list = await read($, files)
+  const views = await Promise.all(list.map((f) => diffOf($, f.path)))
+  await update($, diffs, () => Object.fromEntries(views.map((v) => [v.path, v])))
 }
 
 async function loadDiff($: $, file: string) {
+  const view = await diffOf($, file)
+  await update($, diff, () => view)
+}
+
+async function diffOf($: $, file: string): Promise<DiffView> {
   const known = (await read($, files)).find((f) => f.path === file)
   const root = known?.repo
   let view: DiffView
@@ -338,7 +425,7 @@ async function loadDiff($: $, file: string) {
       ? { path: file, text: body, ...(lines.length > DIFF_LINES ? { note: `First ${DIFF_LINES} of ${lines.length} lines.` } : {}) }
       : { path: file, text: '', note: 'No difference from HEAD now.' }
   }
-  await update($, diff, () => view)
+  return view
 }
 
 /**
@@ -664,7 +751,7 @@ async function refreshUsage($: $, effort?: string) {
 export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'kovan', description: "Open Kovan's pane: the goal, plan, changes, checks and usage" })
-    void $.ui.open({ id: PANE, title: 'Kovan' })
+    void $.ui.open({ id: PANE, title: 'Kovan' }).then(() => $.ui.open({ id: CHANGES, title: 'Changes' })).catch(() => undefined)
     void refreshUsage($).catch(() => undefined)
     void refreshScripts($).catch(() => undefined)
     void refreshFolders($).catch(() => undefined)
@@ -672,6 +759,11 @@ export const register: Register = (on) => {
     // Reset times count down even while nothing happens.
     $.clock.every(60_000, () => { void refreshUsage($).catch(() => undefined) })
     return next(e)
+  })
+
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+    return { sections: [...composed.sections, { id: 'kovan:plan', text: PLAN_NOTE, scope: 'session' as const }] }
   })
 
   // The prompt Kovan starts the session with counts as the person asking, so
@@ -689,6 +781,7 @@ export const register: Register = (on) => {
 
   on('command.run', { command: 'kovan' }, async ($) => {
     await $.ui.open({ id: PANE, title: 'Kovan' })
+    await $.ui.open({ id: CHANGES, title: 'Changes' })
     return { text: "Kovan's pane is open." }
   })
 
@@ -713,6 +806,65 @@ export const register: Register = (on) => {
     void refreshUsage($).catch(() => undefined)
     void noteLinks($, done.text ?? '').catch(() => undefined)
     return done
+  })
+
+  // Changes (item 165): every changed file's diff, in every folder of the
+  // session, one after another, as Claude Code's Diff tab shows its own folder.
+  on('ui.render', { component: 'Pane', requestId: CHANGES }, async ($, e) => {
+    const { Box, Text, Button, Code } = $.ui.resolve(e)
+    const cols = Math.max(24, e.props.bodyColumns)
+    const [changed, roots, views, openDir] = await Promise.all([read($, files), read($, folders), read($, diffs), $.env.get('KOVAN_OPEN_DIR')])
+    // Opened, or a file listed since: fill in what's missing, then draw again.
+    if (changed.some((f) => !views[f.path])) void loadAllDiffs($).catch(() => undefined)
+    const groups = changeGroups(changed, roots)
+    const counts = (list: readonly FileChange[]) => {
+      const add = list.reduce((n, f) => n + f.add, 0)
+      const del = list.reduce((n, f) => n + f.del, 0)
+      return <Text><Text color="diffAdded">{` +${add}`}</Text><Text color="diffRemoved">{` −${del}`}</Text></Text>
+    }
+    const row = (left: RenderChildren, right: RenderChildren) => (
+      <Box flexDirection="row" width={cols}>
+        <Box flexGrow={1} flexShrink={1}>{left}</Box>
+        <Box flexShrink={0}>{right}</Box>
+      </Box>
+    )
+    const fileBlock = (f: FileChange) => {
+      const view = views[f.path]
+      return (
+        <Box flexDirection="column" width={cols} marginBottom={1}>
+          {row(
+            <Text bold wrap="truncate-end">{fitPath(f.rel, cols - 14)}</Text>,
+            !f.repo ? <Text> </Text> : f.isNew ? <Text color="diffAdded">{` new +${f.add}`}</Text> : counts([f])
+          )}
+          {!view ? <Text dimColor>  Reading the diff…</Text> : null}
+          {view?.text ? <Code source={view.text} format={view.plain ? 'source' : 'diff'} path={f.rel} wrap="truncate-end" /> : null}
+          {view?.note ? <Text dimColor>{`  ${view.note}`}</Text> : null}
+          {openDir && f.repo
+            ? <Box marginLeft={2}><Button key={`changes-kovan:${f.path}`} plain label="Open in Kovan" onPress={() => { void openInKovan($, f.path) }} /></Box>
+            : null}
+        </Box>
+      )
+    }
+    if (changed.length === 0) return <Text dimColor>No files changed yet in any of this session's folders.</Text>
+    return (
+      <Box flexDirection="column" width={cols}>
+        {groups.repos.filter((g) => g.files.length > 0).map((g) => (
+          <Box flexDirection="column" width={cols}>
+            {row(<Text bold color="suggestion" wrap="truncate-end">{g.name}</Text>, counts(g.files))}
+            <Text> </Text>
+            {g.files.map(fileBlock)}
+          </Box>
+        ))}
+        {groups.others.length
+          ? (
+            <Box flexDirection="column" width={cols}>
+              <Text dimColor bold>Other files</Text>
+              {groups.others.map(fileBlock)}
+            </Box>
+          )
+          : null}
+      </Box>
+    )
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -792,7 +944,7 @@ export const register: Register = (on) => {
           {linked.length ? <Text> </Text> : null}
 
           {head('PLAN', steps.length ? `${done} of ${steps.length} done` : '')}
-          {steps.length === 0 ? <Text dimColor>No plan yet: it shows once Claude makes one.</Text> : null}
+          {steps.length === 0 ? <Text dimColor>No task list yet: the plan shows once Claude keeps one.</Text> : null}
           {steps.map((s, i) => {
             if (s.status === 'completed') return row(<Text dimColor wrap="truncate-end">{`✓ ${s.text}`}</Text>, <Text> </Text>)
             if (i === doing) {
