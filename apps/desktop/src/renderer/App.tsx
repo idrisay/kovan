@@ -43,6 +43,20 @@ import {
   useKeptPins, useRowMenu, type RowMenuItem
 } from './pins';
 import { PinSlot } from './rows';
+import { firstName, PersonPicker, usePersonData } from './people';
+import type { Teammate } from '@kovan/core';
+
+/** A teammate's list before it has arrived (item 164): loading, or why not. */
+function PersonListState({ person, what, error, onRetry }: { person: Teammate; what: string; error?: string; onRetry: () => void }) {
+  return error ? (
+    <p className="person-state">
+      Couldn't load {firstName(person)}'s {what}: {error}{' '}
+      <button type="button" className="link" onClick={onRetry}>Retry</button>
+    </p>
+  ) : (
+    <p className="person-state">Loading {firstName(person)}'s {what}…</p>
+  );
+}
 
 /** What the detail pane is showing, in words — for its error card and the log (item 83). */
 function paneWhere(selected: Selection): string {
@@ -1172,6 +1186,23 @@ export function App() {
     ...targets.map((t) => ({ id: `terminal-${t.path}`, label: `New terminal in ${t.label}`, run: () => openTerminal(t.path) }))
   ], [selected, targets, refresh, openTerminal]);
 
+  // Item 164: whose pull requests and tickets the lists show. Undefined is
+  // yours. Per list, since a GitHub login and a Jira account aren't the same
+  // person to Kovan; not remembered across launches.
+  const [pullPerson, setPullPerson] = useState<Teammate>();
+  const [ticketPerson, setTicketPerson] = useState<Teammate>();
+  const [personMerged, setPersonMerged] = useState(MERGED_STEP);
+  useEffect(() => setPersonMerged(MERGED_STEP), [pullPerson?.id]);
+  const loadPersonPulls = useCallback((login: string) => window.kovan.personPulls(login, personMerged), [personMerged]);
+  const loadPersonTickets = useCallback((id: string) => window.kovan.personTickets(id), []);
+  const personPulls = usePersonData(pullPerson?.id, loadPersonPulls, snapshot.at);
+  const personTickets = usePersonData(ticketPerson?.id, loadPersonTickets, snapshot.at);
+  const listPerson = view === 'pulls' ? pullPerson : view === 'tickets' ? ticketPerson : undefined;
+  const backToYou = useCallback(() => {
+    if (view === 'pulls') setPullPerson(undefined);
+    else if (view === 'tickets') setTicketPerson(undefined);
+  }, [view]);
+
   const match = useCallback((p: PullSummary) => {
     const q = filter.trim().toLowerCase();
     const textOk = !q ||
@@ -1224,6 +1255,25 @@ export function App() {
   const issueMenu = useCallback((issue: JiraIssue): RowMenuItem[] => (issue.url ? linkMenu(issue.url, 'Jira') : []), [linkMenu]);
 
   const groups = useMemo((): Group[] => {
+    if (pullPerson) {
+      // Theirs, in the order of yours: what waits on you first, then their
+      // open work, drafts, what waits on them, and what they shipped.
+      const theirs = personPulls.data;
+      if (!theirs) return [];
+      const yours = new Set(snapshot.reviewRequested.map((p) => `${p.repo}#${p.number}`));
+      const onYou = theirs.open.filter((p) => yours.has(`${p.repo}#${p.number}`));
+      const rest = theirs.open.filter((p) => !yours.has(`${p.repo}#${p.number}`));
+      const name = firstName(pullPerson);
+      return [
+        { id: 'person-on-you', label: 'Waiting on your review', pulls: sortPulls(onYou.filter(match), pullSort), tint: false },
+        { id: 'person-open', label: 'Open', pulls: sortPulls(rest.filter((p) => !p.isDraft).filter(match), pullSort), tint: false },
+        { id: 'person-drafts', label: 'Drafts', pulls: sortPulls(rest.filter((p) => p.isDraft).filter(match), pullSort), tint: false },
+        { id: 'person-review', label: `Awaiting ${name}'s review`, pulls: sortPulls(theirs.reviewRequested.filter(match), pullSort), tint: false },
+        { id: 'merged', label: 'Recently merged', pulls: theirs.merged.filter(match), tint: false }
+      ].map((group) => (
+        pullsPinnedOnly ? { ...group, pulls: group.pulls.filter((p) => pinnedKeys.has(pullPinKey(p.repo, p.number))) } : group
+      ));
+    }
     const blockedIds = new Set(snapshot.blocked.map((p) => `${p.repo}#${p.number}`));
     const rest = snapshot.mine.filter((p) => !blockedIds.has(`${p.repo}#${p.number}`));
     const drafts = rest.filter((p) => p.isDraft).filter(match);
@@ -1268,7 +1318,17 @@ export function App() {
     ].map((group) => (
       pullsPinnedOnly ? { ...group, pulls: group.pulls.filter((p) => pinnedKeys.has(pullPinKey(p.repo, p.number))) } : group
     ));
-  }, [snapshot, match, pullSort, kept.pulls, pullsPinnedOnly, pinnedKeys]);
+  }, [snapshot, match, pullSort, kept.pulls, pullsPinnedOnly, pinnedKeys, pullPerson, personPulls.data]);
+
+  // The merged window, yours or theirs: what "Show more" reads and widens.
+  const mergedWindow = pullPerson
+    ? {
+        shown: personPulls.data?.merged.length ?? 0,
+        total: personPulls.data?.mergedTotal ?? 0,
+        loading: personPulls.loading && personPulls.data !== undefined && personPulls.data.merged.length < personMerged,
+        more: () => setPersonMerged((personPulls.data?.merged.length ?? 0) + MERGED_STEP)
+      }
+    : { shown: snapshot.merged.length, total: snapshot.mergedTotal, loading: snapshot.loadingMerged, more: () => loadMoreMerged() };
 
   const pullFacets = useMemo(() => pullFacetValues(pullUniverse(snapshot)), [snapshot]);
   const pullFilterCount = PULL_FACETS.reduce((n, f) => n + pullFilters[f.key].size, 0);
@@ -1277,12 +1337,17 @@ export function App() {
     void window.kovan.loadMoreMerged(snapshot.merged.length + MERGED_STEP).then(accept);
   }, [snapshot.merged.length, accept]);
 
-  const ticketFacets = useMemo(() => ticketFacetValues(snapshot.tickets), [snapshot.tickets]);
+  // A teammate's tickets replace yours; your kept pins stay with your list.
+  const ticketSource = useMemo(
+    () => (ticketPerson ? personTickets.data?.tickets ?? [] : [...snapshot.tickets, ...kept.issues]),
+    [ticketPerson, personTickets.data, snapshot.tickets, kept.issues]
+  );
+  const ticketFacets = useMemo(() => ticketFacetValues(ticketSource), [ticketSource]);
   const ticketFilterCount = TICKET_FACETS.reduce((n, f) => n + ticketFilters[f.key].size, 0);
 
   const tickets = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const matching = [...snapshot.tickets, ...kept.issues].filter((t) => {
+    const matching = ticketSource.filter((t) => {
       if (ticketsPinnedOnly && !pinnedKeys.has(ticketPinKey(t.key))) return false;
       if (q && !t.summary.toLowerCase().includes(q) && !t.key.toLowerCase().includes(q)) {
         return false;
@@ -1301,7 +1366,7 @@ export function App() {
       sorted.sort((a, b) => b.updated.localeCompare(a.updated));
     }
     return sorted;
-  }, [snapshot.tickets, kept.issues, ticketsPinnedOnly, pinnedKeys, filter, ticketFilters, ticketSort]);
+  }, [ticketSource, ticketsPinnedOnly, pinnedKeys, filter, ticketFilters, ticketSort]);
 
   /** Newest-first, same as the ticket list's own default — no sort/filter
    *  menu of its own yet, just the shared search box. */
@@ -1461,15 +1526,29 @@ export function App() {
             />
           ) : view === 'workspace' ? null : (
             <>
-              <aside className="queue" aria-label={current.label}>
+              <aside
+                className="queue" aria-label={current.label}
+                onKeyDown={(e) => {
+                  // Esc on someone else's list goes back to yours, unless it
+                  // is closing a menu (still in the page as the key lands).
+                  if (e.key === 'Escape' && listPerson && !document.querySelector('.queue .menu')) backToYou();
+                }}
+              >
                 <div className="queue-head">
-                  <div className="queue-title-row">
+                  <div className={view === 'pulls' || view === 'tickets' ? 'queue-title-row with-person' : 'queue-title-row'}>
                     <h1>{current.label}</h1>
+                    {view === 'pulls' && (
+                      <PersonPicker service="github" value={pullPerson} onChange={setPullPerson} me={snapshot.viewer} />
+                    )}
+                    {view === 'tickets' && (
+                      <PersonPicker service="jira" value={ticketPerson} onChange={setTicketPerson} me={snapshot.viewer} />
+                    )}
+                    {(view === 'pulls' || view === 'tickets') && <span className="person-spacer" />}
                     {view === 'tickets' ? (
                       <>
                         <TicketFilterMenu
                           values={ticketFacets}
-                          tickets={snapshot.tickets}
+                          tickets={ticketSource}
                           active={ticketFilters}
                           onToggle={toggleTicketFilter}
                           onClear={clearTicketFilters}
@@ -1500,11 +1579,25 @@ export function App() {
                     <SearchIcon />
                     <label htmlFor="q" className="sr-only" style={{ display: 'none' }}>Filter</label>
                     <input
-                      id="q" type="text" placeholder="Filter"
+                      id="q" type="text"
+                      placeholder={listPerson ? `Filter ${firstName(listPerson)}'s ${view === 'pulls' ? 'pull requests' : 'tickets'}` : 'Filter'}
                       value={filter} onChange={(e) => setFilter(e.target.value)}
                     />
                     {filter === '' && <kbd>{keyLabel('F')}</kbd>}
                   </div>
+                  {listPerson && (
+                    <p className="person-banner">
+                      <span className="person-banner-text">
+                        {listPerson.name}'s {view === 'pulls' ? 'pull requests' : 'tickets'}
+                      </span>
+                      <button
+                        type="button" className="link person-back" onClick={backToYou}
+                        title="Esc also goes back"
+                      >
+                        Back to you
+                      </button>
+                    </p>
+                  )}
                 </div>
 
                 <div className="queue-list">
@@ -1540,11 +1633,14 @@ export function App() {
                         ))}
                       </ul>
                     )
+                  ) : view === 'tickets' && ticketPerson && !personTickets.data ? (
+                    <PersonListState person={ticketPerson} what="tickets" error={personTickets.error} onRetry={personTickets.retry} />
                   ) : view === 'tickets' ? (
-                    tickets.length === 0 && failedTickets.length === 0 ? (
+                    tickets.length === 0 && (ticketPerson || failedTickets.length === 0) ? (
                       ticketsPinnedOnly && pinnedTicketCount === 0 ? <NothingPinned /> : (
                         <p className="quiet">
-                          {filter || ticketFilterCount > 0 || ticketsPinnedOnly ? 'No tickets match.' : 'No tickets.'}
+                          {filter || ticketFilterCount > 0 || ticketsPinnedOnly ? 'No tickets match.'
+                            : ticketPerson ? `${firstName(ticketPerson)} has no open tickets.` : 'No tickets.'}
                         </p>
                       )
                     ) : (
@@ -1584,7 +1680,7 @@ export function App() {
                           </li>
                           );
                         })}
-                        {failedTickets.map((f) => (
+                        {!ticketPerson && failedTickets.map((f) => (
                           <FailedPinRow
                             key={f.pin.key} pin={f.pin} label={f.pin.key.slice('ticket:'.length)}
                             error={f.error} onRetry={() => kept.retry(f.pin.key)}
@@ -1594,6 +1690,8 @@ export function App() {
                     )
                   ) : pullsPinnedOnly && pinnedPullCount === 0 ? (
                     <NothingPinned />
+                  ) : pullPerson && !personPulls.data ? (
+                    <PersonListState person={pullPerson} what="pull requests" error={personPulls.error} onRetry={personPulls.retry} />
                   ) : (
                     <>
                     {groups.map((group) => {
@@ -1607,7 +1705,7 @@ export function App() {
                           <GroupHead
                             label={group.label}
                             count={group.pulls.length}
-                            total={group.id === 'merged' && !pullsPinnedOnly ? snapshot.mergedTotal : undefined}
+                            total={group.id === 'merged' && !pullsPinnedOnly ? mergedWindow.total : undefined}
                             open={open}
                             tint={group.tint && !empty}
                             note={group.note}
@@ -1646,19 +1744,19 @@ export function App() {
                                 a list you assume is complete.
                               */}
                               {group.id === 'merged' && !pullsPinnedOnly &&
-                                snapshot.merged.length < snapshot.mergedTotal && (
+                                mergedWindow.shown < mergedWindow.total && (
                                 <button
                                   type="button"
                                   className="more"
-                                  disabled={snapshot.loadingMerged}
-                                  onClick={loadMoreMerged}
+                                  disabled={mergedWindow.loading}
+                                  onClick={mergedWindow.more}
                                 >
-                                  {snapshot.loadingMerged
+                                  {mergedWindow.loading
                                     ? 'Loading…'
                                     : `Show ${Math.min(
                                         MERGED_STEP,
-                                        snapshot.mergedTotal - snapshot.merged.length
-                                      )} more of ${snapshot.mergedTotal}`}
+                                        mergedWindow.total - mergedWindow.shown
+                                      )} more of ${mergedWindow.total}`}
                                 </button>
                               )}
                             </>
@@ -1666,7 +1764,7 @@ export function App() {
                         </section>
                       );
                     })}
-                    {failedPulls.length > 0 && (
+                    {!pullPerson && failedPulls.length > 0 && (
                       <section>
                         <GroupHead
                           label="Pinned, not loaded" count={failedPulls.length}

@@ -106,6 +106,31 @@ export class JiraClient {
   }
 
   /**
+   * Who these tickets are assigned to, one entry per ticket, for the person
+   * picker (item 164). Only the assignee and status come back, so a hundred
+   * tickets stay one small request.
+   */
+  async assignees(
+    jql: string, limit = 100, signal?: CancelSignal
+  ): Promise<{ accountId: string; name: string; open: boolean }[]> {
+    const response = await this.http.json<{
+      issues?: { fields?: { assignee?: { accountId?: string; displayName?: string } | null; status?: { statusCategory?: { key?: string } } } }[];
+    }>(this.api('/search/jql'), {
+      method: 'POST',
+      headers: this.headers,
+      body: { jql, maxResults: limit, fields: ['assignee', 'status'] },
+      signal
+    });
+    return (response.issues ?? [])
+      .filter((issue) => issue.fields?.assignee?.accountId)
+      .map((issue) => ({
+        accountId: issue.fields!.assignee!.accountId!,
+        name: issue.fields!.assignee!.displayName ?? '',
+        open: issue.fields?.status?.statusCategory?.key !== 'done'
+      }));
+  }
+
+  /**
    * Transitions are workflow-specific and can't be hardcoded — always read the
    * available set for the issue rather than assuming a name maps to an id.
    */

@@ -29,6 +29,7 @@ import * as path from 'node:path';
 import type { Agents } from './agents';
 import type { ActivityFeed } from './activityFeed';
 import type { Poller, Snapshot } from './poller';
+import type { PersonPulls, PullSummary } from '@kovan/core';
 import { Sessions } from './sessions';
 import { PtyHosts } from './ptyClient';
 import { AgentStatus } from './agentStatus';
@@ -191,6 +192,43 @@ export function fixtureSnapshot(mergedCount: number): Snapshot {
     refreshing: false,
     refreshedAt: process.env['KOVAN_SMOKE_ITEM145'] ? { github: Date.now() - 90_000, jira: Date.now() - 90_000 } : { github: Date.now() - 90_000 },
     refreshingProviders: []
+  };
+}
+
+/** Item 164: the person picker's people, and one teammate's queues. */
+export function teammatesFixture(service: 'github' | 'jira') {
+  return service === 'github'
+    ? [
+        { id: 'alice-dev', name: 'Lena Della Cagna', handle: 'alice-dev', open: 3 },
+        { id: 'dave-dev', name: 'Marco Vitali', handle: 'dave-dev', open: 1 },
+        { id: 'jonas-h', name: 'Jonas Huber', handle: 'jonas-h', open: 0 }
+      ]
+    : [
+        { id: '712020:lena', name: 'Lena Della Cagna', open: 2 },
+        { id: '712020:marco', name: 'Marco Vitali', open: 0 }
+      ];
+}
+
+export function personPullsFixture(login: string, merged: number): PersonPulls {
+  const base: PullSummary = { ...FIXTURE, author: login };
+  return {
+    open: [
+      { ...REVIEW_PULL, author: login },
+      { ...base, number: 210, title: 'Retry the Stripe webhook on 5xx', reviewDecision: 'approved', mergeable: 'mergeable', unresolvedThreads: 0 },
+      { ...base, number: 211, title: 'Offline lesson cache', isDraft: true, unresolvedThreads: 0 }
+    ],
+    reviewRequested: [{ ...base, number: 212, title: 'Parent dashboard weekly summary', author: 'dave-dev', reviewDecision: 'review_required' }],
+    merged: mergedFixture(Math.min(merged, 4)).map((p) => ({ ...p, author: login })),
+    mergedTotal: 4
+  };
+}
+
+export function personTicketsFixture() {
+  return {
+    tickets: [
+      { ...TICKET, key: 'ACME-2571', summary: 'Parent dashboard weekly summary', assignee: 'Lena Della Cagna' },
+      { ...TICKET_LOW, key: 'ACME-2588', summary: 'Teacher export to CSV', assignee: 'Lena Della Cagna' }
+    ]
   };
 }
 
@@ -671,6 +709,9 @@ export async function smokeUi(
   }
   if (process.env['KOVAN_SMOKE_ITEM136'] && mode === 'seeded') {
     return { item136: await driveItem136(win, process.env['KOVAN_SMOKE_ITEM136']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM164'] && mode === 'seeded') {
+    return { item164: await driveItem164(win, process.env['KOVAN_SMOKE_ITEM164']) };
   }
   if (process.env['KOVAN_SMOKE_ITEM163'] && mode === 'seeded') {
     return { item163: await driveItem163(win, process.env['KOVAN_SMOKE_ITEM163'], process.env['KOVAN_PHASE'] ?? '1') };
@@ -4245,6 +4286,68 @@ async function driveItem135(win: BrowserWindow, prefix: string): Promise<Record<
  * the Workspace view with both tabs back, the PNG current, and the folders
  * that were open still open.
  */
+/**
+ * Item 164: someone else's pull requests and tickets. Opens the person button
+ * beside each list's title, picks a teammate, reads the sections that come
+ * back, and goes back to you with Esc on one list and "Back to you" on the other.
+ */
+async function driveItem164(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const list = () => read(win, `({
+    button: document.querySelector('.person-button')?.innerText.trim(),
+    other: document.querySelector('.person-button')?.classList.contains('other'),
+    back: Boolean(document.querySelector('.person-back')),
+    tooltip: document.querySelector('.person-button')?.title,
+    placeholder: document.querySelector('#q')?.placeholder,
+    groups: [...document.querySelectorAll('.queue-list section')].map((s) => s.querySelector('.group-head, button')?.innerText.replace(/\\s+/g, ' ').trim()),
+    rows: [...document.querySelectorAll('.queue-list .row')].map((r) => r.innerText.split('\\n')[0] + ' ' + (r.innerText.split('\\n')[1] ?? '')).slice(0, 8)
+  })`);
+  const menu = () => read(win, `[...document.querySelectorAll('.person-menu button[role="menuitemradio"]')].map((b) => b.innerText.replace(/\\s+/g, ' ').trim())`);
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]').click()`);
+  await until(win, `document.querySelector('.person-button')`, 8_000);
+  const pullsBefore = await list();
+  await read(win, `document.querySelector('.person-button').click()`);
+  await until(win, `document.querySelectorAll('.person-menu button[role="menuitemradio"]').length > 1`, 8_000);
+  const pullMenu = await menu();
+  await shot('pulls-menu');
+  await read(win, `[...document.querySelectorAll('.person-menu button')].find((b) => b.innerText.includes('Lena')).click()`);
+  await until(win, `document.querySelectorAll('.queue-list section').length > 0`, 8_000);
+  await pause(400);
+  const pullsLena = await list();
+  await read(win, `document.querySelectorAll('.queue-list .row')[0]?.click()`);
+  await pause(800);
+  const pane = await read(win, `document.querySelector('.pane h1, .pane h2')?.innerText`);
+  await shot('pulls-lena');
+  await read(win, `document.querySelector('#q').focus()`);
+  await read(win, `document.querySelector('#q').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await pause(300);
+  const pullsAfterEsc = await list();
+
+  await read(win, `document.querySelector('.rail-item[data-view="tickets"]').click()`);
+  await until(win, `document.querySelector('.person-button')`, 8_000);
+  await read(win, `document.querySelector('.person-button').click()`);
+  await until(win, `document.querySelectorAll('.person-menu button[role="menuitemradio"]').length > 1`, 8_000);
+  const ticketMenu = await menu();
+  await read(win, `[...document.querySelectorAll('.person-menu button')].find((b) => b.innerText.includes('Lena')).click()`);
+  await until(win, `document.querySelectorAll('.queue-list .row').length > 0`, 8_000);
+  await pause(400);
+  const ticketsLena = await list();
+  await shot('tickets-lena');
+  await read(win, `document.querySelector('.person-back').click()`);
+  await pause(300);
+  const ticketsBack = await list();
+  return { pullsBefore, pullMenu, pullsLena, pane, pullsAfterEsc, ticketMenu, ticketsLena, ticketsBack };
+}
+
 async function driveItem163(win: BrowserWindow, prefix: string, phase: string): Promise<Record<string, unknown>> {
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const shot = async (name: string) => {

@@ -40,7 +40,7 @@ import { adoptImportedTokens } from './adopt';
 import { adoptBatonSecrets, copyBatonState } from './renamed';
 import {
   smokePty, smokeUi, type SmokeMode, detailFixture, diffFixture, fixtureSnapshot, sentryFramesFixture,
-  sentryTicketFixture, ticketFixture
+  sentryTicketFixture, ticketFixture, teammatesFixture, personPullsFixture, personTicketsFixture
 } from './smoke';
 import { Sessions } from './sessions';
 import { ReviewTools } from './reviewTools';
@@ -706,6 +706,18 @@ app.whenReady().then(async () => {
     return poller.loadMoreMerged(want);
   });
 
+  // Item 164: someone else's pull requests and tickets.
+  const smokeFixtures = Boolean(process.env['KOVAN_SMOKE'] && process.env['KOVAN_USER_DATA']);
+  ipcMain.handle('kovan:teammates', (_event, service: string) => {
+    if (service !== 'github' && service !== 'jira') throw new Error(`No teammates for ${service}`);
+    return smokeFixtures ? teammatesFixture(service) : poller.teammates(service);
+  });
+  ipcMain.handle('kovan:person-pulls', (_event, login: string, merged: number) => {
+    const want = Math.max(1, Math.min(100, Math.floor(Number(merged) || 10)));
+    return smokeFixtures ? personPullsFixture(String(login), want) : poller.personPulls(String(login), want);
+  });
+  ipcMain.handle('kovan:person-tickets', (_event, accountId: string) =>
+    smokeFixtures ? personTicketsFixture() : poller.personTickets(String(accountId)));
   ipcMain.handle('kovan:pull-detail', (_event, repo: string, number: number) => loadPullDetail(repo, number));
   ipcMain.handle('kovan:reviewer-candidates', (_event, repo: string) => loadReviewerCandidates(repo));
   ipcMain.handle('kovan:reviewers-request', (_event, repo: string, number: number, people: string[], teams: string[]) =>

@@ -19,6 +19,9 @@ const api = {
   credentialFields: () => ipcRenderer.invoke('kovan:credential-fields'),
   missingFields: (id: string) => ipcRenderer.invoke('kovan:missing-fields', id),
   loadMoreMerged: (limit: number) => ipcRenderer.invoke('kovan:merged-more', limit),
+  teammates: (service: 'github' | 'jira') => ipcRenderer.invoke('kovan:teammates', service),
+  personPulls: (login: string, merged: number) => ipcRenderer.invoke('kovan:person-pulls', login, merged),
+  personTickets: (accountId: string) => ipcRenderer.invoke('kovan:person-tickets', accountId),
   settings: () => ipcRenderer.invoke('kovan:settings'),
   setSetting: (key: string, value: unknown) => ipcRenderer.invoke('kovan:set-setting', key, value),
   /** Native chrome's side of the painted theme — see `renderer/appearance.tsx`. */

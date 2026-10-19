@@ -60,3 +60,4 @@ export * from './externalUrl';
 export * from './pins';
 export * from './claudeMod';
 export * from './openRequest';
+export * from './people';

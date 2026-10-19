@@ -3240,3 +3240,39 @@ li.pinnable > .pin-toggle:focus-visible { opacity: 1; }
 .row.pin-failed .link { font-size: 11px; }
 .menu.row-menu { min-width: 170px; z-index: 30; }
 .group-note.kept { color: var(--muted); }
+
+/* --- Whose list (item 164): the person button beside a list's title --- */
+.queue-title-row.with-person h1 { flex: none; }
+.person-host { min-width: 0; }
+.person-spacer { flex: 1; }
+.person-button {
+  display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%;
+  height: 24px; padding: 0 7px 0 3px; border: 0; border-radius: 12px;
+  background: var(--wash); color: var(--secondary); font-size: 12px; font-weight: 500;
+}
+.person-button:hover { background: var(--hair-strong); color: var(--title); }
+/* Someone else's list is a choice you made, and the clay says so. */
+.person-button.other { background: color-mix(in srgb, var(--clay) 16%, transparent); color: var(--title); }
+.person-button.other:hover { background: color-mix(in srgb, var(--clay) 24%, transparent); }
+.person-button-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.person-avatar {
+  flex: none; width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--meta) 30%, var(--card)); color: var(--strong);
+  font-size: 9px; font-weight: 600; letter-spacing: 0.02em;
+}
+.person-avatar.small { width: 18px; height: 18px; font-size: 8.5px; }
+.menu.person-menu { left: 0; right: auto; width: 290px; max-width: calc(100vw - 24px); }
+.person-search { margin: 1px 1px 5px; }
+.person-list { display: flex; flex-direction: column; max-height: 320px; overflow-y: auto; }
+.menu .person-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.menu .person-handle { font-family: var(--mono); font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.menu .person-count { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--meta); }
+.menu .person-count.none { color: var(--dim); }
+.menu .person-check { margin-left: auto; display: grid; color: var(--clay); }
+.person-foot { margin: 6px 9px 3px; padding-top: 6px; border-top: 1px solid var(--hair); font-size: 11px; line-height: 1.45; color: var(--muted); }
+.menu .menu-empty .link { display: inline; width: auto; padding: 0; color: var(--clay); background: none; }
+.person-banner { display: flex; align-items: center; gap: 8px; margin: 8px 2px 0; font-size: 11.5px; color: var(--meta); }
+.person-banner-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.person-back { flex: none; font-size: 11.5px; }
+.person-state { margin: 10px 12px; font-size: 12px; color: var(--meta); }

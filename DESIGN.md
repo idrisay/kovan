@@ -287,6 +287,19 @@ dot-folder in your home, mode 600, never read back). nv-review is always the fir
   **Open** with a grey dot rather than leaving the line empty. Any label a
   word can't explain carries a `hint` from core, shown as its tooltip
   ("2 unresolved comments" says which comments).
+- **Person picker** (`renderer/people.tsx`, core `people.ts`, item 164): a
+  pill beside the Pull requests and Tickets titles — your initials and "You",
+  or the teammate's first name on a clay tint while their list shows. Its menu
+  has a search, You first, then the team with open counts in mono. GitHub's
+  team is everyone with a pull request in your repositories; Jira's, everyone
+  assigned a ticket in your tickets' projects in the last 90 days. The team is
+  asked on the menu's first open (kept ten minutes); a teammate's list when
+  picked, and with each poll while picked. Their pull requests keep your
+  sections' order (Waiting on your review, Open, Drafts, Awaiting their
+  review, Recently merged); their tickets use your ticket query with
+  `currentUser()` swapped for their account. A line under the filter names
+  whose list it is, with "Back to you"; Esc does the same. Each list picks
+  separately and nothing is remembered across launches.
 - **Activity inbox** (`Activity.tsx`, `main/activityFeed.ts`, `diffActivity`
   in core): a rail tab (bell) listing what happened to you — review
   requested, approved, changes requested, new ticket, new comment — grouped

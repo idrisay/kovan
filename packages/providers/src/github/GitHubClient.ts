@@ -180,7 +180,27 @@ export async function fetchPullSummary(
 }
 
 /** `sort:` is part of the query because GitHub search has no order argument. */
-const MERGED_SEARCH = 'is:pr is:merged author:@me sort:updated-desc';
+const mergedSearchFor = (who: string) => `is:pr is:merged author:${who} sort:updated-desc`;
+
+/**
+ * Who has pull requests where you work, for the person picker (item 164):
+ * the open ones, to count, and the latest of all, so someone with nothing
+ * open is still listed. Only the author, so it costs a point or two.
+ */
+const TEAMMATES_QUERY = `
+query KovanTeammates($open: String!, $recent: String!) {
+  open: search(query: $open, type: ISSUE, first: 100) {
+    nodes { ... on PullRequest { repository { nameWithOwner } author { __typename login ... on User { name } } } }
+  }
+  recent: search(query: $recent, type: ISSUE, first: 100) {
+    nodes { ... on PullRequest { repository { nameWithOwner } author { __typename login ... on User { name } } } }
+  }
+}`;
+
+interface TeammateNode {
+  repository?: { nameWithOwner?: string } | null;
+  author?: { __typename?: string; login?: string; name?: string | null } | null;
+}
 
 /** What the merged list holds before anybody asks for more. */
 export const MERGED_PAGE = 10;
@@ -195,6 +215,8 @@ interface GraphResponse {
     viewer?: { login?: string };
     rateLimit?: { cost?: number; remaining?: number; limit?: number; resetAt?: string } | null;
     mine?: { nodes?: (ApiPullNode | null)[] | null };
+    open?: { nodes?: (TeammateNode | null)[] | null };
+    recent?: { nodes?: (TeammateNode | null)[] | null };
     review?: { nodes?: (ApiPullNode | null)[] | null };
     merged?: MergedSearch | null;
   };
@@ -315,11 +337,13 @@ export class GitHubClient {
     repos: readonly RepoRef[] | undefined,
     limit: number,
     signal?: CancelSignal,
-    merged: number = MERGED_PAGE
+    merged: number = MERGED_PAGE,
+    /** Whose queues: `@me`, or a teammate's login (item 164). */
+    who = '@me'
   ): Promise<PullQueues> {
-    const mineSearch = buildPullSearch('is:pr is:open author:@me', repos);
-    const reviewSearch = buildPullSearch('is:pr is:open review-requested:@me', repos);
-    const mergedSearch = buildPullSearch(MERGED_SEARCH, repos);
+    const mineSearch = buildPullSearch(`is:pr is:open author:${who}`, repos);
+    const reviewSearch = buildPullSearch(`is:pr is:open review-requested:${who}`, repos);
+    const mergedSearch = buildPullSearch(mergedSearchFor(who), repos);
 
     const response = await this.http.json<GraphResponse>(graphqlEndpoint(this.baseUrl), {
       method: 'POST',
@@ -377,9 +401,10 @@ export class GitHubClient {
   async mergedPulls(
     repos: readonly RepoRef[] | undefined,
     limit: number,
-    signal?: CancelSignal
+    signal?: CancelSignal,
+    who = '@me'
   ): Promise<{ pulls: PullSummary[]; total: number }> {
-    const search = buildPullSearch(MERGED_SEARCH, repos);
+    const search = buildPullSearch(mergedSearchFor(who), repos);
     const response = await this.http.json<GraphResponse>(graphqlEndpoint(this.baseUrl), {
       method: 'POST',
       headers: {
@@ -402,6 +427,48 @@ export class GitHubClient {
       pulls: withinScope(nodes, search.allow),
       total: response.data?.merged?.issueCount ?? 0
     };
+  }
+
+  /**
+   * Everyone with a pull request in these repositories, or under these
+   * owners when there are too many repositories to name in one search.
+   * Bots are left out: they have no queue worth opening.
+   */
+  async teammates(
+    repos: readonly RepoRef[] | undefined,
+    owners: readonly string[],
+    signal?: CancelSignal
+  ): Promise<{ login: string; name: string; open: boolean }[]> {
+    const scope = (base: string): { query: string; allow: Set<string> | undefined } => {
+      if (repos?.length) {
+        const search = buildPullSearch(base, repos);
+        if (!search.filteredClientSide) return search;
+        return { query: [base, ...new Set(repos.map((r) => `user:${r.owner}`))].join(' '), allow: search.allow };
+      }
+      return { query: [base, ...owners.map((o) => `user:${o}`)].join(' '), allow: undefined };
+    };
+    if (!repos?.length && owners.length === 0) return [];
+    const open = scope('is:pr is:open');
+    const recent = scope('is:pr sort:updated-desc');
+    const response = await this.http.json<GraphResponse>(graphqlEndpoint(this.baseUrl), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/vnd.github+json' },
+      body: { query: TEAMMATES_QUERY, variables: { open: open.query, recent: recent.query } },
+      signal
+    });
+    if (response.errors?.length) {
+      throw new Error(response.errors.map((e) => e.message).join('; '));
+    }
+    const read = (nodes: (TeammateNode | null)[] | null | undefined, allow: Set<string> | undefined, isOpen: boolean) =>
+      (nodes ?? [])
+        .filter((n): n is TeammateNode => n?.author?.__typename === 'User' && Boolean(n.author.login))
+        .filter((n) => !allow || allow.has((n.repository?.nameWithOwner ?? '').toLowerCase()))
+        .map((n) => ({ login: n.author!.login!, name: n.author!.name ?? '', open: isOpen }));
+    return [
+      ...read(response.data?.open?.nodes, open.allow, true),
+      // Seen, not counted: open ones are already counted above.
+      ...read(response.data?.recent?.nodes, recent.allow, false)
+    ];
   }
 
   async verify(signal?: CancelSignal): Promise<string> {

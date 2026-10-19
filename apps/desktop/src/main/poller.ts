@@ -11,6 +11,14 @@
 import {
   dedupeRepos,
   isBlocked,
+  isGitHubLogin,
+  personJql,
+  projectKeys,
+  rankTeammates,
+  DEFAULT_TASKS_JQL,
+  type PersonPulls,
+  type PersonTickets,
+  type Teammate,
   sortPulls,
   type JiraIssue,
   type JiraMention,
@@ -114,6 +122,8 @@ export class Poller {
   private lastTicketKeys?: Set<string>;
   private readonly assigners = new Map<string, string>();
   private jiraActivity: Pick<Snapshot, 'jiraMentions' | 'jiraAssignedBy'> = {};
+  /** Item 164: the person picker's lists, asked on its first open, kept ten minutes. */
+  private readonly teammateCache = new Map<'github' | 'jira', { at: number; people: Teammate[] }>();
 
   constructor(private readonly host: DesktopHost) {
     this.http = new HttpClient(host.log);
@@ -335,6 +345,80 @@ export class Poller {
     }
   }
 
+  /**
+   * Who the person picker lists (item 164): GitHub, everyone with a pull
+   * request in your repositories; Jira, everyone with a ticket in your
+   * tickets' projects lately. Asked when the picker opens, never on a timer.
+   */
+  async teammates(service: 'github' | 'jira'): Promise<Teammate[]> {
+    const cached = this.teammateCache.get(service);
+    if (cached && Date.now() - cached.at < 10 * 60_000) return cached.people;
+    let people: Teammate[];
+    if (service === 'github') {
+      const client = await this.github();
+      const repos = await this.scopedRepos();
+      // No workspace: the owners of the repositories your own queues are in.
+      const own = [...this.snapshot.mine, ...this.snapshot.reviewRequested, ...this.snapshot.merged];
+      const owners = [...new Set(own.map((p) => p.repo.split('/')[0] ?? '').filter(isGitHubLogin))];
+      const seen = await client.teammates(repos, owners);
+      people = rankTeammates(seen.map((p) => ({ id: p.login, name: p.name, handle: p.login, open: p.open })), [this.snapshot.viewer]);
+    } else {
+      const client = await this.jira();
+      const projects = projectKeys(this.snapshot.tickets);
+      if (projects.length === 0) {
+        people = [];
+      } else {
+        this.jiraMe ??= await client.myself();
+        const seen = await client.assignees(
+          `project in (${projects.join(', ')}) AND assignee is not EMPTY AND updated >= -90d ORDER BY updated DESC`, 100
+        );
+        people = rankTeammates(seen.map((p) => ({ id: p.accountId, name: p.name, open: p.open })), [this.jiraMe.accountId]);
+      }
+    }
+    this.teammateCache.set(service, { at: Date.now(), people });
+    return people;
+  }
+
+  /** A teammate's pull requests, in your queues' scope (item 164). */
+  async personPulls(login: string, merged: number): Promise<PersonPulls> {
+    if (!isGitHubLogin(login)) throw new Error(`Not a GitHub login: ${login}`);
+    const client = await this.github();
+    const queues = await client.pullQueues(
+      await this.scopedRepos(), this.host.config.get('github.limit', 50), undefined, merged, login
+    );
+    return {
+      open: sortPulls(queues.mine, 'updated-desc'),
+      reviewRequested: sortPulls(queues.reviewRequested, 'updated-desc'),
+      merged: byMergedAt(queues.merged),
+      mergedTotal: queues.mergedTotal
+    };
+  }
+
+  /** A teammate's tickets: your ticket query, asked about them (item 164). */
+  async personTickets(accountId: string): Promise<PersonTickets> {
+    if (!/^[A-Za-z0-9:_-]{1,128}$/.test(accountId)) throw new Error('Not a Jira account id');
+    const client = await this.jira();
+    const tickets = await client.search(
+      personJql(this.host.config.get('jira.tasksJql', DEFAULT_TASKS_JQL), accountId),
+      this.host.config.get('jira.tasksLimit', 100)
+    );
+    return { tickets };
+  }
+
+  private async github(): Promise<GitHubClient> {
+    const token = await this.credentials.token('github');
+    if (!token) throw new Error('GitHub is not connected');
+    return new GitHubClient(this.http, this.host.config.get('github.baseUrl', 'https://api.github.com'), token);
+  }
+
+  private async jira(): Promise<JiraClient> {
+    const token = await this.credentials.token('jira');
+    const site = this.host.config.get('jira.baseUrl', '');
+    const email = this.host.config.get('jira.email', '');
+    if (!token || !site || !email) throw new Error('Jira is not connected');
+    return new JiraClient(this.http, site, email, token);
+  }
+
   private publish(snapshot: Snapshot): void {
     this.snapshot = snapshot;
     this.changed.fire(snapshot);
@@ -407,10 +491,7 @@ export class Poller {
     try {
       const client = new JiraClient(this.http, site, email, token);
       const tickets = await client.search(
-        this.host.config.get(
-          'jira.tasksJql',
-          'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC'
-        ),
+        this.host.config.get('jira.tasksJql', DEFAULT_TASKS_JQL),
         this.host.config.get('jira.tasksLimit', 100),
         signal
       );

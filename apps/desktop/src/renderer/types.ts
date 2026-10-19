@@ -1,5 +1,5 @@
 import type {
-  ActivityEvent, GitHubBudget, QuickCommand, JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport, ReviewTool, AgentFamily
+  ActivityEvent, GitHubBudget, QuickCommand, JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport, ReviewTool, AgentFamily, PersonPulls, PersonTickets, Teammate
 } from '@kovan/core';
 import type { PullDetail, ReviewComment, ReviewThread, Reviewer } from '@kovan/providers';
 import type { AgentRun, RunFile, Runner, RunKind } from '@kovan/agent';
@@ -137,6 +137,12 @@ export interface KovanApi {
   ticketStatus(key: string): Promise<{ status: string; statusCategory: string }>;
   /** Widens the merged window to `limit` and returns the republished snapshot. */
   loadMoreMerged(limit: number): Promise<Snapshot>;
+  /** Item 164: who the person picker lists, asked when it first opens. */
+  teammates(service: 'github' | 'jira'): Promise<Teammate[]>;
+  /** A teammate's pull requests, `merged` of their merged ones. */
+  personPulls(login: string, merged: number): Promise<PersonPulls>;
+  /** A teammate's tickets, by Jira account id. */
+  personTickets(accountId: string): Promise<PersonTickets>;
 
   quickState(kind: QuickKind, subject: string): Promise<QuickState>;
   /** Starts the job and returns at once; progress arrives through `onQuick`. */
