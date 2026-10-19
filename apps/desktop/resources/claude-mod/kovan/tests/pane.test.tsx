@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { changeGroups, checkName, porcelainPaths, chipLabels, findLinks, packChips, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
+import { changeGroups, checkName, goalFirst, porcelainPaths, chipLabels, findLinks, packChips, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
 
 /** `git rev-parse --show-toplevel --show-prefix` for a folder under /repo. */
 function gitPlace(e: unknown): string {
@@ -293,7 +293,7 @@ describe('links in the chat', () => {
   })
 })
 
-test("a pull request linked in a command's output shows in its state's color, the goal's own left out", async ($, on) => {
+test("a pull request linked in a command's output shows in its state's color, the goal's own first", async ($, on) => {
   mock.env(on, { KOVAN_GOAL_KEY: 'acme-backend#868' })
   on('clock.now', () => ({ value: 1_000 }))
   on('session.cwd', () => ({ value: '/repo' }))
@@ -312,13 +312,17 @@ test("a pull request linked in a command's output shows in its state's color, th
   // The title is asked of gh in the background, not in the tool call's way.
   for (let i = 0; i < 50; i++) await Promise.resolve()
   const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /^LINKS ─+ 1$/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^acme-frontend#2789$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^LINKS ─+ 2$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^frontend#2789$/ })).toBeDefined()
   // Design C: the chip takes its state's color, and shows no title.
-  const chip = JSON.stringify(await ui.find({ type: 'Text', text: /^acme-frontend#2789$/ }))
-  expect(chip).toContain('{"type":"Text","props":{"color":"success"},"children":[{"type":"Link","props":{"href":"https://github.com/acme/acme-frontend/pull/2789"')
+  const chip = JSON.stringify(await ui.find({ type: 'Text', text: /^frontend#2789$/ }))
+  expect(chip).toContain('"props":{"color":"success"}')
+  expect(chip).toContain('{"type":"Link","props":{"href":"https://github.com/acme/acme-frontend/pull/2789"')
   expect(await ui.find({ type: 'Text', text: /lesson\+exercise smoke test/ })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /acme-backend#868/ })).toBeUndefined()
+  // Item 166: the goal's own pull request is listed, ahead of the newer one.
+  const row = JSON.stringify(await ui.find({ type: 'Text', text: /backend#868/ }))
+  expect(row.indexOf('backend#868')).toBeGreaterThan(-1)
+  expect(row.indexOf('backend#868')).toBeLessThan(row.indexOf('frontend#2789'))
   await ui.unmount()
 })
 
@@ -390,4 +394,11 @@ test('Kovan sessions are asked to keep a task list the pane can show', async ($,
   // Added after the engine's own sections, never in place of them.
   expect(composed.sections.length).toBeGreaterThan(1)
   expect(composed.sections.at(-1)?.id).toBe('kovan:plan')
+})
+
+test("the goal's link goes first, the rest keep their order", async () => {
+  const l = (key: string) => ({ key })
+  expect(goalFirst([l('a'), l('goal'), l('b')], 'goal').map((x) => x.key)).toEqual(['goal', 'a', 'b'])
+  expect(goalFirst([l('a'), l('b')], 'goal').map((x) => x.key)).toEqual(['a', 'b'])
+  expect(goalFirst([l('a')], undefined).map((x) => x.key)).toEqual(['a'])
 })

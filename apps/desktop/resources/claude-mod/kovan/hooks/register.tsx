@@ -608,25 +608,32 @@ export function packChips(labels: readonly string[], room: number): number[][] {
 const LINKS_KEPT = 8
 
 /**
- * Notes the links a text names, newest first, the goal's own left out, and
- * asks `gh` for the title and state of each new pull request: one small call
- * per pull request the first time it is seen, never while drawing.
+ * Notes the links a text names, newest first, and asks `gh` for the title and
+ * state of each new pull request: one small call per pull request the first
+ * time it is seen, never while drawing.
+ *
+ * The goal's own link is listed too, always first (item 166): it is the one
+ * you most want to open, and the prompt that named it is where you'd look.
  */
 async function noteLinks($: $, text: string, onlyPulls = false) {
-  const found = findLinks(text, onlyPulls)
-  if (found.length === 0) return
-  const goalKey = await $.env.get('KOVAN_GOAL_KEY')
-  const fresh = found.filter((l) => l.key !== goalKey)
+  const fresh = findLinks(text, onlyPulls)
   if (fresh.length === 0) return
+  const goalKey = await $.env.get('KOVAN_GOAL_KEY')
   const same = (a: Found, b: Found) => a.kind === b.kind && a.key === b.key
   let added: Found[] = []
   await update($, links, (list) => {
     added = fresh.filter((l) => !list.some((p) => same(p, l)))
     const moved = fresh.map((l) => list.find((p) => same(p, l)) ?? l)
     const rest = list.filter((p) => !fresh.some((l) => same(p, l)))
-    return [...moved, ...rest].slice(0, LINKS_KEPT)
+    return goalFirst([...moved, ...rest], goalKey).slice(0, LINKS_KEPT)
   })
   for (const link of added) if (link.kind === 'pull') void describePull($, link).catch(() => undefined)
+}
+
+/** The goal's link, when listed, moved to the front; the rest keep their order. */
+export function goalFirst<T extends { key: string }>(list: readonly T[], goalKey: string | undefined): T[] {
+  const goal = goalKey ? list.find((l) => l.key === goalKey) : undefined
+  return goal ? [goal, ...list.filter((l) => l !== goal)] : [...list]
 }
 
 async function describePull($: $, link: Found) {
