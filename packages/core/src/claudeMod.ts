@@ -43,3 +43,11 @@ export function modEnv(goal: ModGoal | undefined): Record<string, string> {
 export function modArgs(command: string, modDir: string | undefined): string[] {
   return modDir && modelFamily(command) === 'claude' ? ['--plugin-dir', modDir] : [];
 }
+
+/** The configured reviewers a prompt names, in their order: what the pane lists (item 167). */
+export function promptReviewers(reviewers: readonly string[], prompt: string): string[] {
+  return reviewers.filter((name) => {
+    const program = name.trim().split(/[\s(]/)[0] ?? '';
+    return program !== '' && new RegExp(`(^|[^\\w-])${program.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w-])`).test(prompt);
+  });
+}

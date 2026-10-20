@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { changeGroups, checkName, goalFirst, porcelainPaths, chipLabels, findLinks, packChips, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
+import { changeGroups, checkName, goalFirst, porcelainPaths, reviewerNames, reviewersIn, reviewOutcome, reviewSummary, taskNotices, chipLabels, findLinks, packChips, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
 
 /** `git rev-parse --show-toplevel --show-prefix` for a folder under /repo. */
 function gitPlace(e: unknown): string {
@@ -401,4 +401,97 @@ test("the goal's link goes first, the rest keep their order", async () => {
   expect(goalFirst([l('a'), l('goal'), l('b')], 'goal').map((x) => x.key)).toEqual(['goal', 'a', 'b'])
   expect(goalFirst([l('a'), l('b')], 'goal').map((x) => x.key)).toEqual(['a', 'b'])
   expect(goalFirst([l('a')], undefined).map((x) => x.key)).toEqual(['a'])
+})
+
+describe('external reviewers (item 167)', () => {
+  const names = ['or-review', 'cc-review', 'nv-review', 'opencode']
+  test('reads the names Kovan hands over', async () => {
+    expect(reviewerNames('["nv-review (kimi)","or-review","nv-review","bad name;rm"]')).toEqual(['nv-review', 'or-review', 'bad'])
+    expect(reviewerNames(undefined)).toEqual([])
+    expect(reviewerNames('not json')).toEqual([])
+  })
+
+  test('finds the reviewers a command runs, not those it only mentions', async () => {
+    expect(reviewersIn('/Users/me/.local/bin/or-review $R/prompt.md -o $R/or.md > $R/or.log 2>&1; echo "or-review exit $?"', names)).toEqual(['or-review'])
+    expect(reviewersIn('zsh -c "source $SNAP; NV_STREAM=0 nv-review" < p.md > nv.md', names)).toEqual(['nv-review'])
+    expect(reviewersIn('opencode run --agent plan "$(cat p.md)"', names)).toEqual(['opencode'])
+    expect(reviewersIn('echo "Requirements review (nv-review, opencode)" > "$KOVAN_STATUS"', names)).toEqual([])
+    expect(reviewersIn('for c in or-review cc-review; do type $c; done', names)).toEqual([])
+    expect(reviewersIn('head -30 /Users/me/.local/bin/or-review', names)).toEqual([])
+  })
+
+  test("reads each reviewer's own exit line and its verdict", async () => {
+    const out = 'or-review exit 0\nnv-review exit 1\n**VERDICT:** REQUEST_CHANGES\n'
+    expect(reviewOutcome(out, 'or-review')).toEqual({ exit: 0, verdict: 'REQUEST_CHANGES' })
+    expect(reviewOutcome(out, 'nv-review').exit).toBe(1)
+    expect(reviewOutcome('nothing', 'cc-review')).toEqual({})
+  })
+
+  test('reads task notifications', async () => {
+    const text = 'x\n<task-notification>\n<task-id>b8sa1ongy</task-id>\n<output-file>/t/b8.output</output-file>\n<status>completed</status>\n<summary>Background command "Run reviewer" completed (exit code 0)</summary>\n</task-notification>'
+    expect(taskNotices(text)).toEqual([{ id: 'b8sa1ongy', status: 'completed', exit: 0, outputFile: '/t/b8.output' }])
+  })
+
+  test('sums the section up', async () => {
+    expect(reviewSummary([{ name: 'a', state: 'done' }, { name: 'b', state: 'failed' }, { name: 'c', state: 'waiting' }])).toBe('1 of 3 done · 1 failed')
+  })
+})
+
+test('each reviewer shows not run yet, running, then done or failed', async ($, on) => {
+  mock.env(on, { KOVAN_REVIEWERS: JSON.stringify(['or-review', 'nv-review', 'cc-review']) })
+  let clock = 0
+  on('clock.now', () => ({ value: clock }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('fs.read', ($, e) => {
+    const p = (e as unknown as { path: string }).path
+    if (p === '/tasks/bg1.output') return { value: 'nv-review exit 0\nVERDICT: APPROVE\n' }
+    throw new Error('no such file')
+  })
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  // The engine taking the prompt in, as it does a background task's notification.
+  on('prompt.submit', ($, e) => e as never)
+  on('tool.call', { tool: 'Bash' }, ($, e) => {
+    const command = String((e as unknown as { command: string }).command)
+    if (command.includes('nv-review')) return { result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bg1' } as never }
+    return { result: { stdout: 'or-review exit 2\n', stderr: '', interrupted: false } as never }
+  })
+  const rows = async (ui: { find: (q: never) => Promise<unknown> }) => JSON.stringify(await ui.find({ type: 'Box' } as never))
+
+  let ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^REVIEWERS ─+ 0 of 3 done$/ })).toBeDefined()
+  expect(await rows(ui)).toContain('not run yet')
+  await ui.unmount()
+
+  await $.tool.call({ tool: 'Bash', command: 'zsh -c "source $SNAP; nv-review" < p.md > nv.md; echo "nv-review exit $?"', run_in_background: true } as never)
+  clock = 3 * 60_000
+  await $.tool.call({ tool: 'Bash', command: '/Users/me/.local/bin/or-review p.md -o or.md; echo "or-review exit $?"' } as never)
+  ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  let json = await rows(ui)
+  expect(json).toContain('running · 3m')
+  expect(json).toContain('exit 2')
+  expect(await ui.find({ type: 'Text', text: /^REVIEWERS ─+ 0 of 3 done · 1 failed$/ })).toBeDefined()
+  await ui.unmount()
+
+  clock = 5 * 60_000
+  await $.prompt.submit({ text: '<task-notification>\n<task-id>bg1</task-id>\n<output-file>/tasks/bg1.output</output-file>\n<status>completed</status>\n<summary>Background command "nv" completed (exit code 0)</summary>\n</task-notification>' } as never)
+  for (let i = 0; i < 100; i++) await Promise.resolve()
+  ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  json = await rows(ui)
+  expect(json).toContain('APPROVE')
+  expect(json).toContain('done · 5m')
+  expect(await ui.find({ type: 'Text', text: /^REVIEWERS ─+ 1 of 3 done · 1 failed$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('no reviewers asked for, no section', async ($, on) => {
+  mock.env(on, {})
+  on('clock.now', () => ({ value: 0 }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^REVIEWERS/ })).toBeUndefined()
+  await ui.unmount()
 })

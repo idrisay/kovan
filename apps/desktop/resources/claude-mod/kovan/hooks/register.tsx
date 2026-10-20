@@ -8,6 +8,8 @@
  *   Changes    every file this session edited, +/- against HEAD; a click
  *              opens its diff under it. Files a shell command changed count
  *              too, by git status against the session's start (item 165)
+ *   Reviewers  the external reviewers Kovan asked for (KOVAN_REVIEWERS), each
+ *              not run yet, running, done or failed, as the agent runs them
  *   Checks     the tests, typechecks and lints the agent ran, and Run checks
  *   one line   model, context, session and weekly usage
  *
@@ -24,7 +26,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { Check, DiffView, FileChange, LinkItem, PlanStep, Usage } from '../types'
+import type { Check, DiffView, FileChange, LinkItem, PlanStep, ReviewRun, Usage } from '../types'
 
 const PANE = 'kovan'
 const CHANGES = 'kovan-changes'
@@ -41,6 +43,7 @@ const links = atom({ plugin: 'kovan', key: 'links' } as const, [])
 const baseline = atom({ plugin: 'kovan', key: 'baseline' } as const, {})
 /** Every changed file's diff, for the Changes pane, by path. */
 const diffs = atom({ plugin: 'kovan', key: 'diffs' } as const, {})
+const reviews = atom({ plugin: 'kovan', key: 'reviews' } as const, [])
 
 /**
  * Asks Claude to keep its plan where the pane can show it (item 165): without
@@ -176,6 +179,17 @@ async function observe($: $, tool: string, input: Record<string, unknown>, ran: 
   if (tool === 'Bash') {
     void noteShellChanges($).catch(() => undefined)
     const command = String(input['command'] ?? '')
+    const running = (await read($, reviews)).filter((r) => r.state === 'running' && !r.taskId).map((r) => r.name)
+    const mine = reviewersIn(command, await reviewNames($)).filter((n) => running.includes(n))
+    if (mine.length) {
+      const res = ran.result as { stdout?: string; stderr?: string; backgroundTaskId?: string; interrupted?: boolean } | undefined
+      if (res?.backgroundTaskId) {
+        // Running on: its notification settles it.
+        await update($, reviews, (list) => list.map((r) => (mine.includes(r.name) && r.state === 'running' && !r.taskId ? { ...r, taskId: res.backgroundTaskId } : r)))
+      } else {
+        await finishReviews($, mine, `${res?.stdout ?? ''}\n${res?.stderr ?? ''}\n${ran.text ?? ''}`, !ran.isError, Boolean(res?.interrupted))
+      }
+    }
     const said = ran.result as { stdout?: string } | undefined
     // `gh pr create` prints the new one's link.
     void noteLinks($, `${said?.stdout ?? ''}`, true).catch(() => undefined)
@@ -187,6 +201,128 @@ async function observe($: $, tool: string, input: Record<string, unknown>, ran: 
     await record($, { name, ok: !ran.isError, detail: summarize(output) })
   }
 }
+
+// ── external reviewers (item 167) ──────────────────────────────────────────
+
+/** The reviewer names Kovan handed the session, each once: `nv-review (kimi)` is `nv-review`. */
+export function reviewerNames(raw: string | undefined): string[] {
+  let list: unknown
+  try { list = JSON.parse(raw ?? '[]') } catch { list = [] }
+  if (!Array.isArray(list)) return []
+  const names = list.map((n) => String(n).trim().split(/[\s(]/)[0] ?? '').filter((n) => /^[\w.-]+$/.test(n))
+  return [...new Set(names)]
+}
+
+/**
+ * The reviewers a shell command runs: a step whose program, past env
+ * assignments and `source`, is one of them, by its name or a path to it.
+ * Quotes split steps too, so `zsh -c "source $SNAP; nv-review"` counts and
+ * `echo "running nv-review"` or `type nv-review` don't.
+ */
+export function reviewersIn(command: string, names: readonly string[]): string[] {
+  const found: string[] = []
+  for (const step of command.split(/&&|\|\||;|\||\n|"|'|\$\(|`|\(|\)/)) {
+    let words = step.trim().split(/\s+/).filter(Boolean)
+    while (words.length && (/^\w+=/.test(words[0]!) || ['env', 'time', 'exec', 'command', 'nice', 'nohup'].includes(words[0]!))) words = words.slice(1)
+    if (words[0] === 'timeout') words = words.slice(2)
+    const program = (words[0] ?? '').split('/').pop() ?? ''
+    if (names.includes(program) && !found.includes(program)) found.push(program)
+  }
+  return found
+}
+
+/**
+ * How each reviewer ended, from its own `<name> exit N` line in the output
+ * (agents run them as `cmd > out; echo "nv-review exit $?"`, whose last
+ * echo makes the whole command succeed), and the VERDICT line one printed.
+ */
+export function reviewOutcome(output: string, name: string): { exit?: number; verdict?: string } {
+  const clean = output.replace(/\u001b\[[0-9;]*m/g, '')
+  const exit = new RegExp(`(?:^|\\s)${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:? exit(?: code)?:? (\\d+)`, 'im').exec(clean)
+  const verdict = [...clean.matchAll(/^\s*\**VERDICT\**:?\**\s*(.+?)\s*$/gim)].pop()
+  return {
+    ...(exit ? { exit: Number(exit[1]) } : {}),
+    ...(verdict ? { verdict: verdict[1]!.replace(/\*+/g, '').slice(0, 60) } : {})
+  }
+}
+
+/** Each `<task-notification>` in a text: its task id, status and exit code. */
+export function taskNotices(text: string): { id: string; status: string; exit?: number; outputFile?: string }[] {
+  const notices: { id: string; status: string; exit?: number; outputFile?: string }[] = []
+  for (const block of text.match(/<task-notification>[\s\S]*?<\/task-notification>/g) ?? []) {
+    const tag = (name: string) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(block)?.[1]?.trim()
+    const id = tag('task-id')
+    if (!id) continue
+    const exit = /exit code (\d+)/.exec(tag('summary') ?? '')
+    const outputFile = tag('output-file')
+    notices.push({ id, status: tag('status') ?? '', ...(exit ? { exit: Number(exit[1]) } : {}), ...(outputFile ? { outputFile } : {}) })
+  }
+  return notices
+}
+
+async function reviewNames($: $): Promise<string[]> {
+  return reviewerNames(await $.env.get('KOVAN_REVIEWERS'))
+}
+
+/** Marks the reviewers a command is about to run as running. */
+async function startReviews($: $, command: string): Promise<string[]> {
+  const started = reviewersIn(command, await reviewNames($))
+  if (started.length === 0) return started
+  const now = await $.clock.now()
+  await update($, reviews, (list) => [
+    ...list.filter((r) => !started.includes(r.name)),
+    ...started.map((name): ReviewRun => ({ name, state: 'running', since: now }))
+  ])
+  return started
+}
+
+/** Settles reviewers from what their command printed and how it ended. */
+async function finishReviews($: $, names: readonly string[], output: string, ok: boolean, stopped = false) {
+  const now = await $.clock.now()
+  await update($, reviews, (list) => list.map((r) => {
+    if (!names.includes(r.name) || r.state !== 'running') return r
+    const { exit, verdict } = reviewOutcome(output, r.name)
+    const failed = exit !== undefined ? exit !== 0 : !ok
+    const state: ReviewRun['state'] = stopped ? 'stopped' : failed ? 'failed' : 'done'
+    const detail = verdict ?? (failed && exit !== undefined ? `exit ${exit}` : undefined)
+    const { taskId: _, ...rest } = r
+    return { ...rest, state, ended: now, ...(detail ? { detail } : {}) }
+  }))
+}
+
+/** A background task ended: the reviewers it ran, settled from its output file. */
+async function noteTaskNotices($: $, text: string) {
+  for (const notice of taskNotices(text)) {
+    const names = (await read($, reviews)).filter((r) => r.taskId === notice.id && r.state === 'running').map((r) => r.name)
+    if (names.length === 0) continue
+    let output = ''
+    if (notice.outputFile) { try { output = await $.fs.read(notice.outputFile) } catch { /* gone */ } }
+    const stopped = notice.status === 'killed' || notice.status === 'stopped'
+    const ok = notice.status === 'completed' && (notice.exit === undefined || notice.exit === 0)
+    await finishReviews($, names, output, ok, stopped)
+  }
+}
+
+/** Every reviewer Kovan asked for, in its order, with how far each has got. */
+export function reviewList(names: readonly string[], runs: readonly ReviewRun[]): ReviewRun[] {
+  return names.map((name) => runs.find((r) => r.name === name) ?? { name, state: 'waiting' as const })
+}
+
+/** The section's count: `2 of 7 done`, failures said too. */
+export function reviewSummary(rows: readonly ReviewRun[]): string {
+  const done = rows.filter((r) => r.state === 'done').length
+  const failed = rows.filter((r) => r.state === 'failed').length
+  return `${done} of ${rows.length} done${failed ? ` · ${failed} failed` : ''}`
+}
+
+/** A dot plus a word, as every state in Kovan: it still reads without colour. */
+const REVIEW_LOOK = {
+  waiting: { mark: '○', word: 'not run yet', color: 'subtle' },
+  running: { mark: '●', word: 'running', color: 'warning' },
+  done: { mark: '●', word: 'done', color: 'success' },
+  failed: { mark: '●', word: 'failed', color: 'error' },
+  stopped: { mark: '○', word: 'stopped', color: 'subtle' }
+} as const
 
 async function record($: $, check: Check) {
   await update($, checks, (list) => [...list.filter((c) => c.name !== check.name), check])
@@ -778,7 +914,8 @@ export const register: Register = (on) => {
   // prompt only: a pane closed by hand stays closed until /kovan.
   let asked = false
   on('prompt.submit', async ($, e, next) => {
-    void noteLinks($, e.text).catch(() => undefined)
+    if (e.text.includes('<task-notification>')) void noteTaskNotices($, e.text).catch(() => undefined)
+    else void noteLinks($, e.text).catch(() => undefined)
     if (!asked) {
       asked = true
       void $.ui.open({ id: PANE, title: 'Kovan' }).catch(() => undefined)
@@ -793,6 +930,9 @@ export const register: Register = (on) => {
   })
 
   on('tool.call', async ($, e, next) => {
+    if (String(e.tool) === 'Bash') {
+      try { await startReviews($, String((e as unknown as Record<string, unknown>)['command'] ?? '')) } catch { /* a view only */ }
+    }
     const ran = await next(e)
     try {
       await observe($, String(e.tool), e as unknown as Record<string, unknown>, ran as { isError?: boolean; deny?: string; result?: unknown; text?: string })
@@ -884,6 +1024,7 @@ export const register: Register = (on) => {
     ])
     const linked = await read($, links)
     const labels = chipLabels(linked)
+    const reviewRows = reviewList(await reviewNames($), await read($, reviews))
     const groups = changeGroups(changed, await read($, folders))
 
     const head = (label: string, right = '') => {
@@ -992,6 +1133,30 @@ export const register: Register = (on) => {
                   : null
               ]}
           <Text> </Text>
+
+          {reviewRows.length ? head('REVIEWERS', reviewSummary(reviewRows)) : null}
+          {reviewRows.map((r) => {
+            const mins = (to: number) => (r.since !== undefined ? Math.max(0, Math.floor((to - r.since) / 60_000)) : 0)
+            const look = REVIEW_LOOK[r.state]
+            const right = r.state === 'running' ? `running · ${mins(now)}m`
+              : r.state === 'waiting' ? 'not run yet'
+                : `${look.word}${r.ended ? ` · ${mins(r.ended)}m` : ''}`
+            // The name never gives way, as a check's: a long verdict is cut.
+            return (
+              <Box flexDirection="row" width={cols}>
+                <Box flexShrink={0}>
+                  <Text><Text color={look.color}>{look.mark} </Text><Text dimColor={r.state === 'waiting'}>{r.name}</Text></Text>
+                </Box>
+                <Box flexGrow={1} flexShrink={1} marginLeft={2}>
+                  <Text dimColor wrap="truncate-end">{r.detail ?? ''}</Text>
+                </Box>
+                <Box flexShrink={0}>
+                  <Text color={r.state === 'waiting' ? undefined : look.color} dimColor={r.state === 'waiting'}>{` ${right}`}</Text>
+                </Box>
+              </Box>
+            )
+          })}
+          {reviewRows.length ? <Text> </Text> : null}
 
           {head('CHECKS')}
           {ran.length === 0 ? <Text dimColor>None yet: tests and typechecks show here when they run.</Text> : null}

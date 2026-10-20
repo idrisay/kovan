@@ -33,6 +33,7 @@ import {
   foldersPromptSection,
   modArgs,
   modEnv,
+  promptReviewers,
   modGoal,
   runPageUrl
 } from '@kovan/core';
@@ -358,7 +359,10 @@ export class Agents {
           ...modEnv(modGoal(subject)),
           KOVAN_OPEN_DIR: claudeModOpenDir(),
           // The pane lists each folder's changes under its own name (item 152).
-          KOVAN_FOLDERS: JSON.stringify([cwd, ...extras.map((f) => f.path)])
+          KOVAN_FOLDERS: JSON.stringify([cwd, ...extras.map((f) => f.path)]),
+          // And the external reviewers this prompt asks for, with how each is
+          // getting on (item 167): only those the prompt names.
+          KOVAN_REVIEWERS: JSON.stringify(promptReviewers(this.host.config.get('runner.reviewers', [] as string[]), prompt))
         }
       : {};
     const result = await this.sessions.run({

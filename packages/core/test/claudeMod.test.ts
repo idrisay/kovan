@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { modArgs, modEnv, modGoal } from '../src/claudeMod';
+import { modArgs, modEnv, modGoal, promptReviewers } from '../src/claudeMod';
 
 describe('modGoal', () => {
   it('prefers the ticket, then the pull request, then the Sentry issue', () => {
@@ -27,5 +27,22 @@ describe('modArgs', () => {
     expect(modArgs('claude-personal', '/mod')).toEqual(['--plugin-dir', '/mod']);
     expect(modArgs('codex', '/mod')).toEqual([]);
     expect(modArgs('claude', undefined)).toEqual([]);
+  });
+});
+
+describe('promptReviewers (item 167)', () => {
+  const prompt = 'Then have or-review, cc-review and nv-review review the result, and fold in what they find.';
+  it('keeps the configured reviewers the prompt names, in their order', () => {
+    expect(promptReviewers(['nv-review', 'opencode', 'or-review'], prompt)).toEqual(['nv-review', 'or-review']);
+  });
+  it('matches whole names only', () => {
+    expect(promptReviewers(['review', 'cc-orca'], prompt)).toEqual(['review']);
+    expect(promptReviewers(['nv'], prompt)).toEqual([]);
+  });
+  it('reads a name with a note after it by its program', () => {
+    expect(promptReviewers(['nv-review (kimi)'], prompt)).toEqual(['nv-review (kimi)']);
+  });
+  it('is empty without reviewers', () => {
+    expect(promptReviewers([], prompt)).toEqual([]);
   });
 });

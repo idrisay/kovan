@@ -38,6 +38,19 @@ export type Check = {
   detail: string;
 };
 
+/** An external reviewer the session runs (item 167): Kovan's configured ones, by name. */
+export type ReviewRun = {
+  name: string;
+  state: 'waiting' | 'running' | 'done' | 'failed' | 'stopped';
+  /** When it started and ended, in $.clock.now() milliseconds. */
+  since?: number;
+  ended?: number;
+  /** The background task running it, to match its notification. */
+  taskId?: string;
+  /** "exit 1", or the VERDICT line it ended with. */
+  detail?: string;
+};
+
 /** A link in the chat the pane lists (item 154): a pull request, a Figma design, a ticket or a local page. */
 export type LinkItem = {
   kind: 'pull' | 'figma' | 'ticket' | 'page';
@@ -83,6 +96,8 @@ declare module 'claude-code' {
       baseline: Record<string, string[]>;
       /** Every changed file's diff for the Changes pane, by path. */
       diffs: Record<string, DiffView>;
+      /** The external reviewers' runs, in the order Kovan lists them (item 167). */
+      reviews: ReviewRun[];
     };
   }
 }
