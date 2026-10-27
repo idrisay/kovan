@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULTREVIEWTEMPLATE,
   DEFAULTUPDATETEMPLATE,
   renderPullPrompt,
   substitute,
@@ -77,6 +78,16 @@ describe('substitution', () => {
     const out = renderPullPrompt(DEFAULTUPDATETEMPLATE, pull);
     expect(out).toContain('KOVAN_REPORT');
     expect(out).not.toContain('DEVHUB_');
+  });
+});
+
+describe('the review prompt', () => {
+  // Left to choose, agents mostly posted a plain comment (item 169).
+  it('asks for a verdict, approve or request changes, not a comment', () => {
+    const out = renderPullPrompt(DEFAULTREVIEWTEMPLATE, pull);
+    expect(out).toContain('gh pr review 42 --repo acme/web --approve');
+    expect(out).toContain('gh pr review 42 --repo acme/web --request-changes');
+    expect(out).toContain('never just comment');
   });
 });
 

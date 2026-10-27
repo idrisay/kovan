@@ -28,6 +28,8 @@ Read the pull request, its diff and its threads, and retrieve the related  ticke
 \${reviewers}
 Then submit a single, concise review to GitHub as my review, folding in  everything you confirmed above. One review, not a running commentary.
 
+The review must approve or request changes, never just comment: choose one.  Approve with \`gh pr review \${number} --repo \${repo} --approve\` when  nothing has to change before it merges; request changes with  \`gh pr review \${number} --repo \${repo} --request-changes\` when anything  does. A \`--comment\` review does not finish the job. Only if GitHub refuses  the verdict, as it does on my own pull request, submit it as a comment  instead and say why in the report.
+
 \${attribution}
 
 \${report}`;
