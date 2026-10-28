@@ -47,8 +47,20 @@ export type ReviewRun = {
   ended?: number;
   /** The background task running it, to match its notification. */
   taskId?: string;
-  /** "exit 1", or the VERDICT line it ended with. */
+  /** Why it failed ("no credit (403)", "exit 1"), or the VERDICT line it ended with. */
   detail?: string;
+  /** The files its command writes its output to, read for the reason when it fails. */
+  logs?: string[];
+  /** The models this run tries, short, when its command picked them (`NV_MODEL=… nv-review`, `--model …`). */
+  models?: string[];
+};
+
+/** What a reviewer runs on, read from its own config or source at session start. */
+export type ReviewerModels = {
+  /** The models it tries, in order, short: `deepseek-v4.1-flash`. */
+  models: string[];
+  /** With no models of its own, the other reviewers it runs (cc-review: cc-token and cc-orca). */
+  via?: string[];
 };
 
 /** A link in the chat the pane lists (item 154): a pull request, a Figma design, a ticket or a local page. */
@@ -98,6 +110,8 @@ declare module 'claude-code' {
       diffs: Record<string, DiffView>;
       /** The external reviewers' runs, in the order Kovan lists them (item 167). */
       reviews: ReviewRun[];
+      /** Each reviewer's models, by name. */
+      reviewModels: Record<string, ReviewerModels>;
     };
   }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { changeGroups, checkName, goalFirst, porcelainPaths, reviewerNames, reviewersIn, reviewOutcome, reviewSummary, taskNotices, chipLabels, findLinks, packChips, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
+import { changeGroups, checkName, goalFirst, porcelainPaths, reviewerNames, reviewersIn, reviewOutcome, reviewSummary, failReason, reviewLogs, codexModel, modelLine, opencodeModel, reviewerModels, runModels, shortModel, sourceModels, splitSources, taskNotices, chipLabels, findLinks, packChips, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
 
 /** `git rev-parse --show-toplevel --show-prefix` for a folder under /repo. */
 function gitPlace(e: unknown): string {
@@ -403,6 +403,8 @@ test("the goal's link goes first, the rest keep their order", async () => {
   expect(goalFirst([l('a')], undefined).map((x) => x.key)).toEqual(['a'])
 })
 
+const nvSource = () => 'local primary="${NV_MODEL:-deepseek-ai/deepseek-v4.1-flash}"\nlocal fallback="${NV_FALLBACK-minimaxai/minimax-m3.1-flash z-ai/glm-5.3-flash}"'
+
 describe('external reviewers (item 167)', () => {
   const names = ['or-review', 'cc-review', 'nv-review', 'opencode']
   test('reads the names Kovan hands over', async () => {
@@ -422,9 +424,52 @@ describe('external reviewers (item 167)', () => {
 
   test("reads each reviewer's own exit line and its verdict", async () => {
     const out = 'or-review exit 0\nnv-review exit 1\n**VERDICT:** REQUEST_CHANGES\n'
-    expect(reviewOutcome(out, 'or-review')).toEqual({ exit: 0, verdict: 'REQUEST_CHANGES' })
+    expect(reviewOutcome(out, 'or-review')).toEqual({ exit: 0, failed: false, verdict: 'REQUEST_CHANGES', lines: 'or-review exit 0' })
     expect(reviewOutcome(out, 'nv-review').exit).toBe(1)
     expect(reviewOutcome('nothing', 'cc-review')).toEqual({})
+  })
+
+  test('reads the status lines agents print, whoever printed them, the last one winning', async () => {
+    const all = ['or-review', 'cc-review', 'nv-review', 'openrouter', 'opencode', 'cc-token', 'cc-orca']
+    const retry = 'cc-token retry rc=1\ncc-orca attempt 1 failed\ncc-orca attempt 2 failed\ncc-orca attempt 3 failed\n\n[exited with code 0]\n'
+    expect(reviewOutcome(retry, 'cc-token', all)).toMatchObject({ exit: 1, failed: true })
+    expect(reviewOutcome(retry, 'cc-orca', all)).toMatchObject({ failed: true })
+    expect(reviewOutcome('cc-orca attempt 1 failed\ncc-orca retry ok (attempt 2)', 'cc-orca', all).failed).toBe(false)
+    const done = 'cc-review(token+orca) rc=1\nor-review rc=1\nopenrouter rc=0\nnv-review rc=0\n'
+    expect(reviewOutcome(done, 'cc-review', all)).toMatchObject({ exit: 1, failed: true })
+    expect(reviewOutcome(done, 'openrouter', all)).toMatchObject({ exit: 0, failed: false })
+    // A status goes to the reviewer named nearest before it; a model id is not a reviewer.
+    const log = 'cc-review: cc-token FAILED after 2s — Failed to authenticate. API Error: 403 x\noc-review: openrouter/thinkingmachines/inkling:free ok in 305s'
+    expect(reviewOutcome(log, 'cc-token', all)).toMatchObject({ failed: true })
+    expect(reviewOutcome(log, 'cc-review', all).failed).toBeUndefined()
+    expect(reviewOutcome(log, 'openrouter', all).failed).toBeUndefined()
+    // nv-review moving on to its next model is not the end of it.
+    expect(reviewOutcome('nv-review: deepseek-ai/deepseek-v4.1-flash failed, retrying with z-ai/glm-5.3-flash', 'nv-review', all).failed).toBeUndefined()
+    // A sourced shell's title sequences are not output.
+    expect(reviewOutcome('\u001b]2;typeset -f cc-token > /dev/null || { print -u2 ; exit 1; }\u0007cc-review: cc-token starting', 'cc-token', all).failed).toBeUndefined()
+  })
+
+  test('says why a reviewer failed in a few words', async () => {
+    expect(failReason("cc-review: cc-token FAILED after 2s — Failed to authenticate. API Error: 403 User's credit limit is insufficient, remaining credit limit: ＄0.000000")).toBe('no credit (403)')
+    expect(failReason('API Error: 403 This model cannot use part of your gift balance')).toBe('no credit (403)')
+    expect(failReason('cc-review: cc-orca FAILED after 2s — API Error: Request rejected (429) · Free model capacity is limited right now. Retry shortly, or add credits')).toBe('rate-limited (429)')
+    expect(failReason('or-review: every model failed:\n  nvidia/nemotron-3-ultra-550b-a55b:free (HTTP 429: Rate limit exceeded: free-models-per-day. Add 10 credits')).toBe('rate-limited (429)')
+    expect(failReason('nv-review: {"status": 410, "title": "Gone", "detail": "model reached its end of life"}')).toBe('model retired')
+    expect(failReason('curl: (28) Operation timed out after 240006 milliseconds')).toBe('timed out')
+    expect(failReason('nv-review: empty response body')).toBe('empty response')
+    expect(failReason('oc-review: opencode/minimax-m3.1-flash-free failed after 0s (rc=1) — Error: \u001b[0mUnexpected error')).toBe('server error')
+    expect(failReason('nv-review: no key at /Users/me/.config/nvidia/key')).toBe('bad or missing key')
+    expect(failReason('cc-review: cc-token FAILED after 9s — something odd happened')).toBe('something odd happened')
+    expect(failReason('all fine')).toBeUndefined()
+  })
+
+  test("finds the logs a reviewer's command writes to", async () => {
+    const S = '/tmp/s'
+    const command = `S=${S}; R=$S/rev; ( /Users/me/.local/bin/cc-review token $R/prompt.md -C $S/src -o $R/cc.token.md > $R/cc-token-retry.log 2>&1; echo "cc-token retry rc=$?" ) & ( for i in 1 2 3; do cc-review orca $R/prompt.md -o $R/cc.orca.md > $R/cc-orca-retry.log 2>&1 && break; echo "cc-orca attempt $i failed"; done ) & wait`
+    expect(reviewLogs(command, 'cc-token')).toEqual([`${S}/rev/cc-token-retry.log`])
+    expect(reviewLogs(command, 'cc-orca')).toEqual([`${S}/rev/cc-orca-retry.log`])
+    expect(reviewLogs(command, 'cc-review')).toEqual([`${S}/rev/cc.token.md`, `${S}/rev/cc-token-retry.log`, `${S}/rev/cc.orca.md`, `${S}/rev/cc-orca-retry.log`])
+    expect(reviewLogs('nv-review < p.md > ~/r/nv.md 2> "$UNSET/nv.err"', 'nv-review', '/Users/me')).toEqual(['/Users/me/r/nv.md'])
   })
 
   test('reads task notifications', async () => {
@@ -434,6 +479,46 @@ describe('external reviewers (item 167)', () => {
 
   test('sums the section up', async () => {
     expect(reviewSummary([{ name: 'a', state: 'done' }, { name: 'b', state: 'failed' }, { name: 'c', state: 'waiting' }])).toBe('1 of 3 done · 1 failed')
+  })
+
+  test("reads each reviewer's models from its own source and config", async () => {
+    const nv = 'nv-review () {\n\tlocal primary="${NV_MODEL:-deepseek-ai/deepseek-v4.1-flash}" \n\tlocal fallback="${NV_FALLBACK-minimaxai/minimax-m3.1-flash z-ai/glm-5.3-flash}" \n}'
+    expect(sourceModels(nv)).toEqual(['deepseek-ai/deepseek-v4.1-flash', 'minimaxai/minimax-m3.1-flash', 'z-ai/glm-5.3-flash'])
+    expect(sourceModels('cc-orca () {\n\tlocal model="${CC_ORCA_MODEL:-z-ai/glm-5.3-flash-free}" \n}')).toEqual(['z-ai/glm-5.3-flash-free'])
+    const py = '#!/usr/bin/env python3\nDEFAULT_MODELS = [\n    "minimax/minimax-m3.1-flash:free",  # 1M ctx\n    "openrouter/free",  # OpenRouter\'s own router\n]\n'
+    expect(sourceModels(py)).toEqual(['minimax/minimax-m3.1-flash:free', 'openrouter/free'])
+    expect(sourceModels(`${py}\n# Tried through OpenCode.\nOPENCODE_FALLBACK = "openrouter/thinkingmachines/inkling:free"\n`)).toEqual(['minimax/minimax-m3.1-flash:free', 'openrouter/free', 'openrouter/thinkingmachines/inkling:free'])
+    expect(shortModel('openrouter/thinkingmachines/inkling:free')).toBe('inkling:free')
+    expect(sourceModels('#!/bin/zsh\nmodel=""')).toEqual([])
+    expect(shortModel('deepseek-ai/deepseek-v4.1-flash')).toBe('deepseek-v4.1-flash')
+    expect(shortModel('nvidia/nvidia/nemotron-3-ultra-550b-a55b')).toBe('nemotron-3-ultra-550b-a55b')
+    expect(shortModel('openrouter/free')).toBe('openrouter/free')
+    expect(opencodeModel('{"model":"opencode/a-free","agent":{"plan":{"model":"opencode/b-free"}}}')).toBe('opencode/b-free')
+    expect(opencodeModel('not json')).toBeUndefined()
+    expect(codexModel('model = "gpt-6-sol"\nmodel_reasoning_effort = "max"\n[profiles.x]\nmodel = "other"\n')).toBe('gpt-6-sol · max')
+    expect(splitSources('noise\n@@kovan-source nv-review\nbody\n@@kovan-source openrouter')).toEqual({ 'nv-review': 'body\n', openrouter: '' })
+  })
+
+  test('a reviewer that runs others shows theirs, and a command can pick its own', async () => {
+    const all = reviewerModels(
+      { 'nv-review': nvSource(), 'cc-token': '${CC_TOKEN_MODEL:-minimax/minimax-m3.1-flash}', 'cc-review': 'cc-token or cc-orca', 'cc-orca': '${CC_ORCA_MODEL:-z-ai/glm-5.3-flash-free}', openrouter: '' },
+      { opencode: ['opencode/minimax-m3.1-flash-free'] }
+    )
+    expect(all['opencode']).toEqual({ models: ['minimax-m3.1-flash-free'] })
+    expect(all['cc-review']).toEqual({ models: [], via: ['cc-token', 'cc-orca'] })
+    expect(all['openrouter']).toBeUndefined()
+    expect(modelLine({ name: 'cc-review', state: 'waiting' }, all)).toBe('cc-token minimax-m3.1-flash · cc-orca glm-5.3-flash-free')
+    expect(modelLine({ name: 'nv-review', state: 'waiting' }, all)).toBe('deepseek-v4.1-flash → minimax-m3.1-flash → glm-5.3-flash')
+    expect(modelLine({ name: 'openrouter', state: 'waiting' }, all)).toBe('')
+
+    const nv = all['nv-review']!.models
+    expect(runModels('nv-review < p.md > nv.md; echo "nv-review exit $?"', 'nv-review', nv)).toBeUndefined()
+    expect(runModels('NV_MODEL=z-ai/glm-5.3 nv-review < p.md', 'nv-review', nv)).toEqual(['glm-5.3', 'minimax-m3.1-flash', 'glm-5.3-flash'])
+    expect(runModels('NV_MODEL=z-ai/glm-5.3 NV_FALLBACK= nv-review < p.md', 'nv-review', nv)).toEqual(['glm-5.3'])
+    expect(runModels('zsh -c "source $SNAP; NV_MODEL=x/y-z nv-review" < p.md', 'nv-review', nv)).toEqual(['y-z', 'minimax-m3.1-flash', 'glm-5.3-flash'])
+    expect(runModels('or-review -m nvidia/nemotron-3-ultra-550b-a55b:free --max-tokens 40000 p.md', 'or-review', [])).toEqual(['nemotron-3-ultra-550b-a55b:free'])
+    expect(runModels('opencode run --agent plan --model=opencode/deepseek-v4.1-flash-free "go"', 'opencode', [])).toEqual(['deepseek-v4.1-flash-free'])
+    expect(modelLine({ name: 'nv-review', state: 'running', models: ['glm-5.3'] }, all)).toBe('glm-5.3')
   })
 })
 
@@ -482,6 +567,76 @@ test('each reviewer shows not run yet, running, then done or failed', async ($, 
   expect(json).toContain('APPROVE')
   expect(json).toContain('done · 5m')
   expect(await ui.find({ type: 'Text', text: /^REVIEWERS ─+ 1 of 3 done · 1 failed$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test("each reviewer's models show under it, read at session start", async ($, on) => {
+  mock.env(on, { KOVAN_REVIEWERS: JSON.stringify(['nv-review', 'opencode', 'cc-review', 'cc-orca']), HOME: '/Users/me' })
+  on('clock.now', () => ({ value: 0 }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('command.register', () => ({ value: { command: 'kovan' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('fs.read', ($, e) => {
+    if ((e as unknown as { path: string }).path === '/Users/me/.config/opencode/opencode.json') return { value: '{"model":"opencode/minimax-m3.1-flash-free"}' }
+    throw new Error('no such file')
+  })
+  const sources = `@@kovan-source nv-review\n${nvSource()}\n@@kovan-source cc-review\ncc-review runs cc-orca\n@@kovan-source cc-orca\n\${CC_ORCA_MODEL:-z-ai/glm-5.3-flash-free}\n`
+  on('process.run', ($, e) => {
+    const argv = (e as unknown as { argv: string[] }).argv
+    // Never an interactive zsh on Claude's own terminal (item 168): it would stop Claude.
+    if (argv.includes('-ic')) expect(argv.slice(0, 4)).toEqual(['/usr/bin/perl', '-MPOSIX', '-e', 'POSIX::setsid(); exec @ARGV or die'])
+    const zsh = argv.includes('-ic')
+    return { value: { exitCode: zsh ? 0 : 1, stdout: zsh ? sources : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bg1' } as never }))
+
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  for (let i = 0; i < 100; i++) await Promise.resolve()
+  let ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: 'deepseek-v4.1-flash → minimax-m3.1-flash → glm-5.3-flash' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'minimax-m3.1-flash-free' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'cc-orca glm-5.3-flash-free' })).toBeDefined()
+  await ui.unmount()
+
+  // A run that names its own model shows that one.
+  await $.tool.call({ tool: 'Bash', command: 'NV_MODEL=z-ai/glm-5.3 NV_FALLBACK= nv-review < p.md > nv.md; echo "nv-review exit $?"', run_in_background: true } as never)
+  ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: 'glm-5.3' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'deepseek-v4.1-flash → minimax-m3.1-flash → glm-5.3-flash' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a reviewer whose retry job ends with code 0 but printed failures shows failed, with the reason from its log', async ($, on) => {
+  mock.env(on, { KOVAN_REVIEWERS: JSON.stringify(['nv-review', 'cc-token', 'cc-orca']) })
+  on('clock.now', () => ({ value: 0 }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  const files: Record<string, string> = {
+    '/tasks/bj.output': 'cc-token retry rc=1\ncc-orca attempt 1 failed\ncc-orca attempt 3 failed\n\n[exited with code 0]\n',
+    '/s/rev/cc-token-retry.log': "\u001b]2;typeset -f cc-token > /dev/null || { print -u2 ; exit 1; }\u0007cc-review: cc-token starting\ncc-review: cc-token FAILED after 2s — Failed to authenticate. API Error: 403 User's credit limit is insufficient\n",
+    '/s/rev/cc-orca-retry.log': 'cc-review: cc-orca FAILED after 2s — API Error: Request rejected (429) · Free model capacity is limited right now. Retry shortly, or add credits\n'
+  }
+  on('fs.read', ($, e) => {
+    const text = files[(e as unknown as { path: string }).path]
+    if (text === undefined) throw new Error('no such file')
+    return { value: text }
+  })
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('prompt.submit', ($, e) => e as never)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bj' } as never }))
+
+  await $.tool.call({ tool: 'Bash', command: 'S=/s; R=$S/rev; ( cc-review token $R/p.md -o $R/cc.token.md > $R/cc-token-retry.log 2>&1; echo "cc-token retry rc=$?" ) & ( for i in 1 2 3; do cc-review orca $R/p.md > $R/cc-orca-retry.log 2>&1 && break; echo "cc-orca attempt $i failed"; done ) & wait', run_in_background: true } as never)
+  await $.prompt.submit({ text: '<task-notification>\n<task-id>bj</task-id>\n<output-file>/tasks/bj.output</output-file>\n<status>completed</status>\n<summary>Background command "retry" completed (exit code 0)</summary>\n</task-notification>' } as never)
+  for (let i = 0; i < 1000; i++) await Promise.resolve()
+
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^REVIEWERS ─+ 0 of 3 done · 2 failed$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'no credit (403)' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'rate-limited (429)' })).toBeDefined()
   await ui.unmount()
 })
 

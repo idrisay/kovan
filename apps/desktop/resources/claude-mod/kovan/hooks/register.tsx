@@ -9,7 +9,8 @@
  *              opens its diff under it. Files a shell command changed count
  *              too, by git status against the session's start (item 165)
  *   Reviewers  the external reviewers Kovan asked for (KOVAN_REVIEWERS), each
- *              not run yet, running, done or failed, as the agent runs them
+ *              not run yet, running, done or failed, as the agent runs them,
+ *              with the models it tries under it
  *   Checks     the tests, typechecks and lints the agent ran, and Run checks
  *   one line   model, context, session and weekly usage
  *
@@ -26,7 +27,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { Check, DiffView, FileChange, LinkItem, PlanStep, ReviewRun, Usage } from '../types'
+import type { Check, DiffView, FileChange, LinkItem, PlanStep, ReviewerModels, ReviewRun, Usage } from '../types'
 
 const PANE = 'kovan'
 const CHANGES = 'kovan-changes'
@@ -44,6 +45,7 @@ const baseline = atom({ plugin: 'kovan', key: 'baseline' } as const, {})
 /** Every changed file's diff, for the Changes pane, by path. */
 const diffs = atom({ plugin: 'kovan', key: 'diffs' } as const, {})
 const reviews = atom({ plugin: 'kovan', key: 'reviews' } as const, [])
+const reviewModels = atom({ plugin: 'kovan', key: 'reviewModels' } as const, {})
 
 /**
  * Asks Claude to keep its plan where the pane can show it (item 165): without
@@ -204,6 +206,9 @@ async function observe($: $, tool: string, input: Record<string, unknown>, ran: 
 
 // ── external reviewers (item 167) ──────────────────────────────────────────
 
+/** Words before a step's program: `env`, `nohup`, a loop's `do`. */
+const STEP_PREFIXES = ['env', 'time', 'exec', 'command', 'nice', 'nohup', 'do', 'then', 'else', '!']
+
 /** The reviewer names Kovan handed the session, each once: `nv-review (kimi)` is `nv-review`. */
 export function reviewerNames(raw: string | undefined): string[] {
   let list: unknown
@@ -223,7 +228,7 @@ export function reviewersIn(command: string, names: readonly string[]): string[]
   const found: string[] = []
   for (const step of command.split(/&&|\|\||;|\||\n|"|'|\$\(|`|\(|\)/)) {
     let words = step.trim().split(/\s+/).filter(Boolean)
-    while (words.length && (/^\w+=/.test(words[0]!) || ['env', 'time', 'exec', 'command', 'nice', 'nohup'].includes(words[0]!))) words = words.slice(1)
+    while (words.length && (/^\w+=/.test(words[0]!) || STEP_PREFIXES.includes(words[0]!))) words = words.slice(1)
     if (words[0] === 'timeout') words = words.slice(2)
     const program = (words[0] ?? '').split('/').pop() ?? ''
     if (names.includes(program) && !found.includes(program)) found.push(program)
@@ -231,19 +236,100 @@ export function reviewersIn(command: string, names: readonly string[]): string[]
   return found
 }
 
+/** Text without terminal colours or the title sequences a sourced shell prints. */
+function plain(text: string): string {
+  return text.replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, '').replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '')
+}
+
+/** Where each name stands in a line, as a word: `openrouter/free` is a model, not the openrouter reviewer. */
+function namesAt(line: string, names: readonly string[]): { name: string; at: number }[] {
+  return names.flatMap((name) => [...line.matchAll(new RegExp(`(?<![\\w.-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w/-])`, 'g'))].map((m) => ({ name, at: m.index! })))
+}
+
 /**
- * How each reviewer ended, from its own `<name> exit N` line in the output
- * (agents run them as `cmd > out; echo "nv-review exit $?"`, whose last
- * echo makes the whole command succeed), and the VERDICT line one printed.
+ * How a reviewer ended, from the status lines agents print as they run them:
+ * `nv-review exit 1`, `cc-token retry rc=1`, `cc-orca attempt 3 failed`,
+ * `cc-review: cc-token FAILED after 2s — …`, `… ok`. Each status belongs to
+ * the reviewer named nearest before it on its line, and the last one wins:
+ * a retry that ends ok is done. Those echoes make the whole command succeed,
+ * so they beat its exit code. Also the VERDICT line one printed, and the
+ * lines that were its own, to read a failure's reason from.
  */
-export function reviewOutcome(output: string, name: string): { exit?: number; verdict?: string } {
-  const clean = output.replace(/\u001b\[[0-9;]*m/g, '')
-  const exit = new RegExp(`(?:^|\\s)${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:? exit(?: code)?:? (\\d+)`, 'im').exec(clean)
+export function reviewOutcome(output: string, name: string, names: readonly string[] = [name]): { exit?: number; failed?: boolean; verdict?: string; lines?: string } {
+  const clean = plain(output)
+  const all = names.includes(name) ? names : [...names, name]
+  let exit: number | undefined
+  let failed: boolean | undefined
+  const own: string[] = []
+  for (const line of clean.split('\n')) {
+    const at = namesAt(line, all)
+    if (at.length === 0) continue
+    let mine = false
+    for (const status of line.matchAll(/\b(?:exit(?:\s+code)?|rc)\s*[:=]?\s*(\d+)\b|\b(failed|FAILED)\b(?!,?\s+retrying)|\b(ok)\b/g)) {
+      const owner = at.filter((n) => n.at < status.index!).sort((a, b) => b.at - a.at)[0]?.name
+      if (owner !== name) continue
+      mine = true
+      if (status[1] !== undefined) { exit = Number(status[1]); failed = exit !== 0 } else { exit = undefined; failed = status[2] !== undefined }
+    }
+    if (mine) own.push(line.trim())
+  }
   const verdict = [...clean.matchAll(/^\s*\**VERDICT\**:?\**\s*(.+?)\s*$/gim)].pop()
   return {
-    ...(exit ? { exit: Number(exit[1]) } : {}),
-    ...(verdict ? { verdict: verdict[1]!.replace(/\*+/g, '').slice(0, 60) } : {})
+    ...(exit !== undefined ? { exit } : {}),
+    ...(failed !== undefined ? { failed } : {}),
+    ...(verdict ? { verdict: verdict[1]!.replace(/\*+/g, '').slice(0, 60) } : {}),
+    ...(own.length ? { lines: own.join('\n') } : {})
   }
+}
+
+/**
+ * Why a reviewer failed, in a few words, from what it and its logs said:
+ * `no credit (403)`, `rate-limited (429)`, `model retired (410)`. The HTTP
+ * code goes first: a 429 says "add credits" too. Else, when `anyLine`, the
+ * last line that says error or failed, past its "—".
+ */
+export function failReason(text: string, anyLine = true): string | undefined {
+  const t = plain(text)
+  const code = [...t.matchAll(/\b(?:API Error:?\s*(?:Request rejected\s*\()?|HTTP(?: error)?:?\s*|status(?: code)?:?\s*)([1-5]\d\d)\b/gi)].pop()?.[1]
+  const said = (words: string) => (code ? `${words} (${code})` : words)
+  if (code === '429' || (!code && /rate.?limit|too many requests|capacity is limited/i.test(t))) return said('rate-limited')
+  if (code === '402' || /credit limit|insufficient (?:credit|balance|funds|quota)|gift balance|out of credits?|no credits? left|exceeded your current quota/i.test(t)) return said('no credit')
+  if (code === '410' || /end of life|end-of-life|no longer (?:available|supported)/i.test(t)) return said('model retired')
+  if (code === '401' || /unauthori[sz]ed|invalid (?:api )?key|no key at|missing (?:api )?key/i.test(t)) return said('bad or missing key')
+  if (code === '404' || /model not found|unknown model|no such model|not a valid model/i.test(t)) return said('model not found')
+  if (code === '403') return said('forbidden')
+  if (/timed out|curl: \(28\)/i.test(t)) return said('timed out')
+  if (/empty response|no stream chunks|empty stream/i.test(t)) return said('empty response')
+  if (code?.startsWith('5') || /unexpected (?:server )?error|internal server error|bad gateway|service unavailable/i.test(t)) return said('server error')
+  if (!anyLine) return code ? `HTTP ${code}` : undefined
+  const line = t.split('\n').map((l) => l.trim()).filter((l) => /error|failed/i.test(l)).pop()
+  return line ? line.replace(/^.*?(?:—|--)\s*/, '').slice(0, 60) : code ? `HTTP ${code}` : undefined
+}
+
+/**
+ * The files a command writes a reviewer's output to, read for the reason
+ * when it fails: the `>`, `2>` and `-o` targets of its own step, and any file
+ * named after it (`cc-token-retry.log`), with the command's own `R=…`
+ * variables, `$HOME` and `~` filled in. A path still holding a variable is
+ * left out.
+ */
+export function reviewLogs(command: string, name: string, home?: string): string[] {
+  const vars: Record<string, string> = home ? { HOME: home } : {}
+  const fill = (s: string) => s.replace(/^~(?=\/)/, home ?? '~').replace(/\$\{?(\w+)\}?/g, (m, v: string) => vars[v] ?? m)
+  for (const a of command.matchAll(/(?:^|[;&|\n(]\s*)(\w+)=("[^"]*"|'[^']*'|[^\s;&|)]*)/g)) vars[a[1]!] = fill(a[2]!.replace(/^["']|["']$/g, ''))
+  const found: string[] = []
+  for (const step of command.split(/&&|\|\||;|\||\n|\$\(|`|\(|\)/)) {
+    let words = step.trim().split(/\s+/).filter(Boolean)
+    while (words.length && (/^\w+=/.test(words[0]!) || STEP_PREFIXES.includes(words[0]!))) words = words.slice(1)
+    if (words[0] === 'timeout') words = words.slice(2)
+    const isMine = (words[0] ?? '').replace(/["']/g, '').split('/').pop() === name
+    for (const t of step.matchAll(/(?:\d?>>?|&>)\s*(?!&)("?)([^\s"';&|)]+)\1|(?:^|\s)(?:-o|--output)\s+("?)([^\s"';&|)]+)\3/g)) {
+      const file = fill(t[2] ?? t[4] ?? '')
+      if (!file.startsWith('/') || file.includes('$') || file.startsWith('/dev/')) continue
+      if ((isMine || (file.split('/').pop() ?? '').includes(name)) && !found.includes(file)) found.push(file)
+    }
+  }
+  return found.slice(0, 8)
 }
 
 /** Each `<task-notification>` in a text: its task id, status and exit code. */
@@ -269,23 +355,44 @@ async function startReviews($: $, command: string): Promise<string[]> {
   const started = reviewersIn(command, await reviewNames($))
   if (started.length === 0) return started
   const now = await $.clock.now()
+  const configured = await read($, reviewModels)
+  const home = await $.env.get('HOME')
   await update($, reviews, (list) => [
     ...list.filter((r) => !started.includes(r.name)),
-    ...started.map((name): ReviewRun => ({ name, state: 'running', since: now }))
+    ...started.map((name): ReviewRun => {
+      const models = runModels(command, name, configured[name]?.models ?? [])
+      const logs = reviewLogs(command, name, home)
+      return { name, state: 'running', since: now, ...(models ? { models } : {}), ...(logs.length ? { logs } : {}) }
+    })
   ])
   return started
 }
 
-/** Settles reviewers from what their command printed and how it ended. */
+/**
+ * Settles reviewers from what their command printed and how it ended. A
+ * failed one says why: from its own lines, else from the logs its command
+ * wrote (the tail of each: the error is at the end).
+ */
 async function finishReviews($: $, names: readonly string[], output: string, ok: boolean, stopped = false) {
   const now = await $.clock.now()
+  const all = await reviewNames($)
+  const logs: Record<string, string> = {}
+  for (const r of await read($, reviews)) {
+    if (!names.includes(r.name) || r.state !== 'running') continue
+    logs[r.name] = ''
+    for (const file of r.logs ?? []) {
+      try { logs[r.name] += `${(await $.fs.read(file)).slice(-20_000)}\n` } catch { /* never written */ }
+    }
+  }
   await update($, reviews, (list) => list.map((r) => {
     if (!names.includes(r.name) || r.state !== 'running') return r
-    const { exit, verdict } = reviewOutcome(output, r.name)
-    const failed = exit !== undefined ? exit !== 0 : !ok
+    const { exit, failed: said, verdict, lines } = reviewOutcome(output, r.name, all)
+    const failed = exit !== undefined ? exit !== 0 : said ?? !ok
     const state: ReviewRun['state'] = stopped ? 'stopped' : failed ? 'failed' : 'done'
-    const detail = verdict ?? (failed && exit !== undefined ? `exit ${exit}` : undefined)
-    const { taskId: _, ...rest } = r
+    // Its own `attempt 3 failed` says nothing new: a known cause there, else the logs'.
+    const reason = failed && !stopped ? failReason(lines ?? '', false) ?? failReason(logs[r.name] ?? '') : undefined
+    const detail = failed ? reason ?? verdict ?? (exit !== undefined ? `exit ${exit}` : undefined) : verdict
+    const { taskId: _, logs: __, ...rest } = r
     return { ...rest, state, ended: now, ...(detail ? { detail } : {}) }
   }))
 }
@@ -323,6 +430,155 @@ const REVIEW_LOOK = {
   failed: { mark: '●', word: 'failed', color: 'error' },
   stopped: { mark: '○', word: 'stopped', color: 'subtle' }
 } as const
+
+// ── each reviewer's models ────────────────────────────────────────────────
+
+/** `deepseek-ai/deepseek-v4.1-flash` → `deepseek-v4.1-flash`, `…/inkling:free` → `inkling:free`; a bare word keeps its vendor: `openrouter/free`. */
+export function shortModel(id: string): string {
+  const last = id.split('/').pop() ?? id
+  return /[-:.\d]/.test(last) ? last : id
+}
+
+/**
+ * The models a reviewer's own source tries, in order: a shell function's
+ * `${NV_MODEL:-…}` default then its `${NV_FALLBACK-…}` list, or a script's
+ * `DEFAULT_MODELS = [ … ]` then any `…_FALLBACK = "…"` it ends on
+ * (or-review's OpenCode one).
+ */
+export function sourceModels(source: string): string[] {
+  const shellDefault = (suffix: string) => new RegExp(`\\$\\{\\w*_${suffix}:?-([^}]*)\\}`).exec(source)?.[1]?.trim()
+  const first = shellDefault('MODEL')
+  if (first) return [...new Set([first, ...(shellDefault('FALLBACK') ?? '').split(/\s+/).filter(Boolean)])]
+  const list = /^DEFAULT_MODELS\s*=\s*\[([\s\S]*?)\]/m.exec(source)
+  const items = (list?.[1] ?? '').replace(/#.*$/gm, '')
+  const models = [...items.matchAll(/["']([^"'\s]+)["']/g)].map((m) => m[1]!)
+  if (models.length === 0) return []
+  const after = [...source.matchAll(/^\w*FALLBACK\w*\s*=\s*["']([^"'\s]+)["']/gm)].map((m) => m[1]!)
+  return [...new Set([...models, ...after])]
+}
+
+/** OpenCode's model for a review: its plan agent's, which reviews run as, else the default. */
+export function opencodeModel(json: string): string | undefined {
+  try {
+    const c = JSON.parse(json) as { model?: string; agent?: { plan?: { model?: string } } }
+    return c.agent?.plan?.model ?? c.model
+  } catch { return undefined }
+}
+
+/** Codex's model and reasoning effort, from config.toml's top level: `gpt-6-sol · max`. */
+export function codexModel(toml: string): string | undefined {
+  const top = toml.split(/^\s*\[/m)[0] ?? ''
+  const model = /^\s*model\s*=\s*"([^"]+)"/m.exec(top)?.[1]
+  const effort = /^\s*model_reasoning_effort\s*=\s*"([^"]+)"/m.exec(top)?.[1]
+  return model ? `${model}${effort ? ` · ${effort}` : ''}` : undefined
+}
+
+/** What `zsh -ic SOURCES zsh <names>` printed, split back into each reviewer's source. */
+export function splitSources(stdout: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  let name: string | undefined
+  for (const line of stdout.split('\n')) {
+    const marker = /^@@kovan-source ([\w.-]+)$/.exec(line)
+    if (marker) { name = marker[1]!; out[name] = ''; continue }
+    if (name !== undefined) out[name] += `${line}\n`
+  }
+  return out
+}
+
+/**
+ * Each reviewer's models from its source, `known` (configs read directly)
+ * first. One with none of its own that runs others by name, as cc-review
+ * runs cc-token and cc-orca, says theirs.
+ */
+export function reviewerModels(sources: Record<string, string>, known: Record<string, string[]> = {}): Record<string, ReviewerModels> {
+  const own: Record<string, ReviewerModels> = {}
+  for (const [name, models] of Object.entries(known)) if (models.length) own[name] = { models: models.map(shortModel) }
+  for (const [name, source] of Object.entries(sources)) {
+    const models = own[name] ? [] : sourceModels(source)
+    if (models.length) own[name] = { models: models.map(shortModel) }
+  }
+  const out = { ...own }
+  for (const [name, source] of Object.entries(sources)) {
+    if (out[name]) continue
+    const via = Object.keys(own).filter((other) => other !== name && new RegExp(`(^|[^\\w-])${other.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w-])`).test(source))
+    if (via.length) out[name] = { models: [], via }
+  }
+  return out
+}
+
+/**
+ * The models a command picks for a reviewer over its defaults, or undefined
+ * when it picks none: `--model x` / `-m x` alone, or `NV_MODEL=x` with the
+ * step's own `NV_FALLBACK=…` or else the configured fallbacks after it.
+ */
+export function runModels(command: string, name: string, configured: readonly string[]): string[] | undefined {
+  // Quotes don't split here: `NV_FALLBACK="a b"` is one assignment.
+  for (const step of command.split(/&&|\|\||;|\||\n|\$\(|`|\(|\)/)) {
+    let words = step.trim().split(/\s+/).filter(Boolean)
+    const env: Record<string, string> = {}
+    while (words.length && (/^\w+=/.test(words[0]!) || ['env', 'time', 'exec', 'command', 'nice', 'nohup'].includes(words[0]!))) {
+      const assign = /^(\w+)=(.*)$/.exec(words[0]!)
+      if (assign) env[assign[1]!] = assign[2]!.replace(/^["']|["']$/g, '')
+      words = words.slice(1)
+    }
+    if (words[0] === 'timeout') words = words.slice(2)
+    if ((words[0] ?? '').replace(/["']/g, '').split('/').pop() !== name) continue
+    const flag = words.findIndex((w) => w === '--model' || w === '-m' || w.startsWith('--model='))
+    if (flag >= 0) {
+      const value = words[flag]!.startsWith('--model=') ? words[flag]!.slice(8) : words[flag + 1]
+      if (value) return [shortModel(value.replace(/["']/g, ''))]
+    }
+    const model = Object.entries(env).find(([k]) => k.endsWith('_MODEL'))?.[1]
+    const fallback = Object.entries(env).find(([k]) => k.endsWith('_FALLBACK'))?.[1]
+    if (model === undefined && fallback === undefined) return undefined
+    const rest = fallback !== undefined ? fallback.split(/\s+/).filter(Boolean).map(shortModel) : configured.slice(1)
+    const first = model !== undefined ? shortModel(model) : configured[0]
+    return [...new Set([...(first ? [first] : []), ...rest])]
+  }
+  return undefined
+}
+
+/** The line under a reviewer: `deepseek-v4.1-flash → minimax-m3.1-flash`, or `cc-token … · cc-orca …`. */
+export function modelLine(run: ReviewRun, all: Record<string, ReviewerModels>): string {
+  if (run.models?.length) return run.models.join(' → ')
+  const own = all[run.name]
+  if (!own) return ''
+  if (own.models.length) return own.models.join(' → ')
+  return (own.via ?? []).map((v) => `${v} ${(all[v]?.models ?? []).join(' → ')}`).join(' · ')
+}
+
+/**
+ * Prints each name's source after a marker line: a shell function's body, a
+ * script whole (`#!` first), a binary not at all. Interactive, as that is
+ * where the functions live.
+ */
+const SOURCES = 'for n; do print -r -- "@@kovan-source $n"; case "$(whence -w -- "$n")" in (*function) whence -f -- "$n" ;; (*command) f="$(whence -p -- "$n")"; [[ "$(head -c 2 "$f" 2>/dev/null)" == "#!" ]] && head -c 200000 "$f" ;; esac; done'
+
+/** Reads where each reviewer keeps its models: OpenCode's and Codex's configs, and the rest's own source. */
+async function refreshReviewModels($: $) {
+  const names = await reviewNames($)
+  if (names.length === 0) return
+  const home = await $.env.get('HOME')
+  const file = async (path: string) => { try { return await $.fs.read(path) } catch { return '' } }
+  const known: Record<string, string[]> = {}
+  if (home && names.includes('opencode')) {
+    const m = opencodeModel(await file(`${home}/.config/opencode/opencode.json`))
+    if (m) known['opencode'] = [m]
+  }
+  if (home && names.includes('codex')) {
+    const m = codexModel(await file(`${home}/.codex/config.toml`))
+    if (m) known['codex'] = [m]
+  }
+  // In a session of its own (item 168): an interactive zsh sharing Claude's
+  // terminal takes its foreground, and Claude, reading keys, is stopped
+  // ("suspended (tty input)"). Without a terminal it has no job control.
+  const r = await $.process.run(
+    ['/usr/bin/perl', '-MPOSIX', '-e', 'POSIX::setsid(); exec @ARGV or die', 'zsh', '-ic', SOURCES, 'zsh', ...names.filter((n) => !known[n])],
+    { timeoutMs: 20_000 }
+  )
+  const found = reviewerModels(splitSources(r.stdout), known)
+  await update($, reviewModels, () => found)
+}
 
 async function record($: $, check: Check) {
   await update($, checks, (list) => [...list.filter((c) => c.name !== check.name), check])
@@ -899,6 +1155,7 @@ export const register: Register = (on) => {
     void refreshScripts($).catch(() => undefined)
     void refreshFolders($).catch(() => undefined)
     void readEarlierLinks($).catch(() => undefined)
+    void refreshReviewModels($).catch(() => undefined)
     // Reset times count down even while nothing happens.
     $.clock.every(60_000, () => { void refreshUsage($).catch(() => undefined) })
     return next(e)
@@ -1025,6 +1282,7 @@ export const register: Register = (on) => {
     const linked = await read($, links)
     const labels = chipLabels(linked)
     const reviewRows = reviewList(await reviewNames($), await read($, reviews))
+    const modelsOf = await read($, reviewModels)
     const groups = changeGroups(changed, await read($, folders))
 
     const head = (label: string, right = '') => {
@@ -1141,18 +1399,22 @@ export const register: Register = (on) => {
             const right = r.state === 'running' ? `running · ${mins(now)}m`
               : r.state === 'waiting' ? 'not run yet'
                 : `${look.word}${r.ended ? ` · ${mins(r.ended)}m` : ''}`
+            const models = modelLine(r, modelsOf)
             // The name never gives way, as a check's: a long verdict is cut.
             return (
-              <Box flexDirection="row" width={cols}>
-                <Box flexShrink={0}>
-                  <Text><Text color={look.color}>{look.mark} </Text><Text dimColor={r.state === 'waiting'}>{r.name}</Text></Text>
+              <Box flexDirection="column" width={cols}>
+                <Box flexDirection="row" width={cols}>
+                  <Box flexShrink={0}>
+                    <Text><Text color={look.color}>{look.mark} </Text><Text dimColor={r.state === 'waiting'}>{r.name}</Text></Text>
+                  </Box>
+                  <Box flexGrow={1} flexShrink={1} marginLeft={2}>
+                    <Text dimColor wrap="truncate-end">{r.detail ?? ''}</Text>
+                  </Box>
+                  <Box flexShrink={0}>
+                    <Text color={r.state === 'waiting' ? undefined : look.color} dimColor={r.state === 'waiting'}>{` ${right}`}</Text>
+                  </Box>
                 </Box>
-                <Box flexGrow={1} flexShrink={1} marginLeft={2}>
-                  <Text dimColor wrap="truncate-end">{r.detail ?? ''}</Text>
-                </Box>
-                <Box flexShrink={0}>
-                  <Text color={r.state === 'waiting' ? undefined : look.color} dimColor={r.state === 'waiting'}>{` ${right}`}</Text>
-                </Box>
+                {models ? <Box marginLeft={2}><Text dimColor wrap="truncate-end">{models}</Text></Box> : null}
               </Box>
             )
           })}
