@@ -127,5 +127,6 @@
   "author": {
     "name": "idrisay",
     "email": "idrisaydev@gmail.com"
-  }
+  },
+  "license": "MIT"
 }
