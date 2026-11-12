@@ -2257,7 +2257,7 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
   border-left: 1px solid color-mix(in srgb, var(--waiting) 30%, transparent);
 }
 .quick-model-name { font-family: var(--mono); font-size: 11px; font-weight: 400; }
-.quick-model-menu { left: 0; right: auto; min-width: 300px; gap: 6px; padding: 6px 6px 8px; }
+.quick-model-menu { left: 0; right: auto; width: 340px; min-width: 0; gap: 6px; padding: 6px 6px 8px; }
 .quick-model-field { display: flex; align-items: center; gap: 8px; margin: 0 9px; font-size: 11.5px; color: var(--meta); }
 .quick-model-field select { flex: 1; }
 .quick-model-list { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; }

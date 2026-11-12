@@ -147,7 +147,10 @@ dot-folder in your home, mode 600, never read back). nv-review is always the fir
   `useMenuDismiss` (`menuDismiss.ts`): it closes on an outside click, on
   Escape, and when another menu opens, so two are never open at once. Rows
   are `role="menuitem"`. Use it for sort, filter, refresh and model pickers.
-  A menu near the window's right edge opens leftward.
+  A menu with no room to its right opens leftward, room counted to the edge
+  of the pane it sits in, not the window's: a docked terminal ends the pane
+  mid-window (item 174, `menuPlace.ts`). With room on neither side it
+  narrows to the wider one.
 - **Sidebar** (`aside.queue` + `<Resizer />` + `main.pane`): every rail view has
   this shape. The width comes from `--queue-w` and the text size from
   `--sidebar-zoom`. Clicking the active rail icon hides it.

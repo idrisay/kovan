@@ -729,6 +729,9 @@ export async function smokeUi(
   if (process.env['KOVAN_SMOKE_ITEM172'] && mode === 'seeded') {
     return { item172: await driveItem172(win, process.env['KOVAN_SMOKE_ITEM172']) };
   }
+  if (process.env['KOVAN_SMOKE_ITEM174'] && mode === 'seeded') {
+    return { item174: await driveItem174(win, process.env['KOVAN_SMOKE_ITEM174']) };
+  }
   if (process.env['KOVAN_SMOKE_ITEM173'] && mode === 'seeded') {
     return { item173: await driveItem173(win, process.env['KOVAN_SMOKE_ITEM173']) };
   }
@@ -5039,6 +5042,57 @@ async function driveItem171(win: BrowserWindow, prefix: string): Promise<Record<
   await pause(300);
   await writeFile(`${prefix}-unticked.png`, (await win.webContents.capturePage()).toPNG());
   console.log(`shot: ${prefix}-unticked.png`);
+  return report;
+}
+
+/**
+ * Item 174: the Review button's model menu stays inside the pull request's
+ * pane when a terminal is docked to its right.
+ */
+async function driveItem174(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.setSize(1440, 900);
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  // Both quick buttons on, as the user has them; they're off by default.
+  await read(win, `Promise.all([window.kovan.setSetting('buttons.summarize', true), window.kovan.setSetting('buttons.review', true)])`);
+  win.webContents.reload();
+  await pause(2_500);
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).some(e => e.textContent === '205')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).find(e => e.textContent === '205')?.closest('button')?.click()`);
+  const tagged = await until(win, `document.querySelector('.quick-model')`, 8_000);
+  // The pull request's own terminal, docked right as in the report.
+  await read(win, `document.querySelector('[aria-label="Open a terminal for this"]')?.click()`);
+  await until(win, `document.querySelector('.detail-terminal')`, 10_000);
+  await read(win, `document.querySelector('[aria-label="Dock right"]')?.click()`);
+  await until(win, `document.querySelector('.detail-terminal.dock-right')`, 5_000);
+  await pause(800);
+  const report: Record<string, unknown> = { tagged, docked: await read(win, `Boolean(document.querySelector('.detail-terminal.dock-right'))`) };
+  for (const which of ['summarize', 'review'] as const) {
+    await read(win, `(() => { const all = document.querySelectorAll('.quick-model'); all[${which === 'summarize' ? 0 : 'all.length - 1'}]?.click(); })()`);
+    await until(win, `document.querySelector('.quick-model-menu')`, 5_000);
+    await pause(600);
+    report[which] = await read(win, `(() => {
+      const m = document.querySelector('.quick-model-menu'); const t = document.querySelector('.detail-terminal');
+      if (!m || !t) return { menu: Boolean(m), terminal: Boolean(t) };
+      const menu = m.getBoundingClientRect();
+      const term = t.getBoundingClientRect();
+      return { menu: [Math.round(menu.left), Math.round(menu.right)], terminalLeft: Math.round(term.left),
+        alignRight: m.classList.contains('align-right'), clear: menu.right <= term.left && menu.left >= 0 };
+    })()`);
+    // The first capture can hand back the frame before; the second is current.
+    win.webContents.invalidate();
+    await pause(300);
+    await win.webContents.capturePage();
+    await pause(500);
+    await writeFile(`${prefix}-${which}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${which}.png`);
+    await read(win, `document.body.click()`);
+    await until(win, `!document.querySelector('.quick-model-menu')`, 3_000);
+  }
   return report;
 }
 

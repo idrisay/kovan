@@ -22,6 +22,7 @@ import { useFold } from './folds';
 import { useUsage } from './Usage';
 import type { QuickState } from './types';
 import { openSettings } from './Reviewers';
+import { menuPlace, type MenuPlace } from './menuPlace';
 
 export function useQuick(kind: QuickKind, subject: string) {
   const [state, setState] = useState<QuickState>({});
@@ -126,9 +127,10 @@ export function QuickButton({
   const [model, setModel] = useQuickModel(kind);
   const { prices } = useUsage();
   const [picking, setPicking] = useState(false);
-  // Opens toward whichever side has room: the Review button sits near the
-  // right edge, and a menu hung from its left ran off the window.
-  const [alignRight, setAlignRight] = useState(false);
+  // Opens toward whichever side has room, measured against the pane it sits
+  // in rather than the window (item 174): with a terminal docked on the right
+  // the pane ends mid-window, and a menu sized by the window was cut off.
+  const [place, setPlace] = useState<MenuPlace>({ alignRight: false });
   const cost = model ? costLabel(kind, model, prices) : undefined;
 
   useMenuDismiss(picking, () => setPicking(false));
@@ -147,8 +149,8 @@ export function QuickButton({
         title={model ? `Runs on ${model}. Click to change.` : 'Click to choose the model'}
         onClick={(e) => {
           e.stopPropagation();
-          const split = e.currentTarget.parentElement?.getBoundingClientRect();
-          setAlignRight(Boolean(split && split.left + 330 > window.innerWidth));
+          const split = e.currentTarget.parentElement;
+          if (split) setPlace(menuPlace(split));
           setPicking((v) => !v);
         }}
       >
@@ -157,7 +159,7 @@ export function QuickButton({
       </button>
       {picking && (
         <QuickModelPicker
-          kind={kind} label={label} model={model} alignRight={alignRight}
+          kind={kind} label={label} model={model} place={place}
           onPick={(next) => { void setModel(next); setPicking(false); }}
           onClose={() => setPicking(false)}
         />
@@ -177,8 +179,8 @@ const REVIEWERS_PROVIDER = '~reviewers';
  * in. Providers are opencode's (`opencode models`, asked when the popover
  * first opens) and, for the review, NVIDIA through your `nv-review` function.
  */
-function QuickModelPicker({ kind, label, model, alignRight, onPick, onClose }: {
-  kind: QuickKind; label: string; model: string; alignRight: boolean; onPick: (model: string) => void; onClose: () => void;
+function QuickModelPicker({ kind, label, model, place, onPick, onClose }: {
+  kind: QuickKind; label: string; model: string; place: MenuPlace; onPick: (model: string) => void; onClose: () => void;
 }) {
   const review = kind === 'pull-review';
   const [available, setAvailable] = useState<string[]>();
@@ -216,7 +218,10 @@ function QuickModelPicker({ kind, label, model, alignRight, onPick, onClose }: {
   };
 
   return (
-    <div className={alignRight ? 'menu quick-model-menu align-right' : 'menu quick-model-menu'} role="dialog" aria-label={`${label} model`} onClick={(e) => e.stopPropagation()}>
+    <div
+      className={place.alignRight ? 'menu quick-model-menu align-right' : 'menu quick-model-menu'}
+      style={place.maxWidth ? { maxWidth: place.maxWidth } : undefined}
+      role="dialog" aria-label={`${label} model`} onClick={(e) => e.stopPropagation()}>
       <div className="menu-head">{label} with</div>
       <label className="quick-model-field">
         <span>Provider</span>
