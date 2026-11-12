@@ -729,6 +729,9 @@ export async function smokeUi(
   if (process.env['KOVAN_SMOKE_ITEM172'] && mode === 'seeded') {
     return { item172: await driveItem172(win, process.env['KOVAN_SMOKE_ITEM172']) };
   }
+  if (process.env['KOVAN_SMOKE_ITEM173'] && mode === 'seeded') {
+    return { item173: await driveItem173(win, process.env['KOVAN_SMOKE_ITEM173']) };
+  }
   if (process.env['KOVAN_SMOKE_ITEM171'] && mode === 'seeded') {
     return { item171: await driveItem171(win, process.env['KOVAN_SMOKE_ITEM171']) };
   }
@@ -5036,6 +5039,47 @@ async function driveItem171(win: BrowserWindow, prefix: string): Promise<Record<
   await pause(300);
   await writeFile(`${prefix}-unticked.png`, (await win.webContents.capturePage()).toPNG());
   console.log(`shot: ${prefix}-unticked.png`);
+  return report;
+}
+
+/**
+ * Item 173: the run sheet is sized by the window, at a laptop's size and at
+ * a wide screen's, folded and with the prompt shown in full.
+ */
+async function driveItem173(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `localStorage.removeItem('kovan.run-prompt-open')`);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).some(e => e.textContent === '205')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).find(e => e.textContent === '205')?.closest('button')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === 'Review in an agent')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Review in an agent')?.click()`);
+  await until(win, `document.getElementById('run-prompt')?.value.length > 0`, 10_000);
+  const measure = () => read(win, `(() => {
+    const sheet = document.querySelector('.run-sheet').getBoundingClientRect();
+    const ta = document.getElementById('run-prompt').getBoundingClientRect();
+    return { window: innerWidth + 'x' + innerHeight, sheet: Math.round(sheet.width) + 'x' + Math.round(sheet.height),
+      sheetBottom: Math.round(sheet.bottom), prompt: Math.round(ta.height) };
+  })()`);
+  const report: Record<string, unknown> = {};
+  for (const [w, h] of [[1440, 900], [1715, 1100], [3430, 1400]] as const) {
+    for (const open of [false, true]) {
+      const isOpen = await read(win, `document.getElementById('run-prompt').className !== 'folded'`);
+      if (isOpen !== open) {
+        await read(win, `Array.from(document.querySelectorAll('.prompt-label .link')).find(b => /Show all|Fold/.test(b.textContent))?.click()`);
+      }
+      win.setSize(w, h);
+      await pause(700);
+      const name = `${w}x${h}-${open ? 'open' : 'folded'}`;
+      report[name] = await measure();
+      win.webContents.invalidate();
+      await pause(300);
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    }
+  }
   return report;
 }
 

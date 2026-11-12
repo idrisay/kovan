@@ -499,8 +499,10 @@ folded, with a link saying what's hidden ("Show all 112 lines",
 "Change"). The run sheet's prompt, its test accounts and its plan limits
 (`AgentLimitsNote compact`) work this way.
 
-**The run sheet (items 171, 172)** is `.sheet.run-sheet`: 1080 px at most,
-the prompt folded to 9 lines. A review whose ticket has other open pull
+**The run sheet (items 171–173)** is `.sheet.run-sheet`: about three quarters of
+the window's width (1080 px at least, 1680 px at most, item 173), the prompt
+folded to a height that grows with the window (9 lines on a laptop, about 34
+on a tall screen); "Show all" opens it to fill the window. A review whose ticket has other open pull
 requests shows them in `.together`, ticked, and the Folder field follows the
 ticks, naming each folder. Its Agent list answers from the last one found
 (kept as `runner.found`) and looks again behind it, at most once a minute:

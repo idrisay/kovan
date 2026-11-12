@@ -1454,9 +1454,23 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 /* Folded (item 117): a few lines to glance at; "Show all" gives the full height. */
 .prompt-label textarea.folded { min-height: 0; }
 
-/* The run sheet, bigger (item 171): room for the prompt and for a ticket's
-   other pull requests, still clear of the window's edges. */
-.sheet.run-sheet { max-width: min(1080px, calc(100vw - 80px)); padding: 24px 28px; }
+/* The run sheet, bigger (item 171) and sized by the window (item 173): a
+   fixed 1080 px looked like a postcard on a wide screen. It takes about
+   three quarters of the width, never under 1080 px (bar the window's edges)
+   nor over 1680 px, where the prompt's lines would get too long to read. */
+.sheet.run-sheet {
+  max-width: min(1680px, max(1080px, 74vw), calc(100vw - 80px));
+  padding: 24px 28px;
+}
+/* Folded, the prompt still grows with the window's height: 9 lines on a
+   laptop, up to about 34 on a tall screen, so the sheet ends near the
+   bottom rather than a third of the way down. */
+.sheet.run-sheet .prompt-label textarea.folded {
+  height: clamp(170px, calc(100vh - 700px), 600px);
+}
+.sheet.run-sheet .prompt-label textarea:not(.folded) {
+  min-height: 240px; height: max(240px, calc(100vh - 440px));
+}
 .sheet.run-sheet .subject { font-size: 13px; }
 
 /* "Same ticket": the ticket's other open pull requests, to review together. */
