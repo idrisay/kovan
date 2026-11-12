@@ -133,6 +133,11 @@ export interface Subject {
   together?: { key: string; pulls: GroupReviewPull[]; context: PullSummary[] };
 }
 
+/** Where the last list of agents is kept between launches (item 172). */
+const RUNNERS_FOUND = 'runner.found';
+/** How long a list of agents is trusted before a look behind it. */
+const RUNNERS_FRESH_MS = 60_000;
+
 export class Agents {
   private readonly store: RunStore;
   private readonly http: HttpClient;
@@ -156,8 +161,43 @@ export class Agents {
     this.testEnvironments = new TestEnvironments(host);
   }
 
+  /**
+   * The agents on this machine (item 172). Finding them asks a login shell
+   * what each name is, which took 0.9 s, and 3.7 s the first time after
+   * launch, every time a run sheet opened. Now the last list answers at once
+   * and a fresh look runs behind it, at most once a minute, for next time. The
+   * list is kept in settings so the first sheet after a restart is quick too.
+   * A change to your own agents in Settings looks again straight away.
+   */
   runners(): Promise<Runner[]> {
-    return available(this.host.config.get('runner.custom', []) as Runner[]);
+    const custom = this.host.config.get('runner.custom', []) as Runner[];
+    const key = JSON.stringify(custom);
+    if (!this.runnerCache) {
+      const kept = this.host.config.get<{ key?: string; list?: Runner[] } | undefined>(RUNNERS_FOUND, undefined);
+      if (kept?.key === key && Array.isArray(kept.list) && kept.list.length > 0) {
+        this.runnerCache = { key, list: kept.list, at: 0 };
+      }
+    }
+    const cached = this.runnerCache;
+    if (cached && cached.key === key) {
+      if (Date.now() - cached.at > RUNNERS_FRESH_MS) void this.findRunners(custom, key).catch(() => undefined);
+      return Promise.resolve(cached.list);
+    }
+    return this.findRunners(custom, key);
+  }
+
+  private runnerCache?: { key: string; list: Runner[]; at: number };
+  private runnerLook?: Promise<Runner[]>;
+
+  private findRunners(custom: Runner[], key: string): Promise<Runner[]> {
+    this.runnerLook ??= available(custom)
+      .then(async (list) => {
+        this.runnerCache = { key, list, at: Date.now() };
+        await this.host.config.set(RUNNERS_FOUND, { key, list });
+        return list;
+      })
+      .finally(() => { this.runnerLook = undefined; });
+    return this.runnerLook;
   }
 
   /** Where a run can be started, from the watched folders and their clones. */

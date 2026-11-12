@@ -172,15 +172,38 @@ export function RunSheet({
   // still offered. Applied once per sheet, so it never fights a change you make.
   const isTicket = Boolean(issue) && !sentry;
   const recalled = useRef(false);
+  // Set once you change the folders yourself: nothing found later overrides you.
+  const foldersTouched = useRef(false);
   useEffect(() => {
     if (recalled.current || targets.length === 0) return;
     recalled.current = true;
-    const back = recallFolders(readChoices().folders, subjectId, isTicket, targets.map((t) => t.path));
-    if (back) {
+    const memory = readChoices().folders;
+    const offered = targets.map((t) => t.path);
+    const apply = (back: { cwd: string; extras: string[] } | undefined) => {
+      if (!back || foldersTouched.current) return;
       setCwd(back.cwd);
       setExtraCwds(back.extras);
+    };
+    // A ticket you never ran (item 172): the clones of the repositories its
+    // pull requests are in, open or merged, before the last ticket's folders,
+    // which belong to other work.
+    if (isTicket && issue && !memory.bySubject[subjectId]) {
+      void window.kovan.ticketPulls(issue.key).then((pulls) => {
+        const paths = [...new Set(pulls
+          .map((t) => targets.find((x) => x.label.toLowerCase() === t.pull.repo.toLowerCase())?.path)
+          .filter((p): p is string => Boolean(p)))];
+        apply(paths.length ? { cwd: paths[0]!, extras: paths.slice(1) } : recallFolders(memory, subjectId, isTicket, offered));
+      }).catch(() => apply(recallFolders(memory, subjectId, isTicket, offered)));
+      return;
     }
+    apply(recallFolders(memory, subjectId, isTicket, offered));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targets, subjectId, isTicket]);
+
+  // A pull request whose repository has no clone here (item 172): say so,
+  // rather than quietly starting in whichever folder comes first.
+  const noClone = Boolean(pull && targets.length > 0 &&
+    !targets.some((t) => t.label.toLowerCase() === pull.repo.toLowerCase()));
 
   // Never leave Folder empty while there are folders to offer: the default
   // above can come back empty (no clone matched, or the list was still being
@@ -362,6 +385,7 @@ export function RunSheet({
           <FolderField
             targets={targets} cwd={cwd} extras={extraCwds} runner={runner}
             onChange={(main, extras) => {
+              foldersTouched.current = true;
               setCwd(main);
               setExtraCwds(extras);
               writeChoices((c) => ({ ...c, folders: rememberFolders(c.folders, subjectId, isTicket, { cwd: main, extras }) }));
@@ -383,6 +407,13 @@ export function RunSheet({
             />
           )}
         </div>
+
+        {noClone && pull && (
+          <p className="quiet small run-note">
+            No clone of {pull.repo} in your folders, so it starts in {targets.find((t) => t.path === cwd)?.label ?? 'the first one'}.
+            {kind === 'review' ? ' A review reads the pull request through gh, so that is fine.' : ' Add its clone in the Workspace tab to work in it.'}
+          </p>
+        )}
 
         <TestEnvironmentPicker kind={kind} onChange={onTestChange} />
 
@@ -571,7 +602,13 @@ function FolderField({ targets, cwd, extras, runner, onChange }: {
     onChange(cwd, extras.includes(p) ? extras.filter((e) => e !== p) : [...extras, p]);
   }
 
-  const summary = !cwd ? 'Choose a folder' : extras.length ? `${label(cwd)} + ${extras.length} more` : label(cwd);
+  // Each folder by name (item 172), the start first; owners dropped when
+  // several are listed, since they are nearly always the same one.
+  const short = (p: string) => label(p).split('/').pop() ?? label(p);
+  const summary = !cwd ? 'Choose a folder'
+    : extras.length === 0 ? label(cwd)
+      : extras.length <= 2 ? chosen.map(short).join(' + ')
+        : `${chosen.slice(0, 2).map(short).join(' + ')} + ${chosen.length - 2} more`;
   const addDir = runner && ['claude', 'codex'].some((c) => runner.command.toLowerCase().includes(c));
 
   return (

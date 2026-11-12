@@ -726,6 +726,9 @@ export async function smokeUi(
   if (process.env['KOVAN_SMOKE_ITEM136'] && mode === 'seeded') {
     return { item136: await driveItem136(win, process.env['KOVAN_SMOKE_ITEM136']) };
   }
+  if (process.env['KOVAN_SMOKE_ITEM172'] && mode === 'seeded') {
+    return { item172: await driveItem172(win, process.env['KOVAN_SMOKE_ITEM172']) };
+  }
   if (process.env['KOVAN_SMOKE_ITEM171'] && mode === 'seeded') {
     return { item171: await driveItem171(win, process.env['KOVAN_SMOKE_ITEM171']) };
   }
@@ -5033,6 +5036,64 @@ async function driveItem171(win: BrowserWindow, prefix: string): Promise<Record<
   await pause(300);
   await writeFile(`${prefix}-unticked.png`, (await win.webContents.capturePage()).toPNG());
   console.log(`shot: ${prefix}-unticked.png`);
+  return report;
+}
+
+/**
+ * Item 172: the review sheet picks every ticked pull request's clone, named
+ * in the Folder field, and the Agent list is there at once the second time.
+ * Runs with KOVAN_SMOKE_ITEM171 set too, for ACME-2500's fixture.
+ */
+async function driveItem172(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const parent = mkdtempSync(path.join(os.tmpdir(), 'kovan-172-'));
+  for (const name of ['billing', 'web', 'jobs', 'infra']) {
+    const repo = path.join(parent, name);
+    mkdirSync(repo);
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+    git('init', '-q');
+    git('remote', 'add', 'origin', `git@github.com:acme/${name}.git`);
+    writeFileSync(path.join(repo, 'a.ts'), 'export const a = 1\n');
+  }
+  win.setSize(1600, 1040);
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `window.kovan.setSetting('repos.folders', [${JSON.stringify(parent)}])`);
+  await read(win, `window.kovan.runTargets(true)`);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).some(e => e.textContent === '205')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).find(e => e.textContent === '205')?.closest('button')?.click()`);
+  const open = async () => {
+    await until(win, `Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === 'Review in an agent')`, 8_000);
+    const t = Date.now();
+    await read(win, `Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Review in an agent')?.click()`);
+    await until(win, `document.querySelector('.run-controls select')?.options.length > 0`, 20_000);
+    return Date.now() - t;
+  };
+  const close = async () => {
+    await read(win, `document.querySelector('.sheet-head .icon-button')?.click()`);
+    await until(win, `!document.querySelector('.run-sheet')`, 3_000);
+  };
+  const report: Record<string, unknown> = { agentsFirstMs: await open() };
+  await until(win, `document.querySelector('.folder-button-text')?.textContent.includes('+')`, 10_000);
+  await pause(500);
+  const folders = () => read(win, `({ field: document.querySelector('.folder-field .run-field-label')?.textContent,
+    summary: document.querySelector('.folder-button-text')?.textContent,
+    note: document.querySelector('.folder-field .model-field-note')?.textContent ?? null })`);
+  report['folders'] = await folders();
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-folders.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-folders.png`);
+  await read(win, `Array.from(document.querySelectorAll('.together-row')).find(r => r.textContent.includes('#88'))?.querySelector('input').click()`);
+  await pause(500);
+  report['afterUntick88'] = await folders();
+  await close();
+  report['agentsSecondMs'] = await open();
+  await close();
+  report['agentsThirdMs'] = await open();
   return report;
 }
 

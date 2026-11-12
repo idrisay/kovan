@@ -120,10 +120,19 @@ class JsonConfig implements ConfigStore {
     return (preset !== undefined ? preset : fallback) as T;
   }
 
+  /** Saves in turn (item 172): two writes at once could finish out of order
+   *  and leave the file with the older copy, losing the newer setting. */
+  private writing: Promise<void> = Promise.resolve();
+
   async set<T>(key: string, value: T): Promise<void> {
     (this.values as unknown as Record<string, unknown>)[key] = value;
-    await fs.mkdir(path.dirname(this.file), { recursive: true });
-    await fs.writeFile(this.file, JSON.stringify(this.values, null, 2), 'utf8');
+    const write = this.writing.then(async () => {
+      await fs.mkdir(path.dirname(this.file), { recursive: true });
+      // Serialised when its turn comes, so the file always gets the latest values.
+      await fs.writeFile(this.file, JSON.stringify(this.values, null, 2), 'utf8');
+    });
+    this.writing = write.catch(() => undefined);
+    await write;
     this.changed.fire(key);
   }
 

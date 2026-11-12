@@ -499,6 +499,13 @@ folded, with a link saying what's hidden ("Show all 112 lines",
 "Change"). The run sheet's prompt, its test accounts and its plan limits
 (`AgentLimitsNote compact`) work this way.
 
+**The run sheet (items 171, 172)** is `.sheet.run-sheet`: 1080 px at most,
+the prompt folded to 9 lines. A review whose ticket has other open pull
+requests shows them in `.together`, ticked, and the Folder field follows the
+ticks, naming each folder. Its Agent list answers from the last one found
+(kept as `runner.found`) and looks again behind it, at most once a minute:
+finding agents asks a login shell and took seconds.
+
 ⌘F focuses the sidebar filter (except inside the code editor). ⌘P opens
 go-to-file (`QuickOpen.tsx`, item 100) from anywhere: recent files first
 (`rememberFile` records every file opened, however), fuzzy matching over the
