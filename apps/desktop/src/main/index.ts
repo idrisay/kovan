@@ -40,7 +40,7 @@ import { adoptImportedTokens } from './adopt';
 import { adoptBatonSecrets, copyBatonState } from './renamed';
 import {
   smokePty, smokeUi, type SmokeMode, detailFixture, diffFixture, fixtureSnapshot, sentryFramesFixture,
-  sentryTicketFixture, ticketFixture, teammatesFixture, personPullsFixture, personTicketsFixture
+  sentryTicketFixture, ticketFixture, teammatesFixture, personPullsFixture, personTicketsFixture, ticketPullsFixture
 } from './smoke';
 import { Sessions } from './sessions';
 import { ReviewTools } from './reviewTools';
@@ -819,6 +819,13 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:test-environments', () => agents.testEnvironments.state());
   ipcMain.handle('kovan:test-environments-save', (_event, next: TestEnvironmentSave) =>
     agents.testEnvironments.save(next)
+  );
+  ipcMain.handle('kovan:ticket-pulls', (_event, key: unknown) =>
+    smokeFixtures ? ticketPullsFixture(String(key)) : poller.ticketPulls(String(key)).catch((err) => {
+      // A sheet that can't find the rest still reviews the one you opened.
+      host.log.warn(`ticket pulls for ${String(key)} failed`, err);
+      return [];
+    })
   );
   ipcMain.handle('kovan:default-cwd', (_event, repo?: string) => agents.defaultCwd(repo));
   ipcMain.handle('kovan:start-agent', async (_event, request, subject) => {

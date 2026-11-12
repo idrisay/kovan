@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DictateButton } from './Dictation';
 import { useMenuDismiss } from './menuDismiss';
 import {
-  folderMemoryFrom, formatAge, modelFamily, recallFolders, rememberFolders, type FolderMemory, type ModelFamily
+  folderMemoryFrom, formatAge, modelFamily, recallFolders, rememberFolders, ticketKeyInTitle, type FolderMemory, type ModelFamily
 } from '@kovan/core';
+import type { TicketPull } from '@kovan/providers';
 import type {
   JiraIssue, ModelList, PullSummary, RunKind, Runner, RunnerLimits, RunTarget, SentryFrame, SentryIssue, StartResult, TestSelection
 } from './types';
@@ -100,7 +101,49 @@ export function RunSheet({
   const [promptOpen, setPromptOpen] = useState(() => recall(PROMPT_OPEN_KEY));
   const firstBuild = useRef(true);
 
-  const subject = { pull, issue, sentry };
+  // Item 171: a review offers the ticket's other open pull requests, ticked,
+  // to review in the same session. Asked of GitHub once, when the sheet opens.
+  const ticketKey = kind === 'review' && pull && !issue && !sentry
+    ? ticketKeyInTitle(pull.title) || ticketKeyInTitle((pull.headRef ?? '').toUpperCase())
+    : '';
+  const [siblings, setSiblings] = useState<TicketPull[]>();
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const pullId = (p: { repo: string; number: number }) => `${p.repo}#${p.number}`;
+  useEffect(() => {
+    if (!ticketKey || !pull) return;
+    let live = true;
+    void window.kovan.ticketPulls(ticketKey).then((all) => {
+      if (!live) return;
+      setSiblings(all);
+      // Ticked: every other open one, except one you already reviewed that
+      // has nothing new since. That one stays unticked until you tick it.
+      setPicked(new Set(all
+        .filter((t) => pullId(t.pull) !== pullId(pull) && !t.pull.mergedAt)
+        .filter((t) => !t.yourReview || t.changedSinceYourReview)
+        .map((t) => pullId(t.pull))));
+    }).catch(() => { if (live) setSiblings([]); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketKey, pull?.repo, pull?.number]);
+  const others = (siblings ?? []).filter((t) => pull && pullId(t.pull) !== pullId(pull));
+  const openOthers = others.filter((t) => !t.pull.mergedAt);
+  const mergedOthers = others.filter((t) => t.pull.mergedAt);
+  const own = siblings?.find((t) => pull && pullId(t.pull) === pullId(pull));
+  const pickedKey = [...picked].sort().join(',');
+  const together = useMemo(() => {
+    if (!pull || picked.size === 0) return undefined;
+    const strip = (t: TicketPull) => ({
+      pull: t.pull, ...(t.yourReview ? { yourReview: t.yourReview } : {}), changedSinceYourReview: t.changedSinceYourReview
+    });
+    return {
+      key: ticketKey,
+      pulls: [own ? strip(own) : { pull }, ...openOthers.filter((t) => picked.has(pullId(t.pull))).map(strip)],
+      context: mergedOthers.map((t) => t.pull)
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickedKey, siblings]);
+
+  const subject = { pull, issue, sentry, ...(together ? { together } : {}) };
   const subjectId = sentry ? sentry.issue.shortId : issue ? issue.key : pull ? `${pull.repo}#${pull.number}` : '';
   const runner = runners.find((r) => r.id === runnerId);
   // Read once when the sheet opens: files the agents wrote, no requests (item 108).
@@ -156,9 +199,40 @@ export function RunSheet({
       setEdited(false);
       setStale(false);
     });
-    // `subject` is rebuilt every render; the sheet is keyed by kind and subject.
+    // `subject` is rebuilt every render; the sheet is keyed by kind and subject,
+    // and by which pull requests are reviewed together (item 171).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, subjectId]);
+  }, [kind, subjectId, together]);
+
+  // Ticking or unticking a pull request rewrites the prompt, unless you have
+  // edited it: then the note offers to rebuild, as an environment change does.
+  const firstTogether = useRef(true);
+  useEffect(() => {
+    if (firstTogether.current) { firstTogether.current = false; return; }
+    if (firstBuild.current) return;
+    if (edited) setStale(true);
+    else rebuild(test);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [together]);
+
+  // The clone of each ticked pull request's repository joins the folders, and
+  // leaves again when unticked; only the ones added here, never yours.
+  const autoFolders = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!siblings || targets.length === 0) return;
+    const want = new Set(
+      openOthers.filter((t) => picked.has(pullId(t.pull)))
+        .map((t) => targets.find((x) => x.label.toLowerCase() === t.pull.repo.toLowerCase())?.path)
+        .filter((p): p is string => Boolean(p))
+    );
+    setExtraCwds((current) => {
+      const kept = current.filter((p) => !autoFolders.current.has(p) || want.has(p));
+      const added = [...want].filter((p) => p !== cwd && !kept.includes(p));
+      autoFolders.current = new Set([...[...autoFolders.current].filter((p) => want.has(p)), ...added]);
+      return added.length || kept.length !== current.length ? [...kept, ...added] : current;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickedKey, siblings, targets, cwd]);
 
   const onTestChange = useCallback((selection: TestSelection | undefined) => {
     setTest(selection);
@@ -212,7 +286,7 @@ export function RunSheet({
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet wide" onClick={(e) => e.stopPropagation()}>
+      <div className="sheet wide run-sheet" onClick={(e) => e.stopPropagation()}>
         <header className="sheet-head">
           <h2>{sentry ? 'Fix in an agent' : KIND_LABEL[kind]}</h2>
           <button type="button" className="icon-button boxed" aria-label="Close" title="Close" onClick={onClose}>
@@ -223,6 +297,47 @@ export function RunSheet({
         <p className="subject">
           {sentry ? `${sentry.issue.shortId} — ${sentry.issue.title}` : issue ? `${issue.key} — ${issue.summary}` : pull?.title}
         </p>
+
+        {ticketKey && openOthers.length > 0 && pull && (
+          <section className="together" aria-label={`Other pull requests for ${ticketKey}`}>
+            <div className="together-head">
+              <span className="together-key">Same ticket · {ticketKey}</span>
+              <span className="together-ask">
+                {openOthers.length === 1 ? '1 more open pull request' : `${openOthers.length} more open pull requests`}. Review them together?
+              </span>
+            </div>
+            <label className="together-row">
+              <input type="checkbox" checked disabled />
+              <span className="together-id">{shortRepo(pull.repo)}#{pull.number}</span>
+              <span className="together-title">{pull.title}</span>
+              <span className="together-state">this one</span>
+            </label>
+            {openOthers.map((t) => {
+              const id = pullId(t.pull);
+              return (
+                <label key={id} className="together-row">
+                  <input
+                    type="checkbox" checked={picked.has(id)}
+                    onChange={(e) => setPicked((s) => {
+                      const next = new Set(s);
+                      if (e.target.checked) next.add(id); else next.delete(id);
+                      return next;
+                    })}
+                  />
+                  <span className="together-id">{shortRepo(t.pull.repo)}#{t.pull.number}</span>
+                  <span className="together-title">{t.pull.title}</span>
+                  <span className={`together-state ${reviewTone(t)}`}>{reviewState(t)}</span>
+                </label>
+              );
+            })}
+            {mergedOthers.length > 0 && (
+              <p className="together-note">
+                Already merged, not reviewed again: {mergedOthers.map((t) => `${shortRepo(t.pull.repo)}#${t.pull.number}`).join(', ')}
+                {picked.size > 0 ? ' (read as context).' : '.'}
+              </p>
+            )}
+          </section>
+        )}
 
         <div className="run-controls">
           <label>
@@ -277,7 +392,7 @@ export function RunSheet({
             Prompt — edit before sending if you want
             {stale && (
               <>
-                {' · '}the environment changed after you edited it.{' '}
+                {' · '}the environment or the pull requests changed after you edited it.{' '}
                 <button type="button" className="link" onClick={() => rebuild(test)}>Rebuild prompt</button>
               </>
             )}
@@ -297,7 +412,7 @@ export function RunSheet({
               value={prompt}
               onChange={(e) => { setPrompt(e.target.value); setEdited(true); }}
               spellCheck={false}
-              rows={promptOpen ? 18 : 5}
+              rows={promptOpen ? 28 : 9}
               className={promptOpen ? undefined : 'folded'}
             />
             <DictateButton field={() => document.getElementById('run-prompt')} label="Dictate into the prompt" />
@@ -308,15 +423,37 @@ export function RunSheet({
 
         <footer className="sheet-foot">
           <span className="quiet small">
-            Filed under {subjectId} · the agent writes its report back here
+            {together
+              ? `One session · one review per pull request · filed under ${subjectId}`
+              : `Filed under ${subjectId} · the agent writes its report back here`}
           </span>
           <button className="primary" disabled={busy || !runnerId || !cwd} onClick={() => void start()}>
-            {busy ? 'Starting…' : 'Run'}
+            {busy ? 'Starting…' : together ? `Review ${together.pulls.length} together` : 'Run'}
           </button>
         </footer>
       </div>
     </div>
   );
+}
+
+/** `acme/acme-backend` → `acme-backend`: the owner is the same on every row. */
+function shortRepo(repo: string): string {
+  return repo.split('/').pop() ?? repo;
+}
+
+/** Where you left another pull request of the ticket, in a word or two. */
+function reviewState(t: TicketPull): string {
+  if (t.pull.isDraft) return 'draft';
+  const said = t.yourReview === 'APPROVED' ? 'you approved'
+    : t.yourReview === 'CHANGES_REQUESTED' ? 'you requested changes'
+      : t.yourReview ? 'you commented' : '';
+  if (!said) return 'awaiting review';
+  return t.changedSinceYourReview ? `${said} · new commits` : `${said} · nothing new`;
+}
+
+function reviewTone(t: TicketPull): string {
+  if (!t.yourReview) return 'waiting';
+  return t.changedSinceYourReview ? 'changed' : '';
 }
 
 const OTHER = '__other__';

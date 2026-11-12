@@ -21,6 +21,8 @@ import {
   testingClause,
   renderIssuePrompt,
   renderPullPrompt,
+  renderGroupReviewPrompt,
+  type GroupReviewPull,
   renderSentryPrompt,
   ticketKeyInTitle,
   TICKET_RECENT_COMMENTS,
@@ -124,6 +126,11 @@ export interface Subject {
   pull?: PullSummary;
   issue?: JiraIssue;
   sentry?: { issue: SentryIssue; frames: SentryFrame[] };
+  /**
+   * A review of several pull requests for one ticket (item 171): the others
+   * reviewed with `pull`, and merged ones read for context. Only on a review.
+   */
+  together?: { key: string; pulls: GroupReviewPull[]; context: PullSummary[] };
 }
 
 export class Agents {
@@ -227,6 +234,14 @@ export class Agents {
         },
         { reviewers, conventions }
       );
+    }
+
+    if (kind === 'review' && subject.together && subject.together.pulls.length > 0) {
+      const own = subject.together.pulls.find((p) => p.pull.repo === subject.pull!.repo && p.pull.number === subject.pull!.number);
+      return renderGroupReviewPrompt(subject.together.key, [own ?? { pull: subject.pull }, ...subject.together.pulls.filter((p) => p !== own)], {
+        context: subject.together.context,
+        reviewers
+      });
     }
 
     const template =

@@ -353,6 +353,66 @@ export function substitute(template: string, values: Record<string, string>): st
 }
 
 /** The ticket key in a pull request title, e.g. `PROJ-1234`. */
+/**
+ * Several pull requests for one ticket, reviewed in one go (item 171). Same
+ * rules as the single review (item 169: a verdict, never just a comment),
+ * plus the part only a joint review can do: whether the pull requests fit
+ * each other.
+ */
+export const DEFAULTGROUPREVIEWTEMPLATE = `Review these \${count} pull requests together, using gh. They implement one ticket, \${key}:
+
+\${pulls}
+\${context}
+Read the ticket first. Then each pull request: its description, its threads and its diff. Check a diff's size first with \`gh pr diff <number> --repo <repo> --stat\`. Read a small one whole, a large one file by file.
+
+Then review them as one change. Beyond what each gets right or wrong on its own, check that they fit each other: what one serves is what the other calls (endpoints, request and response fields, names, types, error cases), nothing one needs is missing from the others, and the order they have to merge or deploy in. Say that order in the report.
+
+\${reviewers}
+Then submit one review on each pull request, as my review, folding in everything you confirmed. A problem between two pull requests goes on both, each naming the other (repo#number).
+
+Each review must approve or request changes, never just comment: \`gh pr review <number> --repo <repo> --approve\` when nothing in that pull request has to change before it merges, \`--request-changes\` when anything does. Approving one and requesting changes on another is fine when that is what you found. Only if GitHub refuses a verdict, as it does on my own pull request, submit that one as a comment and say why in the report.
+
+\${attribution}
+
+\${report}`;
+
+/** How you last left a pull request, for the group prompt's list. */
+export interface GroupReviewPull {
+  pull: Pick<PullSummary, 'url' | 'repo' | 'number' | 'title' | 'author'>;
+  yourReview?: string;
+  changedSinceYourReview?: boolean;
+}
+
+function earlierReview(p: GroupReviewPull): string {
+  const said = p.yourReview === 'APPROVED' ? 'approved' : p.yourReview === 'CHANGES_REQUESTED' ? 'requested changes on' : p.yourReview ? 'commented on' : '';
+  if (!said) return '';
+  return p.changedSinceYourReview
+    ? ` (I ${said} it before; it has new commits since: review what changed, and whether my earlier points were addressed)`
+    : ` (I ${said} it before, with no new commits since)`;
+}
+
+export function renderGroupReviewPrompt(
+  key: string,
+  pulls: readonly GroupReviewPull[],
+  options: { context?: readonly Pick<PullSummary, 'url' | 'title'>[]; reviewers?: string[]; template?: string } = {}
+): string {
+  const reviewers = options.reviewers ?? [];
+  const context = options.context ?? [];
+  return substitute(options.template || DEFAULTGROUPREVIEWTEMPLATE, {
+    count: String(pulls.length),
+    key,
+    pulls: pulls.map((p) => `- ${p.pull.url} — ${p.pull.title} (by ${p.pull.author})${earlierReview(p)}`).join('\n'),
+    context: context.length
+      ? `\nAlready merged for this ticket. Read them for context, don't review them:\n${context.map((c) => `- ${c.url} — ${c.title}`).join('\n')}\n`
+      : '',
+    reviewers: reviewers.length
+      ? `Have ${list(reviewers)} review each pull request on its own, one run per pull request since each takes one diff, and fold in what they find.`
+      : '',
+    attribution: ATTRIBUTIONRULE,
+    report: REPORTRULE
+  });
+}
+
 export function ticketKeyInTitle(title: string, pattern = '[A-Z][A-Z0-9]+-\\d+'): string {
   return new RegExp(pattern).exec(title)?.[0] ?? '';
 }

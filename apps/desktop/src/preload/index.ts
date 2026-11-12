@@ -135,6 +135,7 @@ const api = {
     ipcRenderer.invoke('kovan:build-prompt', kind, subject, test),
   testEnvironments: () => ipcRenderer.invoke('kovan:test-environments'),
   testEnvironmentsSave: (next: unknown) => ipcRenderer.invoke('kovan:test-environments-save', next),
+  ticketPulls: (key: string) => ipcRenderer.invoke('kovan:ticket-pulls', key),
   defaultCwd: (repo?: string) => ipcRenderer.invoke('kovan:default-cwd', repo),
   startAgent: (request: unknown, subject: unknown) =>
     ipcRenderer.invoke('kovan:start-agent', request, subject),

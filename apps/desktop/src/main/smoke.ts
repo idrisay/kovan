@@ -110,7 +110,8 @@ const OPEN_PULLS = [
 /** Someone else's pull request, waiting on the viewer's review. */
 const REVIEW_PULL = {
   ...FIXTURE,
-  headRef: 'feat/unrelated-change',
+  // Item 171's smoke needs a ticket on it; every other run keeps it ticketless.
+  headRef: process.env['KOVAN_SMOKE_ITEM171'] ? 'feat/ACME-2500-invoice-pdf' : 'feat/unrelated-change',
   number: 205,
   title: 'Split the invoice PDF generator out of the request path',
   repo: 'acme/billing',
@@ -221,6 +222,21 @@ export function personPullsFixture(login: string, merged: number): PersonPulls {
     merged: mergedFixture(Math.min(merged, 4)).map((p) => ({ ...p, author: login })),
     mergedTotal: 4
   };
+}
+
+/** ACME-2500's pull requests, for "Review together" (item 171). */
+export function ticketPullsFixture(key: string) {
+  if (key !== 'ACME-2500') return [];
+  const at = (n: number, extra: Partial<PullSummary>): PullSummary => ({
+    ...REVIEW_PULL, number: n, url: `https://example.invalid/pr/${n}`, ...extra
+  });
+  return [
+    { pull: REVIEW_PULL, changedSinceYourReview: false },
+    { pull: at(88, { repo: 'acme/web', title: 'ACME-2500 Invoice download button uses the new PDF endpoint' }), changedSinceYourReview: false },
+    { pull: at(311, { repo: 'acme/jobs', title: 'ACME-2500 Render invoice PDFs on the worker queue' }), yourReview: 'CHANGES_REQUESTED', changedSinceYourReview: true },
+    { pull: at(12, { repo: 'acme/infra', title: 'ACME-2500 Worker queue for PDF jobs' }), yourReview: 'APPROVED', changedSinceYourReview: false },
+    { pull: at(80, { repo: 'acme/billing', title: 'ACME-2500 Invoice PDF template', mergedAt: new Date(Date.now() - 86_400_000).toISOString() }), yourReview: 'APPROVED', changedSinceYourReview: false }
+  ];
 }
 
 export function personTicketsFixture() {
@@ -709,6 +725,9 @@ export async function smokeUi(
   }
   if (process.env['KOVAN_SMOKE_ITEM136'] && mode === 'seeded') {
     return { item136: await driveItem136(win, process.env['KOVAN_SMOKE_ITEM136']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM171'] && mode === 'seeded') {
+    return { item171: await driveItem171(win, process.env['KOVAN_SMOKE_ITEM171']) };
   }
   if (process.env['KOVAN_SMOKE_ITEM165'] && mode === 'seeded') {
     return { item165: await driveItem165(win, process.env['KOVAN_SMOKE_ITEM165']) };
@@ -4971,6 +4990,52 @@ async function driveItem124(win: BrowserWindow, prefix: string): Promise<Record<
  * window's opens the diff in that same window, not in a new one for the
  * other workspace.
  */
+/**
+ * Item 171: the review sheet of a pull request whose ticket has more open
+ * ones lists them ticked (one you reviewed with nothing new, unticked), the
+ * prompt names them all, and unticking one takes it back out.
+ */
+async function driveItem171(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.setSize(1600, 1040);
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).some(e => e.textContent === '205')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).find(e => e.textContent === '205')?.closest('button')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === 'Review in an agent')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Review in an agent')?.click()`);
+  await until(win, `document.querySelector('.together')`, 10_000);
+  await until(win, `document.getElementById('run-prompt')?.value.includes('together')`, 10_000);
+  await pause(600);
+  const state = () => read(win, `(() => {
+    const rows = Array.from(document.querySelectorAll('.together-row')).map((r) => ({
+      id: r.querySelector('.together-id')?.textContent, checked: r.querySelector('input').checked,
+      disabled: r.querySelector('input').disabled, state: r.querySelector('.together-state')?.textContent }));
+    const prompt = document.getElementById('run-prompt').value;
+    const sheet = document.querySelector('.sheet').getBoundingClientRect();
+    return { rows, note: document.querySelector('.together-note')?.textContent ?? null,
+      button: document.querySelector('.sheet-foot .primary')?.textContent, sheetWidth: Math.round(sheet.width), windowWidth: innerWidth,
+      promptHead: prompt.split('\\n').slice(0, 7).join('\\n'),
+      names: ['/pr/205', '/pr/88', '/pr/311', '/pr/12', '/pr/80'].filter((u) => prompt.includes(u)) };
+  })()`);
+  const report: Record<string, unknown> = { ticked: await state() };
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-ticked.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-ticked.png`);
+  // Untick acme/web#88: out of the prompt and the button's count.
+  await read(win, `Array.from(document.querySelectorAll('.together-row')).find(r => r.textContent.includes('#88'))?.querySelector('input').click()`);
+  await until(win, `!document.getElementById('run-prompt').value.includes('/pr/88')`, 5_000);
+  await pause(400);
+  report['unticked'] = await state();
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-unticked.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-unticked.png`);
+  return report;
+}
+
 async function driveItem165(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const { execFileSync } = await import('node:child_process');

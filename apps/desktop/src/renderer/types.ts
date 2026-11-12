@@ -1,7 +1,7 @@
 import type {
-  ActivityEvent, GitHubBudget, QuickCommand, JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport, ReviewTool, AgentFamily, PersonPulls, PersonTickets, Teammate
+  ActivityEvent, GitHubBudget, QuickCommand, JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport, ReviewTool, AgentFamily, PersonPulls, PersonTickets, Teammate, GroupReviewPull
 } from '@kovan/core';
-import type { PullDetail, ReviewComment, ReviewThread, Reviewer } from '@kovan/providers';
+import type { PullDetail, ReviewComment, ReviewThread, Reviewer, TicketPull } from '@kovan/providers';
 import type { AgentRun, RunFile, Runner, RunKind } from '@kovan/agent';
 import type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus, RunTarget
@@ -109,6 +109,11 @@ export interface Subject {
   pull?: PullSummary;
   issue?: JiraIssue;
   sentry?: { issue: SentryIssue; frames: SentryFrame[] };
+  /**
+   * A review of several pull requests for one ticket (item 171): the others
+   * reviewed with `pull`, and merged ones read for context. Only on a review.
+   */
+  together?: { key: string; pulls: GroupReviewPull[]; context: PullSummary[] };
 }
 
 export interface KovanApi {
@@ -223,6 +228,8 @@ export interface KovanApi {
   /** Environments and test accounts. Passwords never come back — only which are saved. */
   testEnvironments(): Promise<TestEnvironmentState>;
   testEnvironmentsSave(next: TestEnvironmentSave): Promise<TestEnvironmentState>;
+  /** A ticket's open and merged pull requests, for a review of them together (item 171). */
+  ticketPulls(key: string): Promise<TicketPull[]>;
   defaultCwd(repo?: string): Promise<string | undefined>;
   startAgent(
     request: {

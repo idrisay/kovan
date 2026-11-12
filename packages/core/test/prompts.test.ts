@@ -139,3 +139,38 @@ describe('the verify prompt', () => {
     expect(withWall).toContain('KOVAN_ENV_BASIC_USER');
   });
 });
+
+describe('reviewing a ticket\'s pull requests together (item 171)', () => {
+  const backend = { url: 'https://github.com/acme/acme-backend/pull/963', repo: 'acme/acme-backend', number: 963, title: 'feat/ACME-2769 Stream answers on request', author: 'alice-dev' };
+  const frontend = { url: 'https://github.com/acme/acme-frontend/pull/2989', repo: 'acme/acme-frontend', number: 2989, title: 'feat/ACME-2769 Stream Foxy chat answers', author: 'alice-dev' };
+
+  it('names every pull request, asks whether they fit, and a verdict on each', async () => {
+    const { renderGroupReviewPrompt } = await import('../src/prompts');
+    const prompt = renderGroupReviewPrompt('ACME-2769', [{ pull: backend }, { pull: frontend }], {
+      context: [{ url: 'https://github.com/acme/ai-service/pull/118', title: 'Stream as SSE' }],
+      reviewers: ['nv-review']
+    });
+    expect(prompt).toContain('Review these 2 pull requests together');
+    expect(prompt).toContain('ACME-2769');
+    expect(prompt).toContain(backend.url);
+    expect(prompt).toContain(frontend.url);
+    expect(prompt).toContain("Read them for context, don't review them:\n- https://github.com/acme/ai-service/pull/118");
+    expect(prompt).toContain('fit each other');
+    expect(prompt).toContain('one review on each pull request');
+    expect(prompt).toContain('--approve');
+    expect(prompt).toContain('--request-changes');
+    expect(prompt).toContain('never just comment');
+    expect(prompt).toContain('nv-review review each pull request on its own');
+    expect(prompt).not.toMatch(/\$\{\w+\}/);
+  });
+
+  it('says how you left one you reviewed before', async () => {
+    const { renderGroupReviewPrompt } = await import('../src/prompts');
+    const prompt = renderGroupReviewPrompt('ACME-2769', [
+      { pull: backend },
+      { pull: frontend, yourReview: 'CHANGES_REQUESTED', changedSinceYourReview: true }
+    ]);
+    expect(prompt).toContain('I requested changes on it before; it has new commits since');
+    expect(prompt).not.toContain('Already merged');
+  });
+});

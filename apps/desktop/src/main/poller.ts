@@ -28,7 +28,7 @@ import {
   type SentryIssue,
   type GitHubBudget
 } from '@kovan/core';
-import { Credentials, GitHubClient, HttpClient, JiraClient, SentryClient } from '@kovan/providers';
+import { Credentials, GitHubClient, HttpClient, JiraClient, SentryClient, type TicketPull } from '@kovan/providers';
 import { findClones } from '@kovan/git';
 import { EventEmitter } from '@kovan/host';
 import type { DesktopHost } from './host';
@@ -377,6 +377,23 @@ export class Poller {
     }
     this.teammateCache.set(service, { at: Date.now(), people });
     return people;
+  }
+
+  /**
+   * A ticket's pull requests (item 171), for "Review together": under the
+   * owners of your repositories and of the pull requests in your queues.
+   * Asked when the review sheet opens, never on a timer.
+   */
+  async ticketPulls(key: string): Promise<TicketPull[]> {
+    const client = await this.github();
+    const repos = await this.scopedRepos();
+    const own = [...this.snapshot.mine, ...this.snapshot.reviewRequested, ...this.snapshot.merged];
+    const owners = [...new Set([
+      ...(repos ?? []).map((r) => r.owner),
+      ...own.map((p) => p.repo.split('/')[0] ?? '')
+    ].filter(isGitHubLogin))];
+    if (owners.length === 0) return [];
+    return client.ticketPulls(key, owners);
   }
 
   /** A teammate's pull requests, in your queues' scope (item 164). */

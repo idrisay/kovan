@@ -3,6 +3,7 @@ import {
   buildPullSearch,
   checkRunStatus,
   graphqlEndpoint,
+  pullMentionsTicket,
   reviewDecisionFrom,
   summaryFromApi,
   withinScope,
@@ -128,6 +129,35 @@ const ACTIVITY_FIELDS = `
 const MERGED_FIELDS = PULL_FIELDS
   .replace('  reviewThreads(first: 100) { nodes { isResolved } }\n', '')
   .replace(CHECKS_FIELD, '  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }');
+
+/** One ticket's pull requests (item 171). */
+export interface TicketPull {
+  pull: PullSummary;
+  /** Your latest review on it, as GitHub names it: APPROVED, CHANGES_REQUESTED, COMMENTED. */
+  yourReview?: string;
+  /** Commits pushed after your latest review. */
+  changedSinceYourReview: boolean;
+}
+
+type TicketPullNode = ApiPullNode & {
+  closed?: boolean;
+  headRefOid?: string;
+  viewerLatestReview?: { state?: string; commit?: { oid?: string } | null } | null;
+};
+
+const TICKET_PULLS_QUERY = `
+query KovanTicketPulls($q: String!) {
+  search(query: $q, type: ISSUE, first: 20) {
+    nodes {
+      ... on PullRequest {
+${MERGED_FIELDS}
+        closed
+        headRefOid
+        viewerLatestReview { state commit { oid } }
+      }
+    }
+  }
+}`;
 
 const QUEUES_QUERY = `
 query KovanPullQueues($mine: String!, $review: String!, $merged: String!,
@@ -485,6 +515,45 @@ export class GitHubClient {
       // Seen, not counted: open ones are already counted above.
       ...read(response.data?.recent?.nodes, recent.allow, false)
     ];
+  }
+
+  /**
+   * Every pull request carrying a ticket's key in its title, under these
+   * owners (item 171): what "Review together" offers beside the one you
+   * opened. By owner rather than by your listed repositories, so a ticket's
+   * PR in a repository you never cloned (acme-console) still shows. Open and
+   * merged ones; a PR closed without merging is dropped. Says, for each, how
+   * you last reviewed it and whether it has commits since.
+   */
+  async ticketPulls(key: string, owners: readonly string[], signal?: CancelSignal): Promise<TicketPull[]> {
+    if (!/^[A-Za-z][A-Za-z0-9]*-\d+$/.test(key)) return [];
+    const query = [`is:pr "${key}" in:title`, ...owners.map((o) => `user:${o}`), 'sort:updated-desc'].join(' ');
+    const response = await this.http.json<{
+      data?: { search?: { nodes?: (TicketPullNode | null)[] | null } };
+      errors?: { message: string }[];
+    }>(graphqlEndpoint(this.baseUrl), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/vnd.github+json' },
+      body: { query: TICKET_PULLS_QUERY, variables: { q: query } },
+      signal
+    });
+    if (response.errors?.length) {
+      throw new Error(response.errors.map((e) => e.message).join('; '));
+    }
+    return (response.data?.search?.nodes ?? [])
+      .filter((n): n is TicketPullNode => Boolean(n?.number))
+      .filter((n) => !n.closed || Boolean(n.mergedAt))
+      .map((n) => {
+        const pull = summaryFromApi(n);
+        const review = n.viewerLatestReview;
+        return {
+          pull,
+          ...(review?.state ? { yourReview: review.state } : {}),
+          changedSinceYourReview: Boolean(review?.commit?.oid && n.headRefOid && review.commit.oid !== n.headRefOid)
+        };
+      })
+      // GitHub matches words, so ACME-24 can find ACME-240: the key must be whole.
+      .filter((t) => pullMentionsTicket(t.pull, key));
   }
 
   async verify(signal?: CancelSignal): Promise<string> {
