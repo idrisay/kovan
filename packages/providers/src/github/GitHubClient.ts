@@ -70,6 +70,19 @@ interface RawPull {
   updated_at: string;
 }
 
+/**
+ * The head commit's checks: GitHub's rolled-up state, and each run with its
+ * workflow and start, so the newest run of a check can outvote an older one
+ * (item 170, see currentCheckContexts).
+ */
+const CHECKS_FIELD = `  commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 50) {
+    pageInfo { hasNextPage }
+    nodes {
+      ... on CheckRun { name status conclusion startedAt completedAt checkSuite { workflowRun { workflow { name } } } }
+      ... on StatusContext { context state }
+    }
+  } } } } }`;
+
 const PULL_FIELDS = `
   number
   title
@@ -89,7 +102,7 @@ const PULL_FIELDS = `
   latestOpinionatedReviews(first: 20) { nodes { state author { login } } }
   reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
   reviewThreads(first: 100) { nodes { isResolved } }
-  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+${CHECKS_FIELD}
 `;
 
 /**
@@ -111,7 +124,10 @@ const ACTIVITY_FIELDS = `
 `;
 
 /** A merged row shows neither review threads nor activity. */
-const MERGED_FIELDS = PULL_FIELDS.replace('  reviewThreads(first: 100) { nodes { isResolved } }\n', '');
+/** Nor checks: a merged pull request's flag is "Merged", whatever ran on it. */
+const MERGED_FIELDS = PULL_FIELDS
+  .replace('  reviewThreads(first: 100) { nodes { isResolved } }\n', '')
+  .replace(CHECKS_FIELD, '  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }');
 
 const QUEUES_QUERY = `
 query KovanPullQueues($mine: String!, $review: String!, $merged: String!,

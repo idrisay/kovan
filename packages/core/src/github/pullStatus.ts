@@ -370,6 +370,91 @@ export function checksFromRollup(value: string | null | undefined): CheckRollup 
   }
 }
 
+/**
+ * One entry of `statusCheckRollup.contexts`: a GitHub Actions (or app) check
+ * run, or a commit status posted through the statuses API.
+ */
+export interface ApiCheckContext {
+  name?: string;
+  status?: string | null;
+  conclusion?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  detailsUrl?: string | null;
+  checkSuite?: { workflowRun?: { workflow?: { name?: string | null } | null } | null } | null;
+  context?: string;
+  state?: string | null;
+  targetUrl?: string | null;
+}
+
+/** A check context's own state, from GraphQL's upper-case enums. */
+export function checkContextStatus(node: ApiCheckContext): 'pending' | 'success' | 'failure' | 'neutral' {
+  if (typeof node.name === 'string' && node.status !== 'COMPLETED') return 'pending';
+  switch (String(node.conclusion ?? node.state ?? '').toUpperCase()) {
+    case 'SUCCESS':
+      return 'success';
+    case 'FAILURE':
+    case 'ERROR':
+    case 'TIMED_OUT':
+    case 'CANCELLED':
+    case 'STARTUP_FAILURE':
+    case 'ACTION_REQUIRED':
+      return 'failure';
+    case 'PENDING':
+    case 'EXPECTED':
+    case 'IN_PROGRESS':
+    case 'QUEUED':
+    case 'WAITING':
+    case 'REQUESTED':
+      return 'pending';
+    default:
+      return 'neutral';
+  }
+}
+
+/**
+ * The checks that still count: the newest run of each check (item 170).
+ *
+ * A workflow that runs on more than one event (a migration gate that runs on
+ * `pull_request` and again on `pull_request_review`) leaves a run per event on
+ * the same commit. GitHub's own `statusCheckRollup.state` counts all of them,
+ * so a gate that failed before the approvals and passed after them still
+ * reads FAILURE, and the pull request sat in "Blocked on you" though nothing
+ * was left to do. GitHub's merge box, like a required check, goes by the
+ * newest run; so does this. Runs are told apart by workflow and job name, so
+ * two workflows that happen to name a job alike stay two checks. A commit
+ * status is already only its newest state per context.
+ */
+export function currentCheckContexts<T extends ApiCheckContext>(nodes: readonly (T | null | undefined)[]): T[] {
+  const newest = new Map<string, T>();
+  const order: string[] = [];
+  for (const node of nodes) {
+    if (!node) continue;
+    let key: string;
+    if (typeof node.name === 'string') {
+      key = `run\u0000${node.checkSuite?.workflowRun?.workflow?.name ?? ''}\u0000${node.name}`;
+    } else if (typeof node.context === 'string') {
+      key = `status\u0000${node.context}`;
+    } else {
+      continue;
+    }
+    const held = newest.get(key);
+    if (!held) {
+      order.push(key);
+      newest.set(key, node);
+    } else if (startOf(node) >= startOf(held)) {
+      newest.set(key, node);
+    }
+  }
+  return order.map((key) => newest.get(key)!);
+}
+
+/** When a run started; a queued run has no start yet and is the newest. */
+function startOf(node: ApiCheckContext): string {
+  if (typeof node.name !== 'string') return '';
+  return node.startedAt ?? node.completedAt ?? '\uffff';
+}
+
 /** `comments(last: 1) { totalCount nodes { author createdAt } }` */
 export interface ApiCommentPage {
   totalCount?: number;
@@ -434,13 +519,38 @@ export interface ApiPullNode {
   comments?: ApiCommentPage | null;
   reviews?: ApiReviewPage | null;
   commits?: {
-    nodes?: ({ commit?: { statusCheckRollup?: { state?: string } | null } } | null)[] | null;
+    nodes?: ({
+      commit?: {
+        statusCheckRollup?: {
+          state?: string;
+          contexts?: {
+            pageInfo?: { hasNextPage?: boolean } | null;
+            nodes?: (ApiCheckContext | null)[] | null;
+          } | null;
+        } | null;
+      };
+    } | null)[] | null;
   } | null;
+}
+
+type ApiRollup = NonNullable<NonNullable<NonNullable<NonNullable<ApiPullNode['commits']>['nodes']>[number]>['commit']>['statusCheckRollup'];
+
+/**
+ * The pull request's checks from the newest run of each (item 170). Falls back
+ * to GitHub's own state when the runs weren't asked for, or there were more
+ * than one page of them: judging from part of the list could call a failing
+ * pull request green.
+ */
+function checksOf(rollup: ApiRollup | undefined): CheckRollup {
+  const contexts = rollup?.contexts;
+  const nodes = contexts?.nodes;
+  if (!nodes || nodes.length === 0 || contexts?.pageInfo?.hasNextPage) return checksFromRollup(rollup?.state);
+  return rollUpChecks(currentCheckContexts(nodes).map(checkContextStatus));
 }
 
 export function summaryFromApi(node: ApiPullNode): PullSummary {
   const threads = node.reviewThreads?.nodes ?? [];
-  const rollup = node.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state;
+  const rollup = node.commits?.nodes?.[0]?.commit?.statusCheckRollup;
 
   return {
     number: node.number,
@@ -453,7 +563,7 @@ export function summaryFromApi(node: ApiPullNode): PullSummary {
     updatedAt: node.updatedAt,
     mergeable: mergeableFromApi(node.mergeable),
     reviewDecision: decisionFromNode(node),
-    checks: checksFromRollup(rollup),
+    checks: checksOf(rollup),
     unresolvedThreads: threads.filter((t) => t && t.isResolved === false).length,
     additions: node.additions ?? 0,
     deletions: node.deletions ?? 0,

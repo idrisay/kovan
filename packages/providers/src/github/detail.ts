@@ -8,7 +8,7 @@
  */
 
 import type { CancelSignal } from '@kovan/host';
-import { graphqlEndpoint } from '@kovan/core';
+import { currentCheckContexts, graphqlEndpoint } from '@kovan/core';
 import { HttpError, type HttpClient } from '../http';
 
 export interface ReviewComment {
@@ -117,7 +117,10 @@ query KovanPullDetail($owner: String!, $name: String!, $number: Int!) {
             statusCheckRollup {
               contexts(first: 50) {
                 nodes {
-                  ... on CheckRun { name conclusion status detailsUrl }
+                  ... on CheckRun {
+                    name conclusion status detailsUrl startedAt completedAt
+                    checkSuite { workflowRun { workflow { name } } }
+                  }
                   ... on StatusContext { context state targetUrl }
                 }
               }
@@ -310,7 +313,9 @@ export async function fetchPullDetail(
         .filter((c: ReviewComment | undefined): c is ReviewComment => Boolean(c)),
       ...reviewComments
     ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    checks: checkNodes.map(checkFrom).filter(Boolean) as CheckRun[],
+    // Only each check's newest run: an older failed run of a check that has
+    // since passed is history, not a failing check (item 170).
+    checks: currentCheckContexts<Record<string, unknown>>(checkNodes).map(checkFrom).filter(Boolean) as CheckRun[],
     files: (pull['files']?.nodes ?? []).filter(Boolean).map((f: any) => ({
       path: f.path,
       additions: f.additions ?? 0,

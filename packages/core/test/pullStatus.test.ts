@@ -248,3 +248,59 @@ describe('pullMentionsTicket', () => {
     expect(pullMentionsTicket({ title: 'Unrelated', headRef: 'main' }, 'ACME-2409')).toBe(false);
   });
 });
+
+describe('checks from the newest run of each (item 170)', () => {
+  // acme-backend#965 as GitHub reported it: the migration gate failed on
+  // `pull_request`, then passed on each `pull_request_review`, and GitHub's
+  // rollup still said FAILURE.
+  const run = (workflow: string, name: string, conclusion: string, startedAt: string) => ({
+    name, status: 'COMPLETED', conclusion, startedAt, completedAt: startedAt,
+    checkSuite: { workflowRun: { workflow: { name: workflow } } }
+  });
+  const pull = (nodes: object[], hasNextPage = false) => summaryFromApi({
+    number: 965, title: 'x', url: 'u', isDraft: false,
+    createdAt: '2026-11-12T10:49:07Z', updatedAt: '2026-11-12T11:49:18Z',
+    additions: 0, deletions: 0, mergeable: 'MERGEABLE', reviewDecision: 'APPROVED',
+    commits: { nodes: [{ commit: { statusCheckRollup: { state: 'FAILURE', contexts: { pageInfo: { hasNextPage }, nodes } } } }] }
+  });
+  const gate = 'Migration approval check';
+  const history = [
+    run(gate, 'check-migration-approvals', 'FAILURE', '2026-11-12T10:49:20Z'),
+    run('Claude', 'claude', 'SKIPPED', '2026-11-12T11:44:25Z'),
+    run('Laravel', 'laravel-tests', 'SUCCESS', '2026-11-12T10:49:20Z'),
+    run('Lint', 'lint', 'SUCCESS', '2026-11-12T10:49:20Z'),
+    run(gate, 'check-migration-approvals', 'SUCCESS', '2026-11-12T11:44:25Z'),
+    run(gate, 'check-migration-approvals', 'SUCCESS', '2026-11-12T11:49:22Z')
+  ];
+
+  it('a gate that failed before the approvals and passed after them is passing', () => {
+    const summary = pull(history);
+    expect(summary.checks).toBe('success');
+    expect(isBlocked(summary)).toBe(false);
+  });
+
+  it('still fails when the newest run of a check failed', () => {
+    const summary = pull([...history, run(gate, 'check-migration-approvals', 'FAILURE', '2026-11-12T12:00:00Z')]);
+    expect(summary.checks).toBe('failure');
+    expect(isBlocked(summary)).toBe(true);
+  });
+
+  it('a queued re-run is newer than any finished one', () => {
+    const queued = { name: 'lint', status: 'QUEUED', checkSuite: { workflowRun: { workflow: { name: 'Lint' } } } };
+    expect(pull([...history, queued]).checks).toBe('pending');
+  });
+
+  it('keeps alike-named jobs of two workflows apart', () => {
+    expect(pull([run('A', 'test', 'FAILURE', '2026-11-12T10:00:00Z'), run('B', 'test', 'SUCCESS', '2026-11-12T11:00:00Z')]).checks)
+      .toBe('failure');
+  });
+
+  it('commit statuses count too', () => {
+    expect(pull([run('Lint', 'lint', 'SUCCESS', '2026-11-12T10:00:00Z'), { context: 'ci/legacy', state: 'ERROR' }]).checks)
+      .toBe('failure');
+  });
+
+  it("trusts GitHub's state when it only saw part of the runs", () => {
+    expect(pull(history, true).checks).toBe('failure');
+  });
+});
