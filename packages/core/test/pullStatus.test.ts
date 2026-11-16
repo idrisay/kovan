@@ -130,6 +130,34 @@ describe('re-requested reviews', () => {
     expect(summary.reviewDecision).toBe('changes_requested');
   });
 
+  // Item 175: evulpo-backend#968 — the only approver was asked again, and
+  // GitHub still answered APPROVED.
+  const approvedBy = (requested: string[], ...approvers: string[]) =>
+    summaryFromApi({
+      number: 968,
+      title: 'x',
+      url: 'u',
+      isDraft: false,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      additions: 0,
+      deletions: 0,
+      reviewDecision: 'APPROVED',
+      latestOpinionatedReviews: { nodes: approvers.map((login) => ({ state: 'APPROVED', author: { login } })) },
+      reviewRequests: { nodes: requested.map((login) => ({ requestedReviewer: { login } })) }
+    });
+
+  it('clears approved once the only approver has been asked again', () => {
+    const summary = approvedBy(['idrisay'], 'idrisay');
+    expect(summary.reviewDecision).toBe('review_required');
+    expect(primaryFlag(summary).label).toBe('Awaiting review');
+  });
+
+  it('keeps approved while another approval still stands', () => {
+    expect(approvedBy(['idrisay'], 'idrisay', 'other-dev').reviewDecision).toBe('approved');
+    expect(approvedBy(['someone-else'], 'idrisay').reviewDecision).toBe('approved');
+  });
+
   it('ignores bare comments when collapsing a review list', () => {
     expect(
       reviewDecisionFrom([

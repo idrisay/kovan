@@ -621,6 +621,9 @@ function standingVerdicts(
  * is back in the reviewer's court, though, so a row that still says "Changes
  * requested" is reporting work that has already been done.
  *
+ * An approval whose reviewer has been asked again is set aside the same way
+ * (item 175), unless another approval still stands.
+ *
  * Otherwise GitHub's decision stands, because it is the only side that knows
  * the branch's protection rules — how many approvals are required, and whose
  * count. Except when it has none: a repository without a "require a review"
@@ -639,7 +642,7 @@ function decisionFromNode(node: ApiPullNode): ReviewDecision {
   if (decision === 'none' && node.reviewDecision == null) {
     return decisionFromVerdicts(verdicts, pendingReviewersOf(node));
   }
-  if (decision !== 'changes_requested') {
+  if (decision !== 'changes_requested' && decision !== 'approved') {
     return decision;
   }
   if (verdicts.length === 0) {
@@ -648,6 +651,12 @@ function decisionFromNode(node: ApiPullNode): ReviewDecision {
     return decision;
   }
   const standing = standingVerdicts(verdicts, pendingReviewersOf(node));
+  if (decision === 'approved') {
+    // Same for an approval (item 175): GitHub keeps APPROVED when the approver
+    // is asked again, but asking again means the author wants a fresh look,
+    // so with no other approval standing the pull request awaits review.
+    return standing.includes('APPROVED') ? 'approved' : 'review_required';
+  }
   return standing.includes('CHANGES_REQUESTED') ? 'changes_requested' : 'review_required';
 }
 
