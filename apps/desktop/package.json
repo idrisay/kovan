@@ -13,6 +13,7 @@
     "smoke": "node scripts/build-dictate.mjs && electron-vite build && KOVAN_SMOKE=1 electron .",
     "smoke:seeded": "node scripts/build-dictate.mjs && electron-vite build && KOVAN_SMOKE=seeded electron .",
     "smoke:live": "node scripts/build-dictate.mjs && electron-vite build && KOVAN_SMOKE=live electron .",
+    "demo": "node scripts/demo.mjs",
     "typecheck": "tsc --noEmit",
     "install:app": "npm run dist && node ../../scripts/install-app.mjs",
     "smoke:workspace": "node scripts/build-dictate.mjs && electron-vite build && KOVAN_SMOKE=workspace electron ."
@@ -194,5 +195,5 @@
     "name": "idrisay",
     "email": "idrisaydev@gmail.com"
   },
-  "homepage": "https://kovan.idrisay.ch"
+  "homepage": "https://kovan.idris-ay.ch"
 }

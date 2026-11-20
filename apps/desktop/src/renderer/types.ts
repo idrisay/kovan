@@ -11,6 +11,9 @@ import type {
 } from '../main/workspace';
 import type { TestEnvironmentSave, TestEnvironmentState, TestSelection } from '../main/testEnvironments';
 import type { ModelList } from '../main/modelSearch';
+import type { MixpanelProgress, MixpanelReportList, MixpanelStatus } from '../main/mixpanel';
+import type { KovanCommandStatus } from '../main/kovanCommand';
+import type { DiscussMessage, MixpanelReport, MixpanelResult } from '@kovan/core';
 
 export type {
   PullDetail, ReviewComment, ReviewThread, Reviewer, AgentRun, RunFile, Runner, RunKind, RunTarget,
@@ -167,6 +170,21 @@ export interface KovanApi {
   quickModelSet(kind: QuickKind, model: string): Promise<void>;
   /** `provider/model` for everything opencode can run. Asked on a picker's first open. */
   quickModelsAvailable(): Promise<string[]>;
+  cliStatus(): Promise<KovanCommandStatus>;
+  cliInstall(): Promise<KovanCommandStatus & { message: string }>;
+  cliRemove(): Promise<KovanCommandStatus & { message: string }>;
+  mixpanelStatus(): Promise<MixpanelStatus>;
+  mixpanelReports(force?: boolean): Promise<MixpanelReportList>;
+  mixpanelCached(): Promise<Record<string, MixpanelResult>>;
+  mixpanelResult(id: number, type: MixpanelReport['type'], force?: boolean): Promise<MixpanelResult>;
+  mixpanelAdd(ref: string, name?: string): Promise<MixpanelReport>;
+  mixpanelRemoveAdded(id: number): Promise<void>;
+  mixpanelThread(id: number): Promise<{ messages: DiscussMessage[]; notes: string[]; busy: boolean; model: string }>;
+  mixpanelThreadClear(id: number): Promise<void>;
+  mixpanelAsk(report: MixpanelReport, question: string): Promise<DiscussMessage[]>;
+  mixpanelNoteAdd(id: number, text: string): Promise<string[]>;
+  mixpanelNoteRemove(id: number, index: number): Promise<string[]>;
+  onMixpanelProgress(listener: (progress: MixpanelProgress) => void): () => void;
   /** A web-searching model looks up today's list prices for these rows. Proposals only — nothing is saved. */
   priceCheck(runner: PriceCheckRunner, model: string, rules: PriceRule[]): Promise<{ proposals: PriceProposal[] } | { error: string }>;
   priceCheckCancel(): Promise<void>;
@@ -184,7 +202,7 @@ export interface KovanApi {
   runningAgentsForce(key: string): Promise<{ key: string; stopped: boolean; left: number }>;
   onRunningAgents(listener: (report: AgentsReport) => void): () => void;
   /** The idle reminder was clicked. */
-  onOpenWorkspace(listener: (id: string, folder?: string) => void): () => void;
+  onOpenWorkspace(listener: (id: string, folder?: string, file?: { path: string; line?: number }) => void): () => void;
   /** "Open in Kovan" from the pane beside Claude: a file's diff (item 148). */
   onOpenDiff(listener: (target: { repo: string; file: string; side: 'staged' | 'unstaged' | 'untracked' }) => void): () => void;
   onShowAgents(listener: () => void): () => void;

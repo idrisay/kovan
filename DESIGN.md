@@ -303,6 +303,27 @@ dot-folder in your home, mode 600, never read back). nv-review is always the fir
   `currentUser()` swapped for their account. A line under the filter names
   whose list it is, with "Back to you"; Esc does the same. Each list picks
   separately and nothing is remembered across launches.
+- **Mixpanel tab** (`Mixpanel.tsx`, `main/mixpanel.ts`, core `mixpanel.ts`,
+  `MixpanelClient` in providers, item 177): off until Settings › Connections ›
+  Mixpanel › "Show Mixpanel in the rail" (`mixpanel.rail`); the rail filters
+  the tab out while it's off and leaves the tab if it's turned off while open.
+  A service account (region, project ID, username, secret in the Keychain),
+  read only. The sidebar lists saved reports (Pinned, then one group per
+  dashboard), each with its last value, a sparkline and the change, from
+  numbers already fetched; "+" adds a report by its link when the App API
+  can't list it. A report opens with the chart (headline line in clay, an
+  unfinished period dashed, breakdown segments in grey), the numbers as a
+  table, and notes. **Discuss** is a ghost toggle, not a run: it opens a panel
+  docked on the right (on `--sidebar`, a step back). Asking runs the quick
+  model (`QuickModel.askOnce`, named in the composer) on the report's numbers;
+  it may answer with one `mixpanel-query` block, which core checks
+  (`parseMixpanelQuery`: an event, a period of a year at most, one breakdown
+  property, equality filters) and main runs as a read-only segmentation query,
+  at most two per question. Kovan writes Mixpanel's expressions itself, never
+  the model. Nothing polls: the list loads when the tab opens, numbers when a
+  report opens and are reused for 15 minutes (the Query API allows 60 an
+  hour), the model only on Ask. Numbers, conversations and notes are kept in
+  `mixpanel/state.json`.
 - **Activity inbox** (`Activity.tsx`, `main/activityFeed.ts`, `diffActivity`
   in core): a rail tab (bell) listing what happened to you — review
   requested, approved, changes requested, new ticket, new comment — grouped
@@ -450,6 +471,25 @@ anything else falls back to the login shell. Only `kovan:open-terminal` uses
 the choice. Agents and quick commands keep the login shell. A session in
 another shell records it in `SessionInfo.shell`, so its row shows a small tag
 and its hover card shows the path.
+
+**The `kovan` command (item 178).** `kovan <file>`, `kovan <file>:42` and
+`kovan .` from any terminal open in Kovan, as `code` does for VS Code. It is
+a shell script Kovan writes (Settings › Text & terminal, or the search
+action "Install 'kovan' command in PATH"), built by `kovanCommandScript` in
+core, into the first of `/usr/local/bin`, `~/.local/bin`, `~/bin` that is on
+the login shell's PATH and writable; never with an admin password, and never
+over a `kovan` it didn't write (`KOVAN_COMMAND_MARKER`). The script checks
+each path exists, so a typo is reported in the terminal, then starts the app
+with `--kovan-open --cwd "$PWD" -- <paths>` (`open -n -a` on macOS, nohup on
+Linux). The running Kovan gets the paths as `requestSingleInstanceLock`'s
+data in `second-instance` (not its argv, which Chromium re-parses); a Kovan
+that wasn't running reads its own argv after restoring its windows. Paths are
+read by `openCandidates`: as written, then without pasted punctuation
+(`improvements.md.`), then with `:line[:column]`. A file opens in the
+workspace holding it (the active one first, then the deepest folder); a path
+in no workspace gets one named after its folder (`Workspaces.createFor`).
+The window on that workspace comes forward, or a new one opens, and the file
+opens in its editor at the line.
 
 ### Search everything (item 127)
 
@@ -604,7 +644,7 @@ visible focus state.
 |---|---|
 | Pure logic, prompts, parsing, formatting | `packages/core` (no Node imports in the barrel, since the renderer loads it) **with a test** in `packages/core/test` |
 | Running CLIs, shell, PATH, run archive | `packages/agent` |
-| GitHub, Jira and Sentry clients | `packages/providers` |
+| GitHub, Jira, Sentry and Mixpanel clients | `packages/providers` |
 | Processes, files, Keychain, IPC handlers | `apps/desktop/src/main` |
 | UI | `apps/desktop/src/renderer`, one component file per feature |
 

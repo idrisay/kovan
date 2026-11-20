@@ -7,14 +7,15 @@
  * something to implement against.
  */
 
-export type ProviderId = 'jira' | 'figma' | 'sentry' | 'github' | 'grafana';
+export type ProviderId = 'jira' | 'figma' | 'sentry' | 'github' | 'grafana' | 'mixpanel';
 
 export const PROVIDER_IDS: readonly ProviderId[] = [
   'github',
   'jira',
   'sentry',
   'grafana',
-  'figma'
+  'figma',
+  'mixpanel'
 ];
 
 export interface JiraIssue {

@@ -26,6 +26,7 @@ import { DEFAULT_SETTINGS, resolveTheme, themeInfo, type ReviewTool } from '@kov
 import type { ChangeKind } from '@kovan/git';
 import { KovanTray } from './tray';
 import { OPEN_WINDOWS_SETTING, Windows, windowsToRestore } from './windows';
+import { installKovanCommand, kovanCommandStatus, removeKovanCommand, resolveOpenTarget } from './kovanCommand';
 import { Activity } from './notify';
 import { ActivityFeed } from './activityFeed';
 import { Dictation } from './dictation';
@@ -39,7 +40,7 @@ import {
 import { adoptImportedTokens } from './adopt';
 import { adoptBatonSecrets, copyBatonState } from './renamed';
 import {
-  smokePty, smokeUi, type SmokeMode, detailFixture, diffFixture, fixtureSnapshot, sentryFramesFixture,
+  smokePty, smokeUi, type SmokeMode, DEMO, demoSnapshot, detailFixture, diffFixture, fixtureSnapshot, sentryFramesFixture,
   sentryTicketFixture, ticketFixture, teammatesFixture, personPullsFixture, personTicketsFixture, ticketPullsFixture
 } from './smoke';
 import { Sessions } from './sessions';
@@ -56,12 +57,13 @@ import { DockMenu } from './dockMenu';
 import { openLink } from './external';
 import { HIDDEN_FLAG, setLinuxAutostart } from './autostart';
 import { QuickModel } from './quick';
+import { MixpanelService } from './mixpanel';
 import { PriceCheck } from './priceCheck';
 import { ModelSearch } from './modelSearch';
 import { Usage } from './usage';
 import { RunningAgents } from './running';
 import { SHELL_SETTING, chosenShell, listShells } from './shells';
-import { activityLabel, diffSideFor, githubAnswered, ticketKeyInTitle, type ActivityEvent, type PriceCheckRunner, type PriceRule, type QuickKind, type ReviewEvent } from '@kovan/core';
+import { activityLabel, diffSideFor, githubAnswered, ticketKeyInTitle, type ActivityEvent, type PriceCheckRunner, type PriceRule, type MixpanelReport, type QuickKind, type ReviewEvent, commandLineOpen, type CommandLineOpen } from '@kovan/core';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -89,7 +91,10 @@ if (process.env['KOVAN_USER_DATA']) {
 // memory budget in MIGRATION.md §9 for the real numbers.
 
 // A second instance would mean two pollers, two trays and double notifications.
-if (!app.requestSingleInstanceLock()) {
+// One started by the `kovan` command (item 178) hands its paths to the running
+// Kovan as the lock's data: `second-instance`'s argv is Chromium's re-parse of
+// the command line, which may reorder or add switches, while this is ours.
+if (!app.requestSingleInstanceLock({ kovanOpen: commandLineOpen(process.argv) ?? null })) {
   app.exit(0);
 }
 
@@ -116,7 +121,7 @@ function deliverActivity(inbox: ActivityEvent[], fresh: ActivityEvent[], quiet: 
   // another app — a macOS notification, because a toast nobody sees is none.
   // A smoke run never reaches Notification Center: it would pop up on the
   // machine running it, and the toast path is the one it can check.
-  const inFront = live && (process.env['KOVAN_SMOKE'] ? true : live.isVisible() && live.isFocused());
+  const inFront = live && (process.env['KOVAN_SMOKE'] && !DEMO ? true : live.isVisible() && live.isFocused());
   if (inFront) {
     live.webContents.send('kovan:activity-toast', fresh);
     return;
@@ -187,6 +192,7 @@ const reviewTools: ReviewTools = new ReviewTools(
 const quick = new QuickModel(host, {
   pull: loadPullDetail, ticket: loadTicket, diff: loadPullDiff, submitReview: postPullReview
 }, reviewTools);
+const mixpanel = new MixpanelService(host, credentials, quick);
 const usage = new Usage(host, sessions, () => quick.listJobs());
 const agents = new Agents(host, sessions, quick);
 const running = new RunningAgents(host, sessions, () => {
@@ -198,7 +204,7 @@ const workspaces = new Workspaces(host);
  * for it once it is listening (item 135), since a message sent now would
  * arrive before anything could hear it.
  */
-const pendingWorkspaceOpen = new Map<number, { id: string; folder?: string }>();
+const pendingWorkspaceOpen = new Map<number, { id: string; folder?: string; file?: { path: string; line?: number } }>();
 // One window per workspace (item 157): a pick brings forward the window on
 // that workspace, or opens a new one for it, as VS Code does.
 const dockMenu = new DockMenu(() => workspaces.list(), () => workspaces.activeId(), (id, folder) => {
@@ -213,6 +219,46 @@ host.config.onChange((key) => {
   if (key === 'workspaces' || key === 'workspace.active') void dockMenu.refresh();
   if (key === 'workspaces') windows.retitleAll();
 });
+
+/**
+ * `kovan <path>` from a terminal (item 178), as `code <path>` does: a file
+ * opens in the editor of the workspace that holds it, a folder opens its
+ * workspace. A path in no workspace gets one, named after its folder (the
+ * file's folder for a file), so the next file from there opens beside it.
+ * The window on that workspace comes forward, or a new one opens for it.
+ * Returns false when there was no open request in the arguments.
+ */
+async function openFromCommandLine(request: CommandLineOpen | undefined, workingDirectory: string): Promise<boolean> {
+  if (!request) return false;
+  const cwd = request.cwd || workingDirectory;
+  let opened = false;
+  for (const raw of request.paths) {
+    const target = await resolveOpenTarget(raw, cwd);
+    if (!target) {
+      // The script checked it a moment ago; it went away since.
+      host.log.warn(`kovan command: no such file or folder: ${raw}`);
+      continue;
+    }
+    let place = await workspaces.workspaceFor(target.path);
+    if (place) {
+      await workspaces.activate(place.id);
+    } else {
+      const folder = target.directory ? target.path : path.dirname(target.path);
+      const made = await workspaces.createFor(folder);
+      place = { id: made.id, folder };
+    }
+    const file = target.directory ? undefined : { path: target.path, ...(target.line ? { line: target.line } : {}) };
+    const { window, fresh } = windows.showWorkspace(place.id);
+    if (fresh) pendingWorkspaceOpen.set(window.id, { id: place.id, folder: place.folder, ...(file ? { file } : {}) });
+    else window.webContents.send('kovan:open-workspace', place.id, place.folder, file);
+    host.log.info(`kovan command: opened ${target.path}${target.line ? `:${target.line}` : ''}`);
+    opened = true;
+  }
+  if (!opened) windows.show();
+  // Typed in a terminal, maybe another app's: bring Kovan to the front.
+  app.focus({ steal: true });
+  return true;
+}
 
 /**
  * "Open in Kovan" from the pane beside Claude (item 148): the file's diff in
@@ -741,6 +787,20 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:quick-model', (_event, kind: QuickKind) => quick.modelFor(kind));
   ipcMain.handle('kovan:quick-model-set', (_event, kind: QuickKind, model: string) => quick.setModelFor(kind, model));
   ipcMain.handle('kovan:quick-models-available', () => quick.available());
+  // Mixpanel (item 177). Read only; nothing here runs unless the tab asks.
+  mixpanel.onProgress((progress) => windows.send('kovan:mixpanel-progress', progress));
+  ipcMain.handle('kovan:mixpanel-status', () => mixpanel.status());
+  ipcMain.handle('kovan:mixpanel-reports', (_event, force?: boolean) => mixpanel.reports(Boolean(force)));
+  ipcMain.handle('kovan:mixpanel-cached', () => mixpanel.cached());
+  ipcMain.handle('kovan:mixpanel-result', (_event, id: number, type: MixpanelReport['type'], force?: boolean) =>
+    mixpanel.result(Number(id), type, Boolean(force)));
+  ipcMain.handle('kovan:mixpanel-add', (_event, ref: string, name?: string) => mixpanel.add(String(ref), name));
+  ipcMain.handle('kovan:mixpanel-remove-added', (_event, id: number) => mixpanel.removeAdded(Number(id)));
+  ipcMain.handle('kovan:mixpanel-thread', (_event, id: number) => mixpanel.thread(Number(id)));
+  ipcMain.handle('kovan:mixpanel-thread-clear', (_event, id: number) => mixpanel.clearThread(Number(id)));
+  ipcMain.handle('kovan:mixpanel-ask', (_event, report: MixpanelReport, question: string) => mixpanel.ask(report, String(question)));
+  ipcMain.handle('kovan:mixpanel-note-add', (_event, id: number, text: string) => mixpanel.addNote(Number(id), String(text)));
+  ipcMain.handle('kovan:mixpanel-note-remove', (_event, id: number, index: number) => mixpanel.removeNote(Number(id), Number(index)));
   // Settings → Token prices → Check prices online. Proposals only: the
   // renderer shows them and the user picks what to apply.
   const priceCheck = new PriceCheck();
@@ -950,6 +1010,10 @@ app.whenReady().then(async () => {
     pendingDiffOpen = undefined;
     return pending;
   });
+  // The `kovan` shell command (item 178), installed from Settings › Text & terminal.
+  ipcMain.handle('kovan:cli-status', () => kovanCommandStatus());
+  ipcMain.handle('kovan:cli-install', () => installKovanCommand());
+  ipcMain.handle('kovan:cli-remove', () => removeKovanCommand());
   ipcMain.handle('kovan:open-workspace-pending', (event) => {
     const window = windows.windowOf(event.sender);
     if (!window) return undefined;
@@ -1046,7 +1110,7 @@ app.whenReady().then(async () => {
 
   // Seeds the workspace the UI smoke then drives. Guarded by the same env var
   // that redirects userData, so it can only ever touch a throwaway profile.
-  if ((process.env['KOVAN_SMOKE'] === 'workspace' || process.env['KOVAN_SMOKE_ITEM100']) && process.env['KOVAN_WS_FOLDER']) {
+  if ((process.env['KOVAN_SMOKE'] === 'workspace' || DEMO || process.env['KOVAN_SMOKE_ITEM100']) && process.env['KOVAN_WS_FOLDER']) {
     await seedWorkspace(process.env['KOVAN_WS_FOLDER']);
   }
 
@@ -1057,9 +1121,12 @@ app.whenReady().then(async () => {
     return;
   }
 
+  // Demo mode answers every refresh from fixtures and otherwise runs as the
+  // real app: no smoke script, no exit.
+  if (DEMO) poller.useFixture(demoSnapshot);
   poller.start();
 
-  if (process.env['KOVAN_SMOKE']) {
+  if (process.env['KOVAN_SMOKE'] && !DEMO) {
     const win = windows.open(workspaces.activeId());
     win.webContents.once('did-finish-load', async () => {
       const mode = process.env['KOVAN_SMOKE'] as SmokeMode;
@@ -1083,7 +1150,13 @@ app.whenReady().then(async () => {
 
 
   app.on('activate', () => createWindow());
-  app.on('second-instance', () => createWindow());
+  app.on('second-instance', (_event, argv, workingDirectory, data) => {
+    const sent = (data as { kovanOpen?: CommandLineOpen | null } | undefined)?.kovanOpen ?? commandLineOpen(argv);
+    void openFromCommandLine(sent ?? undefined, workingDirectory).then(
+      (handled) => { if (!handled) createWindow(); },
+      (err: unknown) => { host.log.warn(`kovan command failed: ${String(err)}`); createWindow(); }
+    );
+  });
   // Cmd+Tab to Kovan with its window closed: `activate` only fires for a Dock
   // click, so switching to it would show a menu bar and nothing else.
   app.on('did-become-active', () => {
@@ -1096,6 +1169,25 @@ app.whenReady().then(async () => {
   if (!app.getLoginItemSettings().wasOpenedAtLogin && !process.argv.includes(HIDDEN_FLAG)) {
     const restore = windowsToRestore(workspaces.list(), host.config.get<unknown>(OPEN_WINDOWS_SETTING, []), workspaces.activeId());
     for (const id of restore) windows.open(id);
+  }
+  // Started by the `kovan` command while Kovan wasn't running (item 178).
+  void openFromCommandLine(commandLineOpen(process.argv), process.cwd())
+    .catch((err: unknown) => host.log.warn(`kovan command failed: ${String(err)}`));
+
+  // Demo with KOVAN_SHOT=<path.png>: the window at launch, and again after the
+  // demo's first Refresh — stills for the site, and a check without a screen.
+  const demoShot = process.env['KOVAN_SHOT'];
+  const demoWin = DEMO && demoShot ? windows.front() : undefined;
+  if (demoWin && demoShot) {
+    demoWin.webContents.once('did-finish-load', async () => {
+      const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      await wait(4000);
+      await writeFile(demoShot, (await demoWin.webContents.capturePage()).toPNG());
+      await poller.refresh(true);
+      await wait(1500);
+      await writeFile(demoShot.replace(/\.png$/, '-refreshed.png'), (await demoWin.webContents.capturePage()).toPNG());
+      console.log(`shot: ${demoShot}`);
+    });
   }
 });
 

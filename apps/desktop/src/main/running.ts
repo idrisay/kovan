@@ -289,7 +289,7 @@ export class RunningAgents {
     for (const agent of fresh) this.notified.add(agent.key);
     if (fresh.length === 0) return;
     if (!this.host.config.get('agents.remind', true) || !this.host.config.get('notify.enabled', true)) return;
-    if (process.env['KOVAN_SMOKE'] || !Notification.isSupported()) return;
+    if ((process.env['KOVAN_SMOKE'] && process.env['KOVAN_SMOKE'] !== 'demo') || !Notification.isSupported()) return;
 
     const threshold = formatIdle(report.idleMs);
     const memory = formatMemory(idle.reduce((sum, a) => sum + a.memory, 0));

@@ -29,7 +29,7 @@ export interface Problem {
 }
 
 const NAMES: Record<ProviderId, string> = {
-  github: 'GitHub', jira: 'Jira', sentry: 'Sentry', grafana: 'Grafana', figma: 'Figma'
+  github: 'GitHub', jira: 'Jira', sentry: 'Sentry', grafana: 'Grafana', figma: 'Figma', mixpanel: 'Mixpanel'
 };
 
 /** How many problems, open and earlier, are kept. */

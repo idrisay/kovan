@@ -56,6 +56,25 @@ const api = {
   quickModel: (kind: string) => ipcRenderer.invoke('kovan:quick-model', kind),
   quickModelSet: (kind: string, model: string) => ipcRenderer.invoke('kovan:quick-model-set', kind, model),
   quickModelsAvailable: () => ipcRenderer.invoke('kovan:quick-models-available'),
+  cliStatus: () => ipcRenderer.invoke('kovan:cli-status'),
+  cliInstall: () => ipcRenderer.invoke('kovan:cli-install'),
+  cliRemove: () => ipcRenderer.invoke('kovan:cli-remove'),
+  mixpanelStatus: () => ipcRenderer.invoke('kovan:mixpanel-status'),
+  mixpanelReports: (force?: boolean) => ipcRenderer.invoke('kovan:mixpanel-reports', force),
+  mixpanelCached: () => ipcRenderer.invoke('kovan:mixpanel-cached'),
+  mixpanelResult: (id: number, type: string, force?: boolean) => ipcRenderer.invoke('kovan:mixpanel-result', id, type, force),
+  mixpanelAdd: (ref: string, name?: string) => ipcRenderer.invoke('kovan:mixpanel-add', ref, name),
+  mixpanelRemoveAdded: (id: number) => ipcRenderer.invoke('kovan:mixpanel-remove-added', id),
+  mixpanelThread: (id: number) => ipcRenderer.invoke('kovan:mixpanel-thread', id),
+  mixpanelThreadClear: (id: number) => ipcRenderer.invoke('kovan:mixpanel-thread-clear', id),
+  mixpanelAsk: (report: unknown, question: string) => ipcRenderer.invoke('kovan:mixpanel-ask', report, question),
+  mixpanelNoteAdd: (id: number, text: string) => ipcRenderer.invoke('kovan:mixpanel-note-add', id, text),
+  mixpanelNoteRemove: (id: number, index: number) => ipcRenderer.invoke('kovan:mixpanel-note-remove', id, index),
+  onMixpanelProgress: (listener: (progress: unknown) => void) => {
+    const handler = (_e: unknown, progress: unknown) => listener(progress);
+    ipcRenderer.on('kovan:mixpanel-progress', handler);
+    return () => ipcRenderer.removeListener('kovan:mixpanel-progress', handler);
+  },
   priceCheck: (runner: string, model: string, rules: unknown[]) =>
     ipcRenderer.invoke('kovan:price-check', runner, model, rules),
   priceCheckCancel: () => ipcRenderer.invoke('kovan:price-check-cancel'),
@@ -76,12 +95,12 @@ const api = {
     return () => ipcRenderer.removeListener('kovan:running-agents', handler);
   },
   /** The Dock menu picked a workspace, or a folder in one (item 135). */
-  onOpenWorkspace: (listener: (id: string, folder?: string) => void) => {
-    const handler = (_event: unknown, id: string, folder?: string) => listener(id, folder);
+  onOpenWorkspace: (listener: (id: string, folder?: string, file?: { path: string; line?: number }) => void) => {
+    const handler = (_event: unknown, id: string, folder?: string, file?: { path: string; line?: number }) => listener(id, folder, file);
     ipcRenderer.on('kovan:open-workspace', handler);
     // One picked while no window was open waits in main until now.
-    void ipcRenderer.invoke('kovan:open-workspace-pending').then((p?: { id: string; folder?: string }) => {
-      if (p) listener(p.id, p.folder);
+    void ipcRenderer.invoke('kovan:open-workspace-pending').then((p?: { id: string; folder?: string; file?: { path: string; line?: number } }) => {
+      if (p) listener(p.id, p.folder, p.file);
     });
     return () => ipcRenderer.removeListener('kovan:open-workspace', handler);
   },

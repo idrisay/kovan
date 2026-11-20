@@ -36,7 +36,15 @@ export const CREDENTIAL_FIELDS: Record<ProviderId, CredentialField[]> = {
     { key: 'grafana.baseUrl', label: 'Grafana URL', placeholder: 'https://acme.grafana.net' },
     { key: 'grafana', label: 'Grafana service account token', secret: true }
   ],
-  figma: [{ key: 'figma', label: 'Figma personal access token', secret: true }]
+  figma: [{ key: 'figma', label: 'Figma personal access token', secret: true }],
+  // Item 177. A service account (Organization settings › Service accounts),
+  // which both the Query API and the App API accept; read only in Kovan.
+  mixpanel: [
+    { key: 'mixpanel.region', label: 'Data region (us, eu or in)', placeholder: 'eu' },
+    { key: 'mixpanel.projectId', label: 'Project ID', placeholder: '2729535' },
+    { key: 'mixpanel.username', label: 'Service account username' },
+    { key: 'mixpanel', label: 'Service account secret', secret: true }
+  ]
 };
 
 export class Credentials {

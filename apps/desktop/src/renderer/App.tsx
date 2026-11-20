@@ -72,10 +72,11 @@ import {
 import { PaneView, type DragHandlers, type DragState } from './PaneView';
 import {
   PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon, SentryIcon, AgentsIcon, BellIcon,
-  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon, CloseIcon, BackIcon, ForwardIcon
+  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon, CloseIcon, BackIcon, ForwardIcon, ChartIcon
 } from './icons';
+import { MixpanelView, useMixpanelRail } from './Mixpanel';
 
-type ViewId = 'pulls' | 'tickets' | 'sentry' | 'activity' | 'workspace' | 'sessions' | 'agents';
+type ViewId = 'pulls' | 'tickets' | 'sentry' | 'mixpanel' | 'activity' | 'workspace' | 'sessions' | 'agents';
 
 /** Where each window was, per workspace (item 163). */
 const PLACE_KEY = 'kovan.place';
@@ -84,6 +85,8 @@ const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JS
   { id: 'pulls', label: 'Pull requests', icon: PullRequestIcon },
   { id: 'tickets', label: 'Tickets', icon: TicketIcon },
   { id: 'sentry', label: 'Sentry errors', icon: SentryIcon },
+  // Item 177: only in the rail once turned on in Settings › Connections › Mixpanel.
+  { id: 'mixpanel', label: 'Mixpanel', icon: ChartIcon },
   // Item 86: what happened to you — review requests, approvals, new tickets.
   { id: 'activity', label: 'Activity', icon: BellIcon },
   { id: 'workspace', label: 'Workspace', icon: WorkspaceIcon },
@@ -607,7 +610,7 @@ function RefreshMenu({
  *  from Settings.tsx, which owns the fuller provider chrome (badges, fields).
  *  A five-entry map duplicated once here is cheaper than coupling the two. */
 const STATUSBAR_PROVIDER: Record<string, string> = {
-  github: 'GitHub', jira: 'Jira', sentry: 'Sentry', grafana: 'Grafana', figma: 'Figma'
+  github: 'GitHub', jira: 'Jira', sentry: 'Sentry', grafana: 'Grafana', figma: 'Figma', mixpanel: 'Mixpanel'
 };
 
 /**
@@ -806,11 +809,13 @@ export function App() {
   const [agentsPane, setAgentsPane] = useState<AgentsPaneId>('agents');
   // The Dock menu (item 135): main has already made it the active workspace.
   const [showWorkspace, setShowWorkspace] = useState<{ id: string; folder?: string; nonce: number }>();
-  useEffect(() => window.kovan.onOpenWorkspace((id, folder) => {
+  useEffect(() => window.kovan.onOpenWorkspace((id, folder, file) => {
     setView('workspace');
     // A new, empty window (item 159): its start page, nothing to switch to.
     if (!id) return;
     setShowWorkspace({ id, ...(folder ? { folder } : {}), nonce: Date.now() });
+    // `kovan <file>` from a terminal (item 178): the file in the editor, at its line.
+    if (file) setOpenRequest({ path: file.path, ...(file.line ? { line: file.line } : {}), nonce: Date.now() + 1 });
   }), []);
   // "Open in Kovan" from the pane beside Claude (item 148).
   useEffect(() => window.kovan.onOpenDiff((target) => {
@@ -841,7 +846,7 @@ export function App() {
   const goTo = useCallback((p: Place) => {
     setView(p.view);
     if (p.session) setActiveSession(p.session);
-    if (p.view !== 'sessions' && p.view !== 'workspace' && p.view !== 'agents') {
+    if (p.view !== 'sessions' && p.view !== 'workspace' && p.view !== 'agents' && p.view !== 'mixpanel') {
       setSelected((p.subject ? findSubject(p.subject, latest.current) : undefined) ?? {});
     }
   }, []);
@@ -1085,10 +1090,18 @@ export function App() {
     }
   }, [activityRequest, activity.inbox, snapshot.at, openEvent]);
 
+  // Item 177: the Mixpanel tab can be turned off while it's open, or a saved
+  // place can name it after it was turned off; go somewhere that's there.
+  const mixpanelRail = useMixpanelRail();
+  useEffect(() => {
+    if (view === 'mixpanel' && !mixpanelRail) setView('pulls');
+  }, [view, mixpanelRail]);
+
   const counts = useMemo(() => ({
     pulls: snapshot.blocked.length + snapshot.reviewRequested.length,
     tickets: snapshot.tickets.length,
     sentry: snapshot.sentryIssues.length,
+    mixpanel: 0,
     activity: 0,
     workspace: 0,
     sessions: sessions.filter((s) => s.running).length,
@@ -1180,11 +1193,13 @@ export function App() {
   const searchActions = useMemo<SearchAction[]>(() => [
     ...(selected.pull ? [{ id: 'review-open', label: `Review ${repoName(selected.pull.repo)} #${selected.pull.number} in an agent`, hint: 'open now', run: () => setRunSheet({ kind: 'review', pull: selected.pull }) }] : []),
     ...(selected.issue ? [{ id: 'implement-open', label: `Implement ${selected.issue.key} in an agent`, hint: 'open now', run: () => setRunSheet({ kind: 'implement', issue: selected.issue }) }] : []),
-    ...VIEWS.map((v) => ({ id: `view-${v.id}`, label: `Go to ${v.label}`, run: () => setView(v.id) })),
+    ...VIEWS.filter((v) => v.id !== 'mixpanel' || mixpanelRail).map((v) => ({ id: `view-${v.id}`, label: `Go to ${v.label}`, run: () => setView(v.id) })),
     { id: 'settings', label: 'Open Settings', run: () => setConnecting(true) },
+    // Item 178, named as VS Code names its own.
+    { id: 'install-cli', label: "Install 'kovan' command in PATH", hint: 'kovan <file> from a terminal', run: () => { setSettingsSection('text:kovan command'); setConnecting(true); } },
     { id: 'refresh', label: 'Refresh everything', hint: 'GitHub, Jira, Sentry', run: refresh },
     ...targets.map((t) => ({ id: `terminal-${t.path}`, label: `New terminal in ${t.label}`, run: () => openTerminal(t.path) }))
-  ], [selected, targets, refresh, openTerminal]);
+  ], [selected, targets, refresh, openTerminal, mixpanelRail]);
 
   // Item 164: whose pull requests and tickets the lists show. Undefined is
   // yours. Per list, since a GitHub login and a Jira account aren't the same
@@ -1452,7 +1467,7 @@ export function App() {
       ) : (
         <div className={queueHidden ? 'body queue-hidden' : 'body'}>
           <nav className="rail" aria-label="Sections">
-            {railOrder.map((id) => VIEWS.find((x) => x.id === id)!).map((v) => {
+            {railOrder.filter((id) => id !== 'mixpanel' || mixpanelRail).map((id) => VIEWS.find((x) => x.id === id)!).map((v) => {
               const Icon = v.icon;
               const n = counts[v.id];
               const drop = railDrag?.target === v.id ? (railDrag.after ? ' drop-after' : ' drop-before') : '';
@@ -1518,6 +1533,8 @@ export function App() {
               snapshot={snapshot} onOpenSubject={openSubject} onRename={renameSession}
               fontSize={fontSize}
             />
+          ) : view === 'mixpanel' ? (
+            <MixpanelView />
           ) : view === 'agents' ? (
             <AgentsView
               pane={agentsPane} onPane={setAgentsPane}

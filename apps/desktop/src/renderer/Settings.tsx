@@ -18,6 +18,8 @@ import { setShell, useShellChoice } from './shellChoice';
 import { ACCENTS, THEMES, speechProvider } from '@kovan/core';
 import { ChevronIcon, CloseIcon, SearchIcon } from './icons';
 import { ReviewersSettings } from './Reviewers';
+import { MixpanelHelp, MixpanelRailSetting } from './Mixpanel';
+import { KovanCommandSetting } from './KovanCommand';
 
 interface Field {
   key: string;
@@ -31,7 +33,8 @@ const PROVIDER_LABEL: Record<string, string> = {
   jira: 'Jira',
   sentry: 'Sentry',
   grafana: 'Grafana',
-  figma: 'Figma'
+  figma: 'Figma',
+  mixpanel: 'Mixpanel'
 };
 
 /**
@@ -502,14 +505,14 @@ const SEARCH_INDEX: Record<SectionId, string[]> = {
   appearance: ['Theme', 'Dark', 'Light', 'OLED Black', 'Cool Graphite', 'Ember Low Light', 'High Contrast', 'Paper Soft',
     'Match macOS', 'Schedule', 'Accent', 'Colour-safe status colours', 'Show a shape with every status', 'List density',
     'Compact', 'Terminal colours', 'Boosted', 'Color', 'Night'],
-  text: ['Shell for new terminals', 'Default shell', 'zsh', 'bash', 'Terminal font size', 'Ticket and pull request text size', 'Sidebar text size',
+  text: ['The kovan command', 'kovan command', 'Install', 'PATH', 'code command', 'Open from terminal', 'Shell for new terminals', 'Default shell', 'zsh', 'bash', 'Terminal font size', 'Ticket and pull request text size', 'Sidebar text size',
     'Tabs, session header and status bar text size', 'Status bar', 'Tabs', 'Font', 'Zoom'],
   notifications: ['macOS notifications', 'Launch Kovan at login', 'Activity', ...ACTIVITY_SETTINGS.map((a) => a.label)],
   dictation: ['Dictate with double-tap ⌘', 'Speech model', 'Apple Speech', 'whisper.cpp', 'OpenAI Whisper', 'Groq Whisper',
     'Deepgram', 'AssemblyAI', 'API key', 'Model file', 'Language', 'Microphone', 'Voice'],
   agents: ['Buttons on pull requests and tickets', 'Summarize', 'Review', 'Condense earlier comments', 'Quick model', 'Model (opencode)', 'Give up after (seconds)', 'Running agents', 'Idle after (minutes)',
     'Remind me when an agent goes idle', 'Token prices', 'Usage', 'Cost', 'Review model'],
-  connections: ['Token', 'API key'],
+  connections: ['Token', 'API key', 'Mixpanel', 'Show Mixpanel in the rail', 'Service account', 'Analytics'],
   environments: ['Environments', 'Test accounts', 'Site URL', 'Basic auth', 'Check it shipped', 'Password']
 };
 
@@ -529,7 +532,9 @@ export function Settings({
   const [notify, setNotify] = useState(true);
   const [saving, setSaving] = useState('');
   /** Which section is open; one at a time, none at first. */
-  const [open, setOpen] = useState<SectionId | undefined>(section as SectionId | undefined);
+  // A section may come as 'connections:Mixpanel': open Connections and bring
+  // the Mixpanel card into view (item 177's "Open Settings › Mixpanel").
+  const [open, setOpen] = useState<SectionId | undefined>(section?.split(':')[0] as SectionId | undefined);
   const [query, setQuery] = useState('');
   /** Every setting as saved, for the one-line summaries. Re-read when a
    *  section closes, so a summary shows what was just changed. */
@@ -704,6 +709,13 @@ export function Settings({
     }
   };
 
+  // Opened at 'connections:Mixpanel': scroll to that card once it's drawn.
+  useEffect(() => {
+    const [id, find] = section?.split(':') ?? [];
+    if (id && find) toggleOpen(id as SectionId, find);
+    // Only on open: later changes to `section` come with a new sheet.
+  }, []);
+
   const sectionBody = (id: SectionId) => {
     switch (id) {
       case 'appearance':
@@ -729,6 +741,7 @@ export function Settings({
               <ChromeSizeControl />
             </label>
             <p className="settings-note">{keyLabel('+')} and {keyLabel('−')} resize whichever of these you last clicked in: the sidebar, the ticket or pull request, a terminal, or its tabs, header and the status bar. Terminal colours are under Appearance.</p>
+            <KovanCommandSetting />
           </>
         );
       case 'notifications':
@@ -765,8 +778,10 @@ export function Settings({
               {label(provider)}
               {connected.includes(provider as ProviderId) && <span className="badge">connected</span>}
             </h3>
+            {provider === 'mixpanel' && <MixpanelHelp />}
             {(fields[provider] ?? []).map(field)}
             {(EXTRA_FIELDS[provider] ?? []).map(field)}
+            {provider === 'mixpanel' && <MixpanelRailSetting connected={connected.includes('mixpanel')} />}
             <button
               className="primary"
               disabled={saving === provider}

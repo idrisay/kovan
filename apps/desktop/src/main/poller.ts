@@ -134,7 +134,28 @@ export class Poller {
     return this.snapshot;
   }
 
+  /**
+   * Demo mode: every refresh answers from `fixture` instead of the network.
+   * `fixture` gets how many refreshes have been asked for, so a demo can move
+   * its story along one "Refresh" at a time.
+   */
+  private fixture?: (refreshes: number, merged: number) => Snapshot;
+  private fixtureRefreshes = 0;
+
+  useFixture(fixture: (refreshes: number, merged: number) => Snapshot): void {
+    this.fixture = fixture;
+  }
+
+  private fromFixture(fixture: (refreshes: number, merged: number) => Snapshot, merged?: number): Snapshot {
+    this.publish(fixture(this.fixtureRefreshes, merged ?? Math.max(10, this.snapshot.merged.length)));
+    return this.snapshot;
+  }
+
   start(): void {
+    if (this.fixture) {
+      this.fromFixture(this.fixture);
+      return;
+    }
     void this.refresh();
     // A fixed tick, with `minIntervalSeconds` enforced inside refresh(), so
     // changing the setting takes effect without restarting the timer.
@@ -155,6 +176,14 @@ export class Poller {
    *              a timer.
    */
   async refresh(force = false): Promise<Snapshot> {
+    if (this.fixture) {
+      const fixture = this.fixture;
+      // A visible beat of "refreshing", as a real poll has.
+      this.publish({ ...this.snapshot, refreshing: true });
+      await new Promise((r) => setTimeout(r, 700));
+      this.fixtureRefreshes++;
+      return this.fromFixture(fixture);
+    }
     const floor = this.host.config.get('refresh.minIntervalSeconds', 15) * 1000;
     if (!force && Date.now() - this.lastRun < floor) {
       return this.snapshot;
@@ -242,6 +271,7 @@ export class Poller {
    * never happened.
    */
   async refreshProvider(id: PolledProvider): Promise<Snapshot> {
+    if (this.fixture) return this.refresh(true);
     if (this.refreshingProviders.has(id)) {
       return this.snapshot;
     }
@@ -305,6 +335,7 @@ export class Poller {
    * footer can say what went wrong without the sidebar going blank.
    */
   async loadMoreMerged(limit: number): Promise<Snapshot> {
+    if (this.fixture) return this.fromFixture(this.fixture, limit);
     if (this.snapshot.loadingMerged) {
       return this.snapshot;
     }

@@ -169,6 +169,43 @@ export class Workspaces {
     return workspace;
   }
 
+  /**
+   * The workspace a path belongs to (item 178): the one with a folder holding
+   * it, the active one first when several do, and among a workspace's folders
+   * the deepest. Undefined when it is in none.
+   */
+  async workspaceFor(candidate: string): Promise<{ id: string; folder: string } | undefined> {
+    let target: string;
+    try {
+      target = await realpath(candidate);
+    } catch {
+      return undefined;
+    }
+    const active = this.activeId();
+    const all = [...this.list()].sort((a, b) => Number(b.id === active) - Number(a.id === active));
+    for (const workspace of all) {
+      let best: string | undefined;
+      for (const folder of workspace.folders) {
+        const root = await realpath(folder).catch(() => undefined);
+        if (root && (target === root || target.startsWith(root + path.sep)) && (!best || root.length > best.length)) best = folder;
+      }
+      if (best) return { id: workspace.id, folder: best };
+    }
+    return undefined;
+  }
+
+  /**
+   * A workspace for a folder named on the command line (\`kovan .\`, item 178),
+   * as a folder picked in the dialog makes one: named after the folder,
+   * holding just it. No dialog, since the folder was already named.
+   */
+  async createFor(folder: string): Promise<Workspace> {
+    const workspace: Workspace = { id: randomUUID(), name: path.basename(folder) || folder, folders: [folder] };
+    await this.save([...this.list(), workspace]);
+    await this.activate(workspace.id);
+    return workspace;
+  }
+
   async addFolder(id: string, window?: BrowserWindow): Promise<Workspace | undefined> {
     const folder = await this.pickFolder(window, 'Add a folder to this workspace');
     if (!folder) return undefined;

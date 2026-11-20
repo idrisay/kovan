@@ -3322,3 +3322,158 @@ li.pinnable > .pin-toggle:focus-visible { opacity: 1; }
 .person-banner-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .person-back { flex: none; font-size: 11.5px; }
 .person-state { margin: 10px 12px; font-size: 12px; color: var(--meta); }
+
+/* --- Mixpanel (item 177) ------------------------------------------------
+ * Design A with a Discuss panel. The report is the brightest surface (the
+ * editor), its cards a step up; Discuss docks on the right a step back, on
+ * the sidebar's surface, since it is where you operate rather than read.
+ * Clay only on selection, the chart's headline line and the primary action. */
+
+.mp-project { font-family: var(--mono); font-size: 10.5px; color: var(--meta); flex: none; }
+.mp-value { font-family: var(--mono); font-size: 11.5px; color: var(--strong); flex: none; font-variant-numeric: tabular-nums; }
+.mp-pin { color: var(--clay); flex: none; display: grid; }
+.mp-spark polyline { fill: none; stroke: var(--secondary); stroke-width: 1.3; }
+.mp-spark circle { fill: var(--clay); }
+.mp-up { color: var(--pass); font-family: var(--mono); font-size: 10.5px; }
+.mp-down { color: var(--blocked-bright); font-family: var(--mono); font-size: 10.5px; }
+.mp-list-error { display: flex; gap: 7px; align-items: baseline; font-size: 11.5px; color: var(--meta); padding: 10px 6px 4px; line-height: 1.5; }
+.mp-list-error .dot { flex: none; transform: translateY(1px); }
+.mp-add { display: flex; flex-direction: column; gap: 6px; padding: 0 12px 10px; }
+.mp-add input {
+  height: 28px; border-radius: 7px; border: 1px solid var(--hair-strong); background: var(--wash);
+  color: var(--body); padding: 0 9px; font-size: 12px; font-family: inherit;
+}
+.mp-add input:focus { outline: none; border-color: color-mix(in srgb, var(--clay) 55%, transparent); }
+.mp-add-foot { display: flex; align-items: center; gap: 12px; }
+.mp-add .settings-note { margin: 0; }
+
+.mp-pane { display: flex; flex-direction: row; min-width: 0; overflow: hidden; background: var(--editor); }
+.mp-pick { margin: auto; }
+.mp-pane > .empty { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--meta); }
+.mp-report { flex: 1; min-width: 0; overflow-y: auto; padding: 18px 24px 28px; display: flex; flex-direction: column; gap: 14px; }
+.mp-report-head { display: flex; flex-direction: column; gap: 7px; max-width: var(--page); }
+.mp-places { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mp-title { margin: 0; font-family: var(--display); font-size: 17px; font-weight: 600; color: var(--title); letter-spacing: -0.015em; text-wrap: balance; }
+.mp-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--meta); }
+.mp-meta .mono { font-family: var(--mono); font-size: 11px; }
+.mp-strong { color: var(--strong); }
+.mp-desc { margin: 0; color: var(--prose); font-size: 12.5px; max-width: var(--measure); }
+.mp-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; }
+.mp-actions .ghost { display: inline-flex; align-items: center; gap: 6px; }
+.mp-actions .ghost.on { color: var(--title); border-color: color-mix(in srgb, var(--clay) 45%, transparent); background: color-mix(in srgb, var(--clay) 12%, transparent); }
+.mp-actions .action-divider { width: 1px; height: 20px; background: var(--hair-strong); margin: 0 2px; }
+.mp-chip {
+  font-size: 11px; color: var(--secondary); border: 1px solid var(--hair-strong); border-radius: 999px;
+  padding: 1px 8px; background: var(--wash); white-space: nowrap;
+}
+.mp-chip.button { cursor: pointer; font-family: inherit; }
+.mp-chip.button:hover { color: var(--title); border-color: color-mix(in srgb, var(--clay) 40%, transparent); }
+.mp-dim { color: var(--dim); font-size: 11px; }
+
+.mp-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr); gap: 12px; max-width: var(--page); }
+@container (max-width: 760px) { .mp-grid { grid-template-columns: minmax(0, 1fr); } }
+.mp-card { background: var(--card); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; max-width: var(--page); }
+.mp-card-head { display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; color: var(--meta); }
+.mp-card-head b { flex: 1; min-width: 0; color: var(--strong); font-weight: 600; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-loading, .mp-error { flex-direction: row; align-items: center; gap: 9px; font-size: 12.5px; color: var(--meta); }
+.mp-error span:nth-child(2) { flex: 1; color: var(--prose); }
+
+.mp-chart { width: 100%; height: auto; display: block; }
+.mp-chart text { fill: var(--meta); font-family: var(--mono); font-size: 10px; }
+.mp-chart .grid { stroke: var(--hair-strong); stroke-width: 1; }
+.mp-chart .line { fill: none; stroke: var(--clay); stroke-width: 2; stroke-linejoin: round; }
+.mp-chart .area { fill: color-mix(in srgb, var(--clay) 12%, transparent); stroke: none; }
+.mp-chart .partial { stroke: var(--clay); stroke-width: 2; stroke-dasharray: 3 4; }
+.mp-chart .segment { fill: none; stroke: var(--muted); stroke-width: 1.1; opacity: 0.55; }
+.mp-chart .end { fill: var(--clay); }
+.mp-big { display: flex; flex-direction: column; gap: 2px; padding: 18px 2px; }
+.mp-big span { font-family: var(--display); font-size: 34px; font-weight: 600; color: var(--title); font-variant-numeric: tabular-nums; }
+.mp-big small { font-size: 12px; color: var(--meta); }
+.mp-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mp-bars li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: 10px; align-items: center; font-size: 12px; }
+.mp-bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--prose); }
+.mp-bar { height: 7px; border-radius: 4px; background: var(--wash); overflow: hidden; }
+.mp-bar span { display: block; height: 100%; background: color-mix(in srgb, var(--clay) 60%, transparent); border-radius: 4px; }
+.mp-num { font-family: var(--mono); font-size: 11.5px; color: var(--strong); font-variant-numeric: tabular-nums; }
+
+.mp-table-wrap { overflow: auto; max-height: 340px; }
+.mp-table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+.mp-table th {
+  position: sticky; top: 0; background: var(--card); text-align: left; font-weight: 600; font-size: 10.5px;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--meta); padding: 4px 8px; border-bottom: 1px solid var(--hair-strong);
+  max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mp-table td { padding: 3px 8px; border-bottom: 1px solid var(--hair); color: var(--prose); white-space: nowrap; }
+.mp-table .n { text-align: right; font-family: var(--mono); color: var(--strong); }
+.mp-notes ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mp-notes li { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--prose); white-space: pre-wrap; }
+.mp-notes li span { flex: 1; min-width: 0; max-width: var(--measure); }
+.mp-notes .icon-button { width: 20px; height: 20px; opacity: 0.6; }
+.mp-notes .icon-button:hover { opacity: 1; }
+
+/* Discuss */
+.mp-dock {
+  width: clamp(280px, 30%, 380px); flex: none; display: flex; flex-direction: column; min-height: 0;
+  background: var(--sidebar); border-left: 1px solid var(--hair);
+}
+.mp-dock-head { display: flex; align-items: center; gap: 8px; padding: 11px 12px 10px 14px; border-bottom: 1px solid var(--hair); color: var(--meta); }
+.mp-dock-head h2 { flex: 1; margin: 0; font-family: var(--display); font-size: 13.5px; font-weight: 600; color: var(--title); }
+.mp-confirm { display: flex; gap: 8px; align-items: center; font-size: 11.5px; color: var(--running); }
+.mp-context { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--hair); }
+.mp-context .mp-chip { font-size: 10.5px; padding: 0 7px; }
+.mp-label { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--meta); margin-right: 2px; }
+.mp-msgs { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.mp-empty { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.mp-msg { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--prose); line-height: 1.55; }
+.mp-msg.you { align-self: flex-end; max-width: 90%; background: var(--card); border-radius: 9px; padding: 7px 10px; white-space: pre-wrap; }
+.mp-msg .mp-text { white-space: pre-wrap; }
+.mp-msg.failed .mp-text { color: var(--meta); }
+.mp-who { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--meta); }
+.mp-msg-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.mp-msg-actions .link { color: var(--meta); text-decoration: none; font-size: 11px; }
+.mp-msg-actions .link:hover:not(:disabled) { color: var(--title); }
+.mp-msg-actions .link:disabled { color: var(--pass); cursor: default; }
+.mp-query { display: flex; flex-direction: column; gap: 2px; background: var(--wash); border-radius: 7px; padding: 6px 8px; }
+.mp-query code { font-family: var(--mono); font-size: 10.5px; color: var(--secondary); white-space: normal; }
+.mp-query-error { font-size: 11px; color: var(--blocked-bright); }
+.mp-suggest { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 12px 8px; }
+.mp-suggest .mp-chip { font-size: 10.5px; }
+.mp-composer { margin: 0 12px 12px; border: 1px solid var(--hair-strong); border-radius: 9px; background: var(--editor); display: flex; flex-direction: column; }
+.mp-composer:focus-within { border-color: color-mix(in srgb, var(--clay) 45%, transparent); }
+.mp-composer textarea {
+  resize: none; border: 0; background: transparent; color: var(--body); font-family: inherit; font-size: 12.5px;
+  padding: 8px 10px 4px; outline: none; line-height: 1.5;
+}
+.mp-composer-foot { display: flex; align-items: center; gap: 8px; padding: 4px 6px 6px 10px; }
+.mp-model { flex: 1; min-width: 0; font-family: var(--mono); font-size: 10.5px; color: var(--meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-composer .quick { padding: 3px 12px; }
+
+/* Mixpanel set-up (item 177): what's missing, where to find it, one way to fix it. */
+.mp-setup {
+  margin: auto; max-width: 520px; padding: 40px 24px; display: flex; flex-direction: column;
+  align-items: flex-start; gap: 10px; color: var(--meta);
+}
+.mp-setup h1 { margin: 4px 0 0; font-family: var(--display); font-size: 18px; font-weight: 600; color: var(--title); }
+.mp-setup-lead { margin: 0; color: var(--prose); font-size: 13px; line-height: 1.6; display: flex; gap: 8px; align-items: baseline; }
+.mp-setup-lead .dot { flex: none; transform: translateY(1px); }
+.mp-setup-list { list-style: none; margin: 6px 0 8px; padding: 0; width: 100%; display: flex; flex-direction: column; gap: 2px; }
+.mp-setup-list li {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 10px; row-gap: 3px; align-items: baseline;
+  padding: 8px 10px; border-radius: 8px; background: var(--card);
+}
+.mp-setup-list li.done { background: transparent; }
+.mp-setup-name { color: var(--strong); font-size: 12.5px; }
+.mp-setup-list li.done .mp-setup-name { color: var(--secondary); }
+.mp-setup-state { font-size: 11px; color: var(--meta); }
+.mp-setup-list li.fix .mp-setup-state { color: var(--blocked-bright); }
+.mp-setup-help { grid-column: 2 / 4; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.mp-setup-foot { margin: 0; font-size: 11px; color: var(--dim); }
+.mp-help ul { margin: 0 0 10px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.mp-help b { color: var(--secondary); font-weight: 500; }
+.mp-test-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 4px 0 8px; }
+.mp-test-row .settings-note { margin: 0; }
+.mp-list-error .link { font-size: 11.5px; }
+
+/* The kovan command (item 178), in Settings › Text & terminal. */
+.cli-actions { display: flex; align-items: center; gap: 14px; margin: 2px 0 6px; }
+.settings-note code { font-family: var(--mono); font-size: 11px; color: var(--secondary); }

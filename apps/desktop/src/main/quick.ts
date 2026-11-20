@@ -488,6 +488,15 @@ export class QuickModel {
   }
 
   /**
+   * One answer, outside the job list: Mixpanel's Discuss panel (item 177),
+   * which keeps its own conversation per report. Same locked-down
+   * `opencode run` as Summarize, so the model can read the file and nothing else.
+   */
+  askOnce(model: string, material: string, instruction: string): Promise<QuickOutput> {
+    return this.ask(model, material, instruction);
+  }
+
+  /**
    * One `opencode run` in an empty temp folder, material attached as a file.
    * See `@kovan/agent`'s `quick.ts` for why the tools are "ask", not "deny".
    */

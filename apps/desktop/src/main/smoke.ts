@@ -36,7 +36,16 @@ import { AgentStatus } from './agentStatus';
 import { reviewBasis, trackProblems } from '@kovan/core';
 import { RunStore, type Runner } from '@kovan/agent';
 
-export type SmokeMode = '1' | 'seeded' | 'live' | 'pty' | 'workspace';
+export type SmokeMode = '1' | 'seeded' | 'live' | 'pty' | 'workspace' | 'demo';
+
+/**
+ * Demo mode (`npm run demo`): the app as you'd use it — windows, tray,
+ * terminals, real notifications — but every queue, detail and person comes
+ * from the fixtures in this file, never from GitHub, Jira or Sentry. For
+ * recording videos without showing real work. Needs a throwaway profile
+ * (`KOVAN_USER_DATA`), like every other fixture.
+ */
+export const DEMO = process.env['KOVAN_SMOKE'] === 'demo' && Boolean(process.env['KOVAN_USER_DATA']);
 
 const FIXTURE = {
   number: 42,
@@ -193,6 +202,28 @@ export function fixtureSnapshot(mergedCount: number): Snapshot {
     refreshing: false,
     refreshedAt: process.env['KOVAN_SMOKE_ITEM145'] ? { github: Date.now() - 90_000, jira: Date.now() - 90_000 } : { github: Date.now() - 90_000 },
     refreshingProviders: []
+  };
+}
+
+/**
+ * The demo's story, one step per Refresh. Launch: one pull request blocked.
+ * After the first Refresh, #118's checks fail and it joins the blocked list,
+ * so the real "Blocked on you" notification fires — film that with the
+ * window closed or behind another app.
+ */
+export function demoSnapshot(refreshes: number, mergedCount: number): Snapshot {
+  const base = fixtureSnapshot(mergedCount);
+  const now = Date.now();
+  const connected = ['github' as const, 'jira' as const, 'sentry' as const];
+  const refreshedAt = { github: now, jira: now, sentry: now };
+  if (refreshes === 0) return { ...base, connected, refreshedAt };
+  const broken = { ...OPEN_PULLS[0]!, checks: 'failure' as const, updatedAt: new Date(now - 60_000).toISOString() };
+  return {
+    ...base,
+    connected,
+    refreshedAt,
+    blocked: [broken, ...base.blocked],
+    mine: base.mine.map((p) => (p.number === broken.number && p.repo === broken.repo ? broken : p))
   };
 }
 
