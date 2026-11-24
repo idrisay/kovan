@@ -1,11 +1,13 @@
 # Improvements
 
 What changed recently, and what is worth doing next. Newest first. When an
-idea below is built, move it to **Done** with its item number.
+idea below is built, move it to **Done** with its item number and commit.
 
 ## Done
 
 ### Item 181: Edit the agent prompts in Settings › Prompts (2026-11-24)
+
+Commit [`1b97ed7`](https://github.com/idrisay/kovan/commit/1b97ed7) on `linux`.
 
 - Each agent prompt can be changed for every future run: Implement a ticket,
   Fix a Sentry error, Review a pull request, Review pull requests together,
@@ -27,6 +29,8 @@ idea below is built, move it to **Done** with its item number.
 
 ### Item 180: Discuss can be made wider or narrower (2026-11-24)
 
+Commit [`1b97ed7`](https://github.com/idrisay/kovan/commit/1b97ed7) on `linux`.
+
 - Drag the Discuss panel's left edge in the Mixpanel tab. It stays at least
   260px wide, and the report always keeps at least 320px beside it.
 - ←/→ on the focused edge move it 8px (⇧ for 32px). Double-click goes back
@@ -37,6 +41,8 @@ idea below is built, move it to **Done** with its item number.
 - Smoke item 180 drags both handles with real mouse input.
 
 ### Item 179: Discuss on Claude Code or any provider; no refetch on the tab (2026-11-24)
+
+Commit [`55f9aad`](https://github.com/idrisay/kovan/commit/55f9aad) on `linux`.
 
 - The model under the Discuss question box is a picker. It offers every
   opencode provider, plus "Claude Code, Codex, your commands": every Claude
