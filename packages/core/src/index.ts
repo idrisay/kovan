@@ -37,6 +37,7 @@ export * from './promptSettings';
 // code is reached through `@kovan/core/node` instead, which only the main
 // process imports.
 export * from './prompts';
+export * from './promptTemplates';
 export * from './testAccounts';
 export * from './quick';
 export * from './reviewTools';

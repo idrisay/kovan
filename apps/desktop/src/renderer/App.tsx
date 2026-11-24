@@ -1859,17 +1859,19 @@ export function App() {
       <DictationLayer />
       {quickOpen && <QuickOpen onOpen={openFromQuick} onClose={() => setQuickOpen(false)} />}
 
+      {runSheet && (
+        <RunSheet
+          kind={runSheet.kind} pull={runSheet.pull} issue={runSheet.issue} sentry={runSheet.sentry}
+          onClose={() => setRunSheet(undefined)} onStarted={onStarted}
+        />
+      )}
+      {/* After the run sheet, so Settings opened from it (item 181's "Change it
+          for every run") sits on top and the sheet is there when it closes. */}
       {connecting && (
         <Settings
           onClose={() => { setConnecting(false); setSettingsSection(undefined); }}
           connected={snapshot.connected}
           section={settingsSection}
-        />
-      )}
-      {runSheet && (
-        <RunSheet
-          kind={runSheet.kind} pull={runSheet.pull} issue={runSheet.issue} sentry={runSheet.sentry}
-          onClose={() => setRunSheet(undefined)} onStarted={onStarted}
         />
       )}
     </div>

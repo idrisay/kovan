@@ -280,7 +280,8 @@ export class Agents {
       const own = subject.together.pulls.find((p) => p.pull.repo === subject.pull!.repo && p.pull.number === subject.pull!.number);
       return renderGroupReviewPrompt(subject.together.key, [own ?? { pull: subject.pull }, ...subject.together.pulls.filter((p) => p !== own)], {
         context: subject.together.context,
-        reviewers
+        reviewers,
+        template: this.host.config.get('prompt.template.groupReview', '') || undefined
       });
     }
 

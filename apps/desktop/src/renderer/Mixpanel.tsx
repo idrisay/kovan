@@ -25,7 +25,7 @@ import { useMenuDismiss } from './menuDismiss';
 import { menuPlace, type MenuPlace } from './menuPlace';
 import { QuickModelPicker } from './Quick';
 import { OPEN_SETTINGS } from './Reviewers';
-import { Resizer } from './Resizer';
+import { Resizer, restoreWidth } from './Resizer';
 import { GroupHead } from './rows';
 import {
   ChartIcon, ChevronIcon, CloseIcon, OpenLinkIcon, PinIcon, PlusIcon, RefreshIcon, SearchIcon, SparklesIcon, TrashIcon
@@ -209,6 +209,19 @@ const memory: {
 
 const SELECTED_KEY = 'kovan.mixpanel-selected';
 const DISCUSS_KEY = 'kovan.mixpanel-discuss';
+
+/**
+ * Discuss's width (item 180): dragged from its left edge, kept in
+ * `--discuss-w` and remembered across launches. The report keeps at least
+ * `REPORT_MIN` beside it; the stylesheet holds the same limits, so a window
+ * made smaller later squeezes the panel rather than the report.
+ */
+const DISCUSS_WIDTH_KEY = 'kovan.mixpanel-discuss-width';
+const DISCUSS_MIN = 260;
+const REPORT_MIN = 320;
+const discussMax = (panel: HTMLElement) =>
+  Math.max(DISCUSS_MIN, (panel.parentElement?.getBoundingClientRect().width ?? window.innerWidth) - REPORT_MIN);
+restoreWidth('--discuss-w', DISCUSS_WIDTH_KEY, (px) => Math.max(DISCUSS_MIN, Math.round(px)));
 
 function readLocal(key: string): string | null {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -698,7 +711,15 @@ function ReportPane({
           </div>
         )}
       </div>
-      {discuss && <DiscussPanel report={report} result={result} onClose={() => toggleDiscuss(false)} onNotes={setNotes} />}
+      {discuss && (
+        <>
+          <Resizer
+            edge="before" cssVar="--discuss-w" storageKey={DISCUSS_WIDTH_KEY}
+            min={DISCUSS_MIN} max={discussMax} label="Resize Discuss"
+          />
+          <DiscussPanel report={report} result={result} onClose={() => toggleDiscuss(false)} onNotes={setNotes} />
+        </>
+      )}
     </>
   );
 }

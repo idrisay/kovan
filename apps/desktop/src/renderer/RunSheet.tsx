@@ -11,6 +11,8 @@ import type {
 import { CloseIcon, RefreshIcon } from './icons';
 import { TestEnvironmentPicker } from './TestEnvironments';
 import { AgentLimitsNote } from './AgentLimits';
+import { PROMPTS_CHANGED } from './PromptSettings';
+import { openSettings } from './Reviewers';
 
 const LAST_MODEL_KEY = 'runner.lastModel';
 
@@ -238,6 +240,17 @@ export function RunSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [together]);
 
+  // A prompt or the shared values saved in Settings › Prompts (item 181),
+  // opened from the link above the prompt: rebuilt the same way.
+  useEffect(() => {
+    const changed = () => { if (edited) setStale(true); else rebuild(test); };
+    window.addEventListener(PROMPTS_CHANGED, changed);
+    return () => window.removeEventListener(PROMPTS_CHANGED, changed);
+  }, [edited, rebuild, test]);
+
+  // Which prompt in Settings › Prompts this run starts from.
+  const promptKind = sentry ? 'sentry' : kind === 'review' && together ? 'groupReview' : kind;
+
   // The clone of each ticked pull request's repository joins the folders, and
   // leaves again when unticked; only the ones added here, never yours.
   const autoFolders = useRef<Set<string>>(new Set());
@@ -423,7 +436,7 @@ export function RunSheet({
             Prompt — edit before sending if you want
             {stale && (
               <>
-                {' · '}the environment or the pull requests changed after you edited it.{' '}
+                {' · '}what it's built from changed after you edited it.{' '}
                 <button type="button" className="link" onClick={() => rebuild(test)}>Rebuild prompt</button>
               </>
             )}
@@ -435,6 +448,13 @@ export function RunSheet({
               onClick={(e) => { e.preventDefault(); setPromptOpen((v) => { remember(PROMPT_OPEN_KEY, !v); return !v; }); }}
             >
               {promptOpen ? 'Fold' : `Show all ${prompt.split('\n').length} lines`}
+            </button>
+            {' · '}
+            <button
+              type="button" className="link" title="Settings › Prompts: the text every run of this kind starts from"
+              onClick={(e) => { e.preventDefault(); openSettings(`prompts:${promptKind}`); }}
+            >
+              Change it for every run
             </button>
           </span>
           <span className="prompt-field">

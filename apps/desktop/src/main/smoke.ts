@@ -761,6 +761,12 @@ export async function smokeUi(
   if (process.env['KOVAN_SMOKE_ITEM172'] && mode === 'seeded') {
     return { item172: await driveItem172(win, process.env['KOVAN_SMOKE_ITEM172']) };
   }
+  if (process.env['KOVAN_SMOKE_ITEM181'] && mode === 'seeded') {
+    return { item181: await driveItem181(win, process.env['KOVAN_SMOKE_ITEM181']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM180'] && mode === 'seeded') {
+    return { item180: await driveItem180(win, process.env['KOVAN_SMOKE_ITEM180']) };
+  }
   if (process.env['KOVAN_SMOKE_ITEM179'] && mode === 'seeded') {
     return { item179: await driveItem179(win, process.env['KOVAN_SMOKE_ITEM179']) };
   }
@@ -5132,6 +5138,230 @@ async function driveItem174(win: BrowserWindow, prefix: string): Promise<Record<
 }
 
 /**
+ * Connects Mixpanel (the `smokeClient` fixture) on the throwaway profile and
+ * puts its tab in the rail. Items 179 and 180.
+ */
+async function mixpanelFixtureTab(win: BrowserWindow): Promise<void> {
+  win.setSize(1440, 900);
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `Promise.all([
+    window.kovan.setSetting('mixpanel.region', 'eu'), window.kovan.setSetting('mixpanel.projectId', '12345'),
+    window.kovan.setSetting('mixpanel.username', 'kovan.smoke'), window.kovan.setSecret('mixpanel', 'smoke-secret'),
+    window.kovan.setSetting('mixpanel.rail', true)
+  ])`);
+  win.webContents.reload();
+  await new Promise((r) => setTimeout(r, 2_500));
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  await until(win, `document.querySelector('.rail-item[data-view="mixpanel"]')`, 15_000);
+}
+
+/**
+ * Item 181: Settings › Prompts. From a ticket's run sheet, "Change it for
+ * every run" opens the Implement prompt on top of the sheet; a misspelled
+ * placeholder is named; a saved edit and new shared values rebuild the open
+ * sheet's prompt; Reset brings the built-in text back.
+ */
+async function driveItem181(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const failures: string[] = [];
+  const expect = (ok: unknown, what: string) => { if (!ok) failures.push(what); };
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await win.webContents.capturePage();
+    await pause(400);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const type = (selector: string, js: string) => read(win, `(() => {
+    const box = document.querySelector(${JSON.stringify(selector)});
+    const next = (${js})(box.value);
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(box, next);
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  const runPrompt = () => read(win, `document.getElementById('run-prompt')?.value ?? ''`) as Promise<string>;
+  const button = (scope: string, text: string) =>
+    `Array.from(document.querySelectorAll('${scope} button')).find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
+
+  win.setSize(1440, 900);
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `window.kovan.setSetting('prompt.conventions', ${JSON.stringify({
+    baseBranch: 'develop', checks: ['npm run type-check'], untouchable: [], pullRequestReviewers: ['gidyb — Gidy', 'ledanni — Danni']
+  })})`);
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  await read(win, `document.querySelector('.rail-item[data-view="tickets"]')?.click()`);
+  await pause(300);
+  await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('button')).some(b => /in an agent/.test(b.textContent))`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('button')).find(b => /in an agent/.test(b.textContent))?.click()`);
+  await until(win, `document.getElementById('run-prompt')?.value.includes('Open the pull request against develop')`, 10_000);
+  const first = await runPrompt();
+  expect(first.includes('Request a review from gidyb — Gidy and ledanni — Danni') && first.includes('no test plan'), 'run sheet prompt before');
+
+  // The link opens Settings at this prompt, on top of the sheet.
+  await read(win, `${button('.run-sheet, .sheet', 'Change it for every run')}.click()`);
+  await until(win, `document.querySelector('.prompt-settings')`, 5_000);
+  const opened = await read(win, `(() => {
+    const tab = document.querySelector('.prompt-tab[aria-selected="true"]')?.textContent ?? '';
+    const s = document.querySelector('.sheet.settings').getBoundingClientRect();
+    const top = document.elementFromPoint(s.left + s.width / 2, s.top + 30);
+    return { tab, onTop: Boolean(top?.closest('.sheet.settings')), sheetStillOpen: Boolean(document.getElementById('run-prompt')) };
+  })()`) as { tab: string; onTop: boolean; sheetStillOpen: boolean };
+  expect(opened.tab.startsWith('Implement a ticket') && opened.onTop && opened.sheetStillOpen, `opened ${JSON.stringify(opened)}`);
+
+  // A misspelled name is named; then the real edit.
+  await type('.prompt-text', `(v) => v + '\\n\${prReviewer}'`);
+  await pause(150);
+  const typo = await read(win, `document.querySelector('.prompt-editor .settings-note.error')?.textContent ?? ''`);
+  expect(String(typo).includes('${prReviewer}'), `typo note ${String(typo)}`);
+  await type('.prompt-text', `(v) => v.replace('\\n\${prReviewer}', '').replace('and nothing else — no test plan.', 'and a short test plan.')`);
+  await read(win, `${button('.prompt-actions', 'Preview')}.click()`);
+  await until(win, `document.querySelector('.prompt-preview pre')`, 3_000);
+  const preview = await read(win, `document.querySelector('.prompt-preview pre').textContent`) as string;
+  expect(preview.includes('a short test plan') && preview.includes('Request a review from gidyb — Gidy') && !/\$\{\w+\}/.test(preview), 'preview');
+  await shot('editor');
+  await read(win, `${button('.prompt-actions', 'Save prompt')}.click()`);
+  await pause(300);
+  const stored = await read(win, `window.kovan.settings().then(s => ({ text: s['prompt.template.implement'], base: (s['prompt.templateBase'] || {}).implement }))`) as { text?: string; base?: string };
+  expect(stored.text?.includes('a short test plan') && stored.base, `stored ${JSON.stringify(stored).slice(0, 120)}`);
+  const tabMark = await read(win, `document.querySelector('.prompt-tab[aria-selected="true"]')?.textContent ?? ''`);
+
+  // Shared values: one more reviewer.
+  await type('.prompt-shared textarea', `(v) => v + '\\noctocat — Mona'`);
+  await read(win, `${button('.prompt-shared', 'Save shared values')}.click()`);
+  await pause(300);
+  const shared = await read(win, `window.kovan.settings().then(s => s['prompt.conventions'].pullRequestReviewers)`) as string[];
+  expect(shared.includes('octocat — Mona'), `shared ${JSON.stringify(shared)}`);
+
+  // Closed: the sheet's prompt was rebuilt from both.
+  await read(win, `document.querySelector('.sheet.settings [aria-label="Close"]').click()`);
+  await until(win, `!document.querySelector('.sheet.settings')`, 3_000);
+  await until(win, `document.getElementById('run-prompt')?.value.includes('a short test plan')`, 5_000);
+  const rebuilt = await runPrompt();
+  expect(rebuilt.includes('a short test plan') && rebuilt.includes('ledanni — Danni and octocat — Mona'), 'run sheet rebuilt');
+
+  // Reset, after a confirm, back to the built-in text.
+  await read(win, `${button('.run-sheet, .sheet', 'Change it for every run')}.click()`);
+  await until(win, `document.querySelector('.prompt-settings')`, 5_000);
+  await read(win, `${button('.prompt-actions', 'Reset to built-in…')}.click()`);
+  await read(win, `${button('.prompt-confirm', 'Reset')}.click()`);
+  await pause(300);
+  const afterReset = await read(win, `window.kovan.settings().then(s => s['prompt.template.implement'])`);
+  expect(afterReset === '', `after reset ${JSON.stringify(afterReset)}`);
+  await read(win, `document.querySelector('.sheet.settings [aria-label="Close"]').click()`);
+  await until(win, `document.getElementById('run-prompt')?.value.includes('no test plan')`, 5_000);
+  const back = await runPrompt();
+  expect(back.includes('no test plan'), 'run sheet back to built-in');
+
+  if (failures.length) throw new Error(`item 181: ${failures.join('; ')}`);
+  return { opened, typo, tabMark, shared, storedBase: stored.base, rebuiltHasEdit: rebuilt.includes('a short test plan') };
+}
+
+/**
+ * Item 180: Discuss's width is dragged from its left edge, with real mouse
+ * events through the handle's pointer capture: wider to the left, never so
+ * wide the report loses its 320px, arrow keys, remembered, and double-click
+ * back to the default.
+ */
+async function driveItem180(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const failures: string[] = [];
+  const expect = (ok: unknown, what: string) => { if (!ok) failures.push(what); };
+  await mixpanelFixtureTab(win);
+  await read(win, `document.querySelector('.rail-item[data-view="mixpanel"]').click()`);
+  await until(win, `Array.from(document.querySelectorAll('.rows .row-title')).some(e => e.textContent === 'Weekly signups')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.rows .row-title')).find(e => e.textContent === 'Weekly signups').closest('button').click()`);
+  await until(win, `document.querySelector('.mp-chart')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.mp-actions button')).find(b => b.textContent.includes('Discuss')).click()`);
+  await until(win, `document.querySelector('.mp-dock') && document.querySelector('[aria-label="Resize Discuss"]')`, 5_000);
+  await pause(300);
+
+  const measure = () => read(win, `(() => {
+    const dock = document.querySelector('.mp-dock').getBoundingClientRect();
+    const pane = document.querySelector('.mp-pane').getBoundingClientRect();
+    const bar = document.querySelector('[aria-label="Resize Discuss"]').getBoundingClientRect();
+    let saved = null; try { saved = localStorage.getItem('kovan.mixpanel-discuss-width'); } catch {}
+    return { dock: Math.round(dock.width), pane: Math.round(pane.width), x: Math.round(bar.left + bar.width / 2), y: Math.round(bar.top + 200), saved };
+  })()`) as Promise<{ dock: number; pane: number; x: number; y: number; saved: string | null }>;
+  // Through the debugger protocol, as the sidebar's and terminal's resize
+  // tests do: only real input is granted pointer capture.
+  win.webContents.debugger.attach('1.3');
+  const mouse = (type: string, x: number, y: number, buttons: number) =>
+    win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+      type, x, y, button: 'left', buttons, clickCount: 1, pointerType: 'mouse'
+    });
+  const drag = async (from: { x: number; y: number }, dx: number) => {
+    await mouse('mousePressed', from.x, from.y, 1);
+    for (let i = 1; i <= 10; i++) await mouse('mouseMoved', from.x + Math.round((dx * i) / 10), from.y, 1);
+    await pause(80);
+    await mouse('mouseReleased', from.x + dx, from.y, 0);
+    await pause(250);
+  };
+
+  const before = await measure();
+  await drag(before, -200);
+  const wider = await measure();
+  expect(Math.abs(wider.dock - (before.dock + 200)) <= 2, `drag left 200: ${before.dock} → ${wider.dock}`);
+  expect(wider.saved === String(wider.dock), `remembered ${wider.saved} for ${wider.dock}`);
+
+  await drag(wider, -3000);
+  const widest = await measure();
+  expect(widest.dock === widest.pane - 320, `widest ${widest.dock} in a pane of ${widest.pane}`);
+
+  await drag(widest, 3000);
+  const narrowest = await measure();
+  expect(narrowest.dock === 260, `narrowest ${narrowest.dock}`);
+
+  await read(win, `(() => {
+    const bar = document.querySelector('[aria-label="Resize Discuss"]');
+    bar.focus();
+    bar.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', shiftKey: true, bubbles: true }));
+  })()`);
+  await pause(150);
+  const keyed = await measure();
+  expect(keyed.dock === narrowest.dock + 32, `shift+left ${narrowest.dock} → ${keyed.dock}`);
+
+  // The sidebar's own handle, the shared Resizer's defaults: still sizes the
+  // list on its left, stores its own key, and leaves Discuss alone.
+  const side = () => read(win, `(() => {
+    const q = document.querySelector('.queue[aria-label="Mixpanel"]').getBoundingClientRect();
+    const bar = document.querySelector('[aria-label="Resize sidebar"]').getBoundingClientRect();
+    let saved = null; try { saved = localStorage.getItem('kovan.sidebar-width'); } catch {}
+    return { queue: Math.round(q.width), x: Math.round(bar.left + bar.width / 2), y: Math.round(bar.top + 200), saved,
+      dock: Math.round(document.querySelector('.mp-dock').getBoundingClientRect().width) };
+  })()`) as Promise<{ queue: number; x: number; y: number; saved: string | null; dock: number }>;
+  const sideBefore = await side();
+  await drag(sideBefore, 100);
+  const sideAfter = await side();
+  expect(sideAfter.queue === sideBefore.queue + 100 && sideAfter.saved === String(sideAfter.queue) && sideAfter.dock === keyed.dock,
+    `sidebar drag ${JSON.stringify(sideBefore)} → ${JSON.stringify(sideAfter)}`);
+  await read(win, `document.querySelector('[aria-label="Resize sidebar"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await pause(200);
+  const sideReset = await side();
+  expect(sideReset.queue === sideBefore.queue && sideReset.saved === null, `sidebar reset ${JSON.stringify(sideReset)}`);
+  const sidebar = { before: sideBefore.queue, after: sideAfter.queue, reset: sideReset.queue };
+
+  await drag(keyed, -150);
+  win.webContents.invalidate();
+  await pause(300);
+  await win.webContents.capturePage();
+  await pause(400);
+  await writeFile(`${prefix}-resized.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-resized.png`);
+
+  win.webContents.debugger.detach();
+  await read(win, `document.querySelector('[aria-label="Resize Discuss"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await pause(300);
+  const reset = await measure();
+  expect(reset.dock === before.dock && reset.saved === null, `double-click reset to ${reset.dock}, saved ${reset.saved}`);
+
+  if (failures.length) throw new Error(`item 180: ${failures.join('; ')}`);
+  return { before, wider, widest, narrowest, keyed, sidebar, reset };
+}
+
+/**
  * Item 179: coming back to the Mixpanel tab asks Mixpanel for nothing and
  * draws the report at once; Discuss runs on a model picked under its
  * question box, here the Claude Code Kovan found for its Agents tab, never
@@ -5149,18 +5379,7 @@ async function driveItem179(win: BrowserWindow, prefix: string): Promise<Record<
   };
   const failures: string[] = [];
   const expect = (ok: unknown, what: string) => { if (!ok) failures.push(what); };
-  win.setSize(1440, 900);
-  win.show();
-  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
-  await read(win, `Promise.all([
-    window.kovan.setSetting('mixpanel.region', 'eu'), window.kovan.setSetting('mixpanel.projectId', '12345'),
-    window.kovan.setSetting('mixpanel.username', 'kovan.smoke'), window.kovan.setSecret('mixpanel', 'smoke-secret'),
-    window.kovan.setSetting('mixpanel.rail', true)
-  ])`);
-  win.webContents.reload();
-  await pause(2_500);
-  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
-  await until(win, `document.querySelector('.rail-item[data-view="mixpanel"]')`, 15_000);
+  await mixpanelFixtureTab(win);
 
   // First visit: the list once, the report's numbers once.
   await read(win, `document.querySelector('.rail-item[data-view="mixpanel"]').click()`);

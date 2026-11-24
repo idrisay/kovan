@@ -3413,7 +3413,9 @@ li.pinnable > .pin-toggle:focus-visible { opacity: 1; }
 
 /* Discuss */
 .mp-dock {
-  width: clamp(280px, 30%, 380px); flex: none; display: flex; flex-direction: column; min-height: 0;
+  /* --discuss-w is set by dragging its left edge (item 180); the limits match
+     DISCUSS_MIN and REPORT_MIN in Mixpanel.tsx. */
+  width: var(--discuss-w, clamp(280px, 30%, 380px)); min-width: 260px; max-width: calc(100% - 320px); flex: none; display: flex; flex-direction: column; min-height: 0;
   background: var(--sidebar); border-left: 1px solid var(--hair);
 }
 .mp-dock-head { display: flex; align-items: center; gap: 8px; padding: 11px 12px 10px 14px; border-bottom: 1px solid var(--hair); color: var(--meta); }
@@ -3488,3 +3490,44 @@ li.pinnable > .pin-toggle:focus-visible { opacity: 1; }
 /* The kovan command (item 178), in Settings › Text & terminal. */
 .cli-actions { display: flex; align-items: center; gap: 14px; margin: 2px 0 6px; }
 .settings-note code { font-family: var(--mono); font-size: 11px; color: var(--secondary); }
+
+/* Settings › Prompts (item 181): a tab per prompt, its text, the names it
+   fills, and the shared values. Edited text is mono, as code is (rule 5). */
+.prompt-settings h3 { margin-top: 14px; }
+.prompt-tabs { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+.prompt-tab {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--hair-strong); background: var(--card); color: var(--meta); font-size: 11.5px;
+}
+.prompt-tab:hover { color: var(--title); }
+.prompt-tab.on { border-color: var(--clay); color: var(--title); background: color-mix(in srgb, var(--clay) 8%, var(--card)); }
+.prompt-tab-mark { font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--running); }
+.prompt-tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--clay); }
+.prompt-editor { display: flex; flex-direction: column; gap: 8px; }
+.prompt-editor-head { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.prompt-editor-head .settings-note { margin: 0; }
+.badge.quiet { color: var(--meta); background: var(--wash); }
+.provider .prompt-text, .provider .prompt-shared textarea {
+  width: 100%; resize: vertical; background: var(--rail); border: 1px solid var(--hair-strong); border-radius: 8px;
+  padding: 8px 10px; color: var(--prose); font-family: var(--mono); font-size: 11.5px; line-height: 1.55;
+}
+.provider .prompt-text:focus, .provider .prompt-shared textarea:focus { outline: none; border-color: color-mix(in srgb, var(--clay) 50%, transparent); }
+.prompt-placeholders { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.prompt-placeholders .settings-note { margin: 0 4px 0 0; }
+.prompt-chip {
+  font-family: var(--mono); font-size: 10.5px; color: var(--secondary); background: var(--wash);
+  border: 1px solid var(--hair); border-radius: 5px; padding: 1px 6px;
+}
+.prompt-chip:hover { color: var(--title); border-color: var(--hair-strong); }
+.prompt-editor > .settings-note { margin: 0; }
+.prompt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.prompt-actions .settings-note { margin: 0; }
+.prompt-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 11.5px; color: var(--running); }
+.prompt-preview pre {
+  margin: 0; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  background: var(--wash); border-radius: 8px; padding: 10px 12px;
+  font-family: var(--mono); font-size: 11px; line-height: 1.55; color: var(--prose);
+}
+.prompt-preview .settings-note { margin: 0 0 6px; }
+.prompt-shared { margin-top: 18px; padding-top: 4px; border-top: 1px solid var(--hair); }
+.prompt-shared label span code { font-family: var(--mono); font-size: 10.5px; color: var(--secondary); }

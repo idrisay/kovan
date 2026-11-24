@@ -154,6 +154,12 @@ dot-folder in your home, mode 600, never read back). nv-review is always the fir
 - **Sidebar** (`aside.queue` + `<Resizer />` + `main.pane`): every rail view has
   this shape. The width comes from `--queue-w` and the text size from
   `--sidebar-zoom`. Clicking the active rail icon hides it.
+- **Resizer** (`Resizer.tsx`): the one drag handle for a panel's width. By
+  default it sits after the sidebar and sizes `--queue-w`; `edge="before"`
+  sizes a panel docked on the right (Discuss), each with its own custom
+  property, storage key and bounds. Every one drags with pointer capture,
+  moves with ←/→ (⇧ for 32px), remembers its width across launches and
+  resets on double-click. A new resizable panel uses this, not its own.
 - **Rows** (`.row`, `.row.one-line`): list items. Actions that aren't always
   needed (rename, open, close) are **hover-revealed and take no space until
   hover** (`display: none` → `grid` on `:hover` / `:focus-within`), so names
@@ -184,8 +190,8 @@ dot-folder in your home, mode 600, never read back). nv-review is always the fir
   never dropped by itself, except a closed session's, whose id can't come
   back. Pins are the `pins` setting, not localStorage.
 - **Settings** (`Settings.tsx`, item 99): one list, no side nav. A search
-  field, then seven rows — Appearance, Text & terminal, Notifications,
-  Dictation, Agents, Connections, Environments — each saying its current
+  field, then eight rows — Appearance, Text & terminal, Notifications,
+  Dictation, Agents, Prompts, Connections, Environments — each saying its current
   values in one line. A row opens in place and closes the one that was open;
   its body mounts only then, so opening Settings loads nothing. Search matches
   section names and `SEARCH_INDEX` (every control's label, plus words people
@@ -195,6 +201,25 @@ dot-folder in your home, mode 600, never read back). nv-review is always the fir
   it's one people check.
 - **Settings sections**: an `h3`, a `.settings-note` explaining what it does in
   plain words, then controls. Steppers use `.font-size-control`.
+- **Prompts** (`PromptSettings.tsx`, core `promptTemplates.ts`, item 181): the
+  text each agent run starts from, one tab per kind (Implement a ticket, Fix a
+  Sentry error, Review a pull request, Review pull requests together, Unblock
+  a pull request, Check it shipped), plus the shared values filled into them
+  (`prompt.conventions`: base branch, pull request reviewers, checks, files
+  not to edit). A prompt is its built-in text in `prompts.ts` until you save
+  your own (`prompt.template.<kind>`, read by `Agents.basePrompt`); saving the
+  built-in text, or Reset (after an inline confirm), clears it. Placeholder
+  chips insert `${name}` at the cursor and say what each becomes; a name the
+  kind doesn't fill is called out (it would reach the agent as written), as is
+  a prompt without `${report}`. Preview renders it on example data with your
+  shared values. The built-in text's fingerprint is kept beside an override
+  (`prompt.templateBase`), so a later change to the built-in prompt is
+  pointed out rather than silently missed. `PROMPT_TEMPLATES` is the
+  catalogue: a new placeholder in a renderer goes into it too, and a test
+  fails until it does. The run sheet links "Change it for every run" to the
+  prompt it was built from. Settings opens above the run sheet, and saving
+  sends `PROMPTS_CHANGED`, which rebuilds the sheet's prompt, or offers
+  Rebuild if you've already edited it.
 - **Split quick button** (`.quick-split`): the label half runs the action, and
   the tag half shows the model plus FREE or `$in/$out`, and opens a provider and
   model picker. Any action that runs a model names that model on its button.
@@ -314,7 +339,10 @@ dot-folder in your home, mode 600, never read back). nv-review is always the fir
   can't list it. A report opens with the chart (headline line in clay, an
   unfinished period dashed, breakdown segments in grey), the numbers as a
   table, and notes. **Discuss** is a ghost toggle, not a run: it opens a panel
-  docked on the right (on `--sidebar`, a step back). Asking runs the model
+  docked on the right (on `--sidebar`, a step back), its width dragged from
+  its left edge (`<Resizer edge="before">`, `--discuss-w`, item 180): 260px at
+  least, never leaving the report under 320px, also held in CSS so a smaller
+  window squeezes the panel and not the report. Asking runs the model
   named by the composer's tag on the report's numbers: the quick model until
   you pick another there (`mixpanel.discussModel`). The tag opens the same
   picker as the Review button (`QuickModelPicker`, opening upward): any

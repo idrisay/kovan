@@ -4,7 +4,7 @@ import { ACTIVITY_SETTINGS, ActivitySettings } from './Activity';
 import { DictationSettings } from './Dictation';
 import {
   DEFAULT_IDLE_MINUTES, DEFAULT_PRICES, PRICE_CHECK_RUNNERS, QUICK_DEFAULT_MODEL,
-  QUICK_DEFAULT_TIMEOUT_SECONDS, applyPriceProposals,
+  PROMPT_TEMPLATES, QUICK_DEFAULT_TIMEOUT_SECONDS, applyPriceProposals,
   type Price, type PriceCheckRunner, type PriceProposal, type PriceRule, type ProviderId
 } from '@kovan/core';
 import { savePrices, useUsage } from './Usage';
@@ -20,6 +20,7 @@ import { ChevronIcon, CloseIcon, SearchIcon } from './icons';
 import { ReviewersSettings } from './Reviewers';
 import { MixpanelHelp, MixpanelRailSetting } from './Mixpanel';
 import { KovanCommandSetting } from './KovanCommand';
+import { PromptSettings } from './PromptSettings';
 
 interface Field {
   key: string;
@@ -477,7 +478,7 @@ function PriceCheckPanel({ rules, fields }: { rules: PriceRule[]; fields: { key:
   );
 }
 
-type SectionId = 'appearance' | 'text' | 'notifications' | 'dictation' | 'agents' | 'connections' | 'environments';
+type SectionId = 'appearance' | 'text' | 'notifications' | 'dictation' | 'agents' | 'prompts' | 'connections' | 'environments';
 
 /**
  * Settings as one list (item 99, option B): each section is a single row that
@@ -494,6 +495,7 @@ const SECTIONS: Section[] = ([
   // These two bodies open with their own heading, which the row already says.
   { id: 'dictation', title: 'Dictation', icon: '◉', ownHeading: true },
   { id: 'agents', title: 'Agents', icon: '▸' },
+  { id: 'prompts', title: 'Prompts', icon: '¶' },
   { id: 'connections', title: 'Connections', icon: '⎇' },
   { id: 'environments', title: 'Environments', icon: '⌂', ownHeading: true }
   // Dictation listens through a Swift helper and Apple's recogniser: macOS only.
@@ -512,6 +514,9 @@ const SEARCH_INDEX: Record<SectionId, string[]> = {
     'Deepgram', 'AssemblyAI', 'API key', 'Model file', 'Language', 'Microphone', 'Voice'],
   agents: ['Buttons on pull requests and tickets', 'Summarize', 'Review', 'Condense earlier comments', 'Quick model', 'Model (opencode)', 'Give up after (seconds)', 'Running agents', 'Idle after (minutes)',
     'Remind me when an agent goes idle', 'Token prices', 'Usage', 'Cost', 'Review model'],
+  prompts: ['Prompts', 'Prompt templates', ...PROMPT_TEMPLATES.map((t) => t.title), 'Work on in an agent', 'Base branch',
+    'Pull request reviewers', 'Checks that must pass', 'Files agents must not edit', 'Placeholders', 'Pull request title',
+    'Pull request body', 'Test plan', 'Reset to built-in'],
   connections: ['Token', 'API key', 'Mixpanel', 'Show Mixpanel in the rail', 'Service account', 'Analytics'],
   environments: ['Environments', 'Test accounts', 'Site URL', 'Basic auth', 'Check it shipped', 'Password']
 };
@@ -662,6 +667,16 @@ export function Settings({
       `idle after ${Number(raw['agents.idleMinutes']) || DEFAULT_IDLE_MINUTES} min`,
       on('agents.remind') ? 'reminders on' : 'reminders off'
     ].filter(Boolean).join(' · '),
+    prompts: (() => {
+      const edited = PROMPT_TEMPLATES.filter((t) => typeof raw[t.settingKey] === 'string' && (raw[t.settingKey] as string).trim()).length;
+      const shared = raw['prompt.conventions'] as { baseBranch?: string; pullRequestReviewers?: string[] } | undefined;
+      const reviewers = shared?.pullRequestReviewers?.length ?? 0;
+      return [
+        edited ? `${edited} of ${PROMPT_TEMPLATES.length} customised` : 'All built-in',
+        `base ${shared?.baseBranch || 'main'}`,
+        reviewers ? `${reviewers} pull request reviewer${reviewers === 1 ? '' : 's'}` : ''
+      ].filter(Boolean).join(' · ');
+    })(),
     connections: providers.length === 0 ? '' : [
       ...providers.filter((id) => connected.includes(id as ProviderId)).map((id) => `✓ ${label(id)}`),
       (() => {
@@ -712,7 +727,8 @@ export function Settings({
   // Opened at 'connections:Mixpanel': scroll to that card once it's drawn.
   useEffect(() => {
     const [id, find] = section?.split(':') ?? [];
-    if (id && find) toggleOpen(id as SectionId, find);
+    // 'prompts:review' names the prompt to open, not text to find.
+    if (id && find && id !== 'prompts') toggleOpen(id as SectionId, find);
     // Only on open: later changes to `section` come with a new sheet.
   }, []);
 
@@ -771,6 +787,8 @@ export function Settings({
             <TokenPriceSettings />
           </>
         );
+      case 'prompts':
+        return <PromptSettings initial={section?.startsWith('prompts:') ? section.slice('prompts:'.length) : undefined} />;
       case 'connections':
         return providers.map((provider) => (
           <div key={provider} className="settings-connection">
