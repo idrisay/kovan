@@ -67,6 +67,7 @@ const api = {
   mixpanelRemoveAdded: (id: number) => ipcRenderer.invoke('kovan:mixpanel-remove-added', id),
   mixpanelThread: (id: number) => ipcRenderer.invoke('kovan:mixpanel-thread', id),
   mixpanelThreadClear: (id: number) => ipcRenderer.invoke('kovan:mixpanel-thread-clear', id),
+  mixpanelModelSet: (model: string) => ipcRenderer.invoke('kovan:mixpanel-model-set', model),
   mixpanelAsk: (report: unknown, question: string) => ipcRenderer.invoke('kovan:mixpanel-ask', report, question),
   mixpanelNoteAdd: (id: number, text: string) => ipcRenderer.invoke('kovan:mixpanel-note-add', id, text),
   mixpanelNoteRemove: (id: number, index: number) => ipcRenderer.invoke('kovan:mixpanel-note-remove', id, index),

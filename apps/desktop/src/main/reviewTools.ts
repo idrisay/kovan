@@ -136,13 +136,7 @@ export class ReviewTools {
   /** Agents and commands Kovan already found, minus the ones already added. */
   async candidates(): Promise<ReviewCandidate[]> {
     const added = new Set(this.list().map((t) => t.command));
-    const runners = SMOKE
-      ? [
-          { command: 'claude', invocation: 'executable' }, { command: 'codex', invocation: 'executable' },
-          { command: 'claude-personal', invocation: 'shellFunction' }, { command: 'nv-review', invocation: 'shellFunction' },
-          { command: 'or-review', invocation: 'shellFunction' }
-        ] as Runner[]
-      : await this.runners();
+    const runners = await this.machineRunners();
     const found: ReviewCandidate[] = runners
       .filter((r) => r.command && r.invocation !== 'loginShell' && r.command !== 'opencode' && !added.has(r.command))
       .map((r) => {
@@ -159,6 +153,30 @@ export class ReviewTools {
       }
     }
     return found;
+  }
+
+  /** The agents and commands Kovan found for its Agents tab; a fixed few in a smoke run. */
+  private async machineRunners(): Promise<Runner[]> {
+    return SMOKE
+      ? [
+          { command: 'claude', invocation: 'executable' }, { command: 'codex', invocation: 'executable' },
+          { command: 'claude-personal', invocation: 'shellFunction' }, { command: 'nv-review', invocation: 'shellFunction' },
+          { command: 'or-review', invocation: 'shellFunction' }
+        ] as Runner[]
+      : this.runners();
+  }
+
+  /**
+   * A Claude Code or Codex that Kovan already runs from its Agents tab, as a
+   * reviewer that was never added: Discuss offers these directly, so using
+   * your Claude there takes no setup. Undefined for anything else.
+   */
+  async agentAsTool(command: string): Promise<ReviewTool | undefined> {
+    const family = agentFamily(command);
+    if (!family || !isSafeCommandName(command)) return undefined;
+    const runners = await this.machineRunners();
+    if (!runners.some((r) => r.command === command && r.invocation !== 'loginShell')) return undefined;
+    return { id: command, kind: 'agent', command, family, timeoutMinutes: 10 };
   }
 
   private async reviewCommandsOnMachine(): Promise<string[]> {
@@ -261,6 +279,23 @@ export class ReviewTools {
     const prompt = pullReviewPrompt(pull, diff, { checkout: true });
     const answer = await this.withWorktree(clone, pull.number, (dir) => this.runAgent(tool, prompt, dir, control));
     return { answer, prompt };
+  }
+
+  /**
+   * One answer to a prompt that isn't a review: Mixpanel's Discuss on Claude,
+   * Codex or one of your commands. Always in an empty temp folder, so even an
+   * agent sees the prompt and nothing else, and runs as read-only as a review.
+   */
+  async ask(tool: ReviewTool, prompt: string): Promise<string> {
+    const control: ReviewRunControl = { onChild: () => undefined, cancelled: () => false };
+    if (SMOKE) return `${tool.command} answered from the report's numbers.`;
+    if (tool.kind === 'command') return this.runCommand(tool, prompt, control);
+    const cwd = await mkdtemp(path.join(tmpdir(), 'kovan-ask-'));
+    try {
+      return await this.runAgent(tool, prompt, cwd, control);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
   }
 
   /**

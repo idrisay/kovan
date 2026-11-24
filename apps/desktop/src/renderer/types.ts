@@ -181,6 +181,8 @@ export interface KovanApi {
   mixpanelRemoveAdded(id: number): Promise<void>;
   mixpanelThread(id: number): Promise<{ messages: DiscussMessage[]; notes: string[]; busy: boolean; model: string }>;
   mixpanelThreadClear(id: number): Promise<void>;
+  /** Discuss's model: an opencode `provider/model` or a reviewer's `model (id)`. Returns the model now in use. */
+  mixpanelModelSet(model: string): Promise<string>;
   mixpanelAsk(report: MixpanelReport, question: string): Promise<DiscussMessage[]>;
   mixpanelNoteAdd(id: number, text: string): Promise<string[]>;
   mixpanelNoteRemove(id: number, index: number): Promise<string[]>;

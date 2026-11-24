@@ -192,7 +192,7 @@ const reviewTools: ReviewTools = new ReviewTools(
 const quick = new QuickModel(host, {
   pull: loadPullDetail, ticket: loadTicket, diff: loadPullDiff, submitReview: postPullReview
 }, reviewTools);
-const mixpanel = new MixpanelService(host, credentials, quick);
+const mixpanel = new MixpanelService(host, credentials, quick, reviewTools);
 const usage = new Usage(host, sessions, () => quick.listJobs());
 const agents = new Agents(host, sessions, quick);
 const running = new RunningAgents(host, sessions, () => {
@@ -798,6 +798,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:mixpanel-remove-added', (_event, id: number) => mixpanel.removeAdded(Number(id)));
   ipcMain.handle('kovan:mixpanel-thread', (_event, id: number) => mixpanel.thread(Number(id)));
   ipcMain.handle('kovan:mixpanel-thread-clear', (_event, id: number) => mixpanel.clearThread(Number(id)));
+  ipcMain.handle('kovan:mixpanel-model-set', (_event, model: string) => mixpanel.setModel(String(model ?? '')));
   ipcMain.handle('kovan:mixpanel-ask', (_event, report: MixpanelReport, question: string) => mixpanel.ask(report, String(question)));
   ipcMain.handle('kovan:mixpanel-note-add', (_event, id: number, text: string) => mixpanel.addNote(Number(id), String(text)));
   ipcMain.handle('kovan:mixpanel-note-remove', (_event, id: number, index: number) => mixpanel.removeNote(Number(id), Number(index)));

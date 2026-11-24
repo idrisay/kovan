@@ -33,6 +33,7 @@ import type { PersonPulls, PullSummary } from '@kovan/core';
 import { Sessions } from './sessions';
 import { PtyHosts } from './ptyClient';
 import { AgentStatus } from './agentStatus';
+import { mixpanelAsked } from './mixpanel';
 import { reviewBasis, trackProblems } from '@kovan/core';
 import { RunStore, type Runner } from '@kovan/agent';
 
@@ -759,6 +760,9 @@ export async function smokeUi(
   }
   if (process.env['KOVAN_SMOKE_ITEM172'] && mode === 'seeded') {
     return { item172: await driveItem172(win, process.env['KOVAN_SMOKE_ITEM172']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM179'] && mode === 'seeded') {
+    return { item179: await driveItem179(win, process.env['KOVAN_SMOKE_ITEM179']) };
   }
   if (process.env['KOVAN_SMOKE_ITEM174'] && mode === 'seeded') {
     return { item174: await driveItem174(win, process.env['KOVAN_SMOKE_ITEM174']) };
@@ -5125,6 +5129,119 @@ async function driveItem174(win: BrowserWindow, prefix: string): Promise<Record<
     await until(win, `!document.querySelector('.quick-model-menu')`, 3_000);
   }
   return report;
+}
+
+/**
+ * Item 179: coming back to the Mixpanel tab asks Mixpanel for nothing and
+ * draws the report at once; Discuss runs on a model picked under its
+ * question box, here the Claude Code Kovan found for its Agents tab, never
+ * added as a reviewer. Mixpanel is `smokeClient`.
+ */
+async function driveItem179(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await win.webContents.capturePage();
+    await pause(400);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const failures: string[] = [];
+  const expect = (ok: unknown, what: string) => { if (!ok) failures.push(what); };
+  win.setSize(1440, 900);
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `Promise.all([
+    window.kovan.setSetting('mixpanel.region', 'eu'), window.kovan.setSetting('mixpanel.projectId', '12345'),
+    window.kovan.setSetting('mixpanel.username', 'kovan.smoke'), window.kovan.setSecret('mixpanel', 'smoke-secret'),
+    window.kovan.setSetting('mixpanel.rail', true)
+  ])`);
+  win.webContents.reload();
+  await pause(2_500);
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  await until(win, `document.querySelector('.rail-item[data-view="mixpanel"]')`, 15_000);
+
+  // First visit: the list once, the report's numbers once.
+  await read(win, `document.querySelector('.rail-item[data-view="mixpanel"]').click()`);
+  await until(win, `Array.from(document.querySelectorAll('.rows .row-title')).some(e => e.textContent === 'Weekly signups')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.rows .row-title')).find(e => e.textContent === 'Weekly signups').closest('button').click()`);
+  await until(win, `document.querySelector('.mp-chart')`, 8_000);
+  const firstVisit = { ...mixpanelAsked };
+  expect(firstVisit.list === 1 && firstVisit.numbers === 1, `first visit asked ${JSON.stringify(firstVisit)}`);
+
+  // Away and back, twice. The chart must be in the first frame painted after
+  // the click: React flushes the click in a microtask, before the next frame.
+  const returns: unknown[] = [];
+  for (let i = 0; i < 2; i++) {
+    await read(win, `document.querySelector('.rail-item[data-view="pulls"]').click()`);
+    await until(win, `!document.querySelector('.mp-pane')`, 5_000);
+    returns.push(await read(win, `(async () => {
+      document.querySelector('.rail-item[data-view="mixpanel"]').click();
+      await new Promise((r) => requestAnimationFrame(r));
+      const text = document.querySelector('.mp-pane')?.innerText ?? '';
+      const list = document.querySelector('.queue[aria-label="Mixpanel"]')?.innerText ?? '';
+      return { chart: Boolean(document.querySelector('.mp-chart')), loading: /Loading/.test(text + list) };
+    })()`));
+    await pause(1_200);
+  }
+  const afterReturns = { ...mixpanelAsked };
+  expect(returns.every((r) => (r as { chart: boolean; loading: boolean }).chart && !(r as { loading: boolean }).loading), `returns drew ${JSON.stringify(returns)}`);
+  expect(afterReturns.list === 1 && afterReturns.numbers === 1, `returns asked ${JSON.stringify(afterReturns)}`);
+
+  // Picking the other report still asks for its numbers.
+  await read(win, `Array.from(document.querySelectorAll('.rows .row-title')).find(e => e.textContent === 'Lessons started').closest('button').click()`);
+  await until(win, `document.querySelector('.mp-title')?.textContent === 'Lessons started' && document.querySelector('.mp-chart')`, 8_000);
+  const afterPick = { ...mixpanelAsked };
+  expect(afterPick.numbers === 2, `picking another report asked ${JSON.stringify(afterPick)}`);
+
+  // Discuss: the model tag opens the picker upward; pick Claude Code as found.
+  await read(win, `Array.from(document.querySelectorAll('.mp-actions button')).find(b => b.textContent.includes('Discuss')).click()`);
+  await until(win, `document.querySelector('.mp-dock .mp-model')`, 5_000);
+  const tagBefore = await read(win, `document.querySelector('.mp-dock .mp-model').innerText`);
+  await read(win, `document.querySelector('.mp-dock .mp-model').click()`);
+  await until(win, `document.querySelector('.quick-model-menu.opens-up')`, 5_000);
+  await read(win, `(() => {
+    const select = document.querySelector('.quick-model-menu select');
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, '~reviewers');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  const claudeRow = `Array.from(document.querySelectorAll('.quick-model-list button')).find(b => b.querySelector('.quick-model-id')?.textContent === 'claude')`;
+  await until(win, claudeRow, 8_000);
+  await pause(300);
+  const menu = await read(win, `(() => {
+    const m = document.querySelector('.quick-model-menu').getBoundingClientRect();
+    const t = document.querySelector('.mp-dock .mp-model').getBoundingClientRect();
+    return { above: m.bottom <= t.top, inWindow: m.top >= 0 && m.right <= window.innerWidth,
+      providers: Array.from(document.querySelectorAll('.quick-model-menu option')).map(o => o.textContent),
+      rows: Array.from(document.querySelectorAll('.quick-model-list button')).map(b => b.innerText.replace(/\\s+/g, ' ')) };
+  })()`) as { above: boolean; inWindow: boolean };
+  expect(menu.above && menu.inWindow, `picker placed ${JSON.stringify(menu)}`);
+  const rows = (menu as unknown as { rows: string[] }).rows.join(' | ');
+  expect(/claude Claude Code/i.test(rows) && /codex Codex/i.test(rows) && /claude-personal/.test(rows), `agent rows ${rows}`);
+  await shot('picker');
+  await read(win, `${claudeRow}.click()`);
+  await until(win, `document.querySelector('.mp-dock .mp-model-name')?.textContent === 'claude'`, 5_000);
+  const saved = await read(win, `window.kovan.settings().then(s => s['mixpanel.discussModel'])`);
+  expect(saved === '(claude)', `saved model ${String(saved)}`);
+  const reviewersAfter = await read(win, `window.kovan.reviewTools().then(t => t.map(x => x.id))`);
+  expect(!(reviewersAfter as string[]).includes('claude'), `picking it added a reviewer: ${JSON.stringify(reviewersAfter)}`);
+
+  // Ask; the answer comes from the reviewer (its smoke stand-in), not opencode.
+  await read(win, `(() => {
+    const box = document.querySelector('#mp-question');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(box, 'Summarize the trend');
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await until(win, `!document.querySelector('.mp-composer button.quick').disabled`, 3_000);
+  await read(win, `document.querySelector('.mp-composer button.quick').click()`);
+  await until(win, `document.querySelector('.mp-msg.model .mp-text')`, 10_000);
+  const answer = await read(win, `document.querySelector('.mp-msg.model').innerText`);
+  expect(String(answer).includes('claude answered'), `answer was ${String(answer)}`);
+  await shot('answered');
+
+  if (failures.length) throw new Error(`item 179: ${failures.join('; ')}`);
+  return { firstVisit, returns, afterReturns, afterPick, tagBefore, menu, saved, reviewersAfter, answer };
 }
 
 /**

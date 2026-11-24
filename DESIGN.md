@@ -314,16 +314,29 @@ dot-folder in your home, mode 600, never read back). nv-review is always the fir
   can't list it. A report opens with the chart (headline line in clay, an
   unfinished period dashed, breakdown segments in grey), the numbers as a
   table, and notes. **Discuss** is a ghost toggle, not a run: it opens a panel
-  docked on the right (on `--sidebar`, a step back). Asking runs the quick
-  model (`QuickModel.askOnce`, named in the composer) on the report's numbers;
-  it may answer with one `mixpanel-query` block, which core checks
+  docked on the right (on `--sidebar`, a step back). Asking runs the model
+  named by the composer's tag on the report's numbers: the quick model until
+  you pick another there (`mixpanel.discussModel`). The tag opens the same
+  picker as the Review button (`QuickModelPicker`, opening upward): any
+  opencode provider (`QuickModel.askOnce`), or, under "Claude Code, Codex,
+  your commands", a reviewer added in Settings › Agents and every Claude Code
+  or Codex the Agents tab already found, offered as found with nothing to add
+  (`ReviewTools.agentAsTool`; picking one adds no reviewer). Those run through
+  `ReviewTools.ask`: in an empty temp folder, read-only, prompt on stdin, on
+  the CLI's own sign-in. Not nv-review. The
+  composer is a plain box, not a `<form>`, because the picker holds one. The
+  model may answer with one `mixpanel-query` block, which core checks
   (`parseMixpanelQuery`: an event, a period of a year at most, one breakdown
   property, equality filters) and main runs as a read-only segmentation query,
   at most two per question. Kovan writes Mixpanel's expressions itself, never
-  the model. Nothing polls: the list loads when the tab opens, numbers when a
-  report opens and are reused for 15 minutes (the Query API allows 60 an
-  hour), the model only on Ask. Numbers, conversations and notes are kept in
-  `mixpanel/state.json`.
+  the model. Nothing polls: the list is asked for once, the first time the tab
+  opens with none kept (or after the last try failed), then only on its
+  Reload button or new credentials; numbers when you pick a report in the
+  list, reused for 15 minutes (the Query API allows 60 an hour); the model
+  only on Ask. Coming back to the tab asks for nothing: the view keeps what
+  it had on screen for the session (`memory` in `Mixpanel.tsx`) and the open
+  report shows its kept numbers with their age, Refresh beside them. The
+  list, numbers, conversations and notes are kept in `mixpanel/state.json`.
 - **Activity inbox** (`Activity.tsx`, `main/activityFeed.ts`, `diffActivity`
   in core): a rail tab (bell) listing what happened to you — review
   requested, approved, changes requested, new ticket, new comment — grouped

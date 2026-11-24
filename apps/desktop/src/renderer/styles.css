@@ -3445,7 +3445,18 @@ li.pinnable > .pin-toggle:focus-visible { opacity: 1; }
   padding: 8px 10px 4px; outline: none; line-height: 1.5;
 }
 .mp-composer-foot { display: flex; align-items: center; gap: 8px; padding: 4px 6px 6px 10px; }
-.mp-model { flex: 1; min-width: 0; font-family: var(--mono); font-size: 10.5px; color: var(--meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The model tag: what answers, and a click away from the picker (which opens upward, the composer sits at the bottom). */
+.mp-model-pick { position: relative; flex: 1; min-width: 0; display: flex; }
+.mp-model {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0;
+  background: none; border: 0; border-radius: 5px; padding: 2px 4px; margin-left: -4px;
+  font-family: var(--mono); font-size: 10.5px; color: var(--meta); cursor: pointer;
+}
+.mp-model:hover:not(:disabled), .mp-model[aria-expanded='true'] { color: var(--title); background: rgba(255, 255, 255, 0.05); }
+.mp-model:disabled { cursor: default; }
+.mp-model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-model .quick-tag, .mp-model svg { flex: none; }
+.quick-model-menu.opens-up { top: auto; bottom: calc(100% + 6px); }
 .mp-composer .quick { padding: 3px 12px; }
 
 /* Mixpanel set-up (item 177): what's missing, where to find it, one way to fix it. */

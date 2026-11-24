@@ -8,21 +8,27 @@
  * opens a panel beside it where a model answers questions from the report's
  * numbers and may ask Kovan for a few read-only queries of its own.
  *
- * Nothing here polls. The list is asked for when the tab opens, numbers when
- * a report opens (main reuses them for 15 minutes), the model only on Send.
+ * Nothing here polls. The list is asked for once (main keeps it until
+ * Reload), numbers when you pick a report (main reuses them for 15 minutes),
+ * the model only on Ask. Coming back to the tab asks for nothing: what was
+ * on screen is kept in `memory` and shown again as it was.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   describeMixpanelQuery, formatChange, formatMetric, groupMixpanelReports, headline, lastPeriodOpen, mixpanelReportUrl,
+  parseReviewToolModel, reviewToolLabel,
   type DiscussMessage, type MixpanelReport, type MixpanelResult, type MixpanelSeries
 } from '@kovan/core';
 import type { MixpanelReportList, MixpanelStatus } from '../main/mixpanel';
+import { useMenuDismiss } from './menuDismiss';
+import { menuPlace, type MenuPlace } from './menuPlace';
+import { QuickModelPicker } from './Quick';
 import { OPEN_SETTINGS } from './Reviewers';
 import { Resizer } from './Resizer';
 import { GroupHead } from './rows';
 import {
-  ChartIcon, CloseIcon, OpenLinkIcon, PinIcon, PlusIcon, RefreshIcon, SearchIcon, SparklesIcon, TrashIcon
+  ChartIcon, ChevronIcon, CloseIcon, OpenLinkIcon, PinIcon, PlusIcon, RefreshIcon, SearchIcon, SparklesIcon, TrashIcon
 } from './icons';
 
 // --- The rail switch -------------------------------------------------------
@@ -183,6 +189,22 @@ function MixpanelSetup({ status, refused }: { status: MixpanelStatus; refused?: 
   );
 }
 
+// --- What the tab had on screen ----------------------------------------------
+
+/**
+ * The tab unmounts when you switch to another one. What it had loaded lives
+ * here for the rest of the session, so coming back draws it at once instead
+ * of "Loading…" and asks main (and Mixpanel) for nothing.
+ */
+const memory: {
+  status?: MixpanelStatus;
+  list?: MixpanelReportList;
+  /** Every report's last numbers, once read from main. */
+  cached?: Record<string, MixpanelResult>;
+  pins?: number[];
+  added?: number[];
+} = {};
+
 // --- Small helpers ---------------------------------------------------------
 
 const SELECTED_KEY = 'kovan.mixpanel-selected';
@@ -339,6 +361,11 @@ async function copyText(text: string): Promise<void> {
   try { await navigator.clipboard.writeText(text); } catch { /* nothing to fall back to in a sandboxed window */ }
 }
 
+/** `opencode/x` → `x`; `(claude)` → `claude`; `sonnet (claude)` → `claude · sonnet`. */
+function modelLabel(model: string): string {
+  return parseReviewToolModel(model) ? reviewToolLabel(model) : model.replace(/^opencode\//, '');
+}
+
 function Answer({ message, onNote }: { message: DiscussMessage; onNote: (text: string) => void }) {
   const [showQueries, setShowQueries] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -348,7 +375,7 @@ function Answer({ message, onNote }: { message: DiscussMessage; onNote: (text: s
     <div className={`mp-msg model${failed ? ' failed' : ''}`}>
       <span className="mp-who">
         {failed && <span className="dot fail" />}
-        {message.model ?? 'model'}{message.queries?.length ? ` · ran ${message.queries.length} quer${message.queries.length === 1 ? 'y' : 'ies'}` : ''} · {age(message.at)}
+        {message.model ? modelLabel(message.model) : 'model'}{message.queries?.length ? ` · ran ${message.queries.length} quer${message.queries.length === 1 ? 'y' : 'ies'}` : ''} · {age(message.at)}
       </span>
       <div className="mp-text">{message.text}</div>
       {showQueries && message.queries?.map((q, i) => (
@@ -369,6 +396,45 @@ function Answer({ message, onNote }: { message: DiscussMessage; onNote: (text: s
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * The composer's model tag: what answers, and the picker to change it. The
+ * same picker as the Review button's, so besides opencode's providers it
+ * offers the reviewers added in Settings — Claude Code, Codex, your commands.
+ * Remembered for Discuss only (`mixpanel.discussModel`).
+ */
+function DiscussModel({ model, disabled, onPick }: { model: string; disabled: boolean; onPick: (model: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [place, setPlace] = useState<MenuPlace>({ alignRight: false });
+  useMenuDismiss(open, () => setOpen(false));
+  const own = parseReviewToolModel(model);
+  const name = modelLabel(model);
+  return (
+    <span className="mp-model-pick">
+      <button
+        type="button" className="mp-model" disabled={disabled || !model} aria-expanded={open}
+        aria-label={`Model for Discuss: ${name || 'default'}. Change`}
+        title={model ? `Answers come from ${model}. Click to change.` : 'Click to choose the model'}
+        onClick={(e) => {
+          e.stopPropagation();
+          setPlace(menuPlace(e.currentTarget));
+          setOpen((v) => !v);
+        }}
+      >
+        <span className="mp-model-name">{name}</span>
+        {!own && /free/i.test(model) && <span className="quick-tag">FREE</span>}
+        <ChevronIcon size={9} open={open} />
+      </button>
+      {open && (
+        <QuickModelPicker
+          reviewers agents label="Discuss" model={model} place={place} className="opens-up"
+          onPick={(next) => { onPick(next); setOpen(false); }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </span>
   );
 }
 
@@ -427,7 +493,10 @@ function DiscussPanel({
     void window.kovan.mixpanelNoteAdd(report.id, text).then(onNotes);
   }, [report.id, onNotes]);
 
-  const free = /free/i.test(model);
+  const pickModel = useCallback((next: string) => {
+    void window.kovan.mixpanelModelSet(next).then(setModel);
+  }, []);
+
   return (
     <aside className="mp-dock" aria-label="Discuss this report">
       <div className="mp-dock-head">
@@ -468,7 +537,7 @@ function DiscussPanel({
           : <Answer key={i} message={m} onNote={addNote} />)}
         {busy && (
           <div className="mp-msg model">
-            <span className="mp-who"><span className="dot running pulse" />{model}</span>
+            <span className="mp-who"><span className="dot running pulse" />{modelLabel(model)}</span>
             <span className="mp-dim">{step ?? 'Thinking'}…</span>
           </div>
         )}
@@ -479,7 +548,8 @@ function DiscussPanel({
           {SUGGESTIONS.map((s) => <button key={s} type="button" className="mp-chip button" onClick={() => void send(s)}>{s}</button>)}
         </div>
       )}
-      <form className="mp-composer" onSubmit={(e) => { e.preventDefault(); void send(draft); }}>
+      {/* Not a <form>: the model picker in its foot holds a form of its own. */}
+      <div className="mp-composer">
         <label htmlFor="mp-question" className="sr-only" style={{ display: 'none' }}>Ask about this report</label>
         <textarea
           id="mp-question" rows={2} placeholder="Ask about this report…" value={draft} disabled={busy}
@@ -487,10 +557,10 @@ function DiscussPanel({
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
         />
         <div className="mp-composer-foot">
-          <span className="mp-model" title="Discuss uses the quick model from Settings › Agents">{model}{free ? ' · FREE' : ''}</span>
-          <button type="submit" className="quick" disabled={busy || !draft.trim()}>Ask</button>
+          <DiscussModel model={model} disabled={busy} onPick={pickModel} />
+          <button type="button" className="quick" disabled={busy || !draft.trim()} onClick={() => void send(draft)}>Ask</button>
         </div>
-      </form>
+      </div>
     </aside>
   );
 }
@@ -498,16 +568,24 @@ function DiscussPanel({
 // --- The report pane -------------------------------------------------------
 
 function ReportPane({
-  report, status, pinned, onTogglePin, onResult, onRemove
+  report, status, pinned, initial, fetch, onTogglePin, onResult, onRemove
 }: {
   report: MixpanelReport;
   status: MixpanelStatus;
   pinned: boolean;
+  /** The numbers already kept for it, shown at once. */
+  initial?: MixpanelResult;
+  /**
+   * Whether opening it may ask Mixpanel (main still reuses numbers under 15
+   * minutes old): when you picked it in the list, not when you came back to
+   * the tab. Without kept numbers it is always asked once.
+   */
+  fetch: boolean;
   onTogglePin: () => void;
   onResult: (result: MixpanelResult) => void;
   onRemove?: () => void;
 }) {
-  const [result, setResult] = useState<MixpanelResult>();
+  const [result, setResult] = useState<MixpanelResult | undefined>(initial);
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [notes, setNotes] = useState<string[]>([]);
@@ -528,12 +606,13 @@ function ReportPane({
     }
   }, [report.id, report.type, onResult]);
 
+  // Once per pane: the parent keys it by report, so `initial` and `fetch` are
+  // read as they were when it opened.
+  const [askOnOpen] = useState(() => !initial || fetch);
   useEffect(() => {
-    setResult(undefined);
-    setNotes([]);
-    void load(false);
+    if (askOnOpen) void load(false);
     void window.kovan.mixpanelThread(report.id).then((t) => setNotes(t.notes));
-  }, [report.id, load]);
+  }, [report.id, load, askOnOpen]);
 
   // "updated 2m ago" stays true.
   useEffect(() => {
@@ -656,12 +735,20 @@ function AddReport({ onAdded, onCancel }: { onAdded: (report: MixpanelReport) =>
 }
 
 export function MixpanelView() {
-  const [status, setStatus] = useState<MixpanelStatus>();
-  const [list, setList] = useState<MixpanelReportList>();
+  const [status, setStatus] = useState<MixpanelStatus | undefined>(memory.status);
+  const [list, setList] = useState<MixpanelReportList | undefined>(memory.list);
   const [listLoading, setListLoading] = useState(false);
-  const [cached, setCached] = useState<Record<string, MixpanelResult>>({});
-  const [pins, setPins] = useState<number[]>([]);
-  const [added, setAdded] = useState<number[]>([]);
+  // Undefined until main's kept numbers arrive; a report waits for them so it
+  // can show them rather than ask Mixpanel.
+  const [cached, setCached] = useState<Record<string, MixpanelResult> | undefined>(memory.cached);
+  const [pins, setPins] = useState<number[]>(memory.pins ?? []);
+  const [added, setAdded] = useState<number[]>(memory.added ?? []);
+  /** Whether the open report was picked in the list since the tab opened. */
+  const picked = useRef(false);
+
+  useEffect(() => {
+    Object.assign(memory, { status, list, cached, pins, added });
+  }, [status, list, cached, pins, added]);
   const [filter, setFilter] = useState('');
   const [folded, setFolded] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
@@ -682,27 +769,33 @@ export function MixpanelView() {
   }, []);
 
   useEffect(() => {
-    void window.kovan.settings().then((settings) => {
-      const p = settings['mixpanel.pins'];
-      setPins(Array.isArray(p) ? p.filter((x): x is number => typeof x === 'number') : []);
-    });
-    void window.kovan.mixpanelCached().then(setCached);
+    if (!memory.pins) {
+      void window.kovan.settings().then((settings) => {
+        const p = settings['mixpanel.pins'];
+        setPins(Array.isArray(p) ? p.filter((x): x is number => typeof x === 'number') : []);
+      });
+    }
+    if (!memory.cached) void window.kovan.mixpanelCached().then(setCached);
+    // Read from settings and the Keychain, not Mixpanel. The list is asked for
+    // only when there is none yet, the last try failed, or the project changed.
+    const before = memory.status;
     void window.kovan.mixpanelStatus().then((s) => {
       setStatus(s);
-      if (s.connected && !s.problem) void loadList(false);
+      const moved = before !== undefined && (before.projectId !== s.projectId || before.region !== s.region);
+      if (s.connected && !s.problem && (!memory.list || memory.list.error || moved)) void loadList(false);
     });
   }, [loadList]);
 
   const groups = useMemo(() => groupMixpanelReports(list?.reports ?? [], pins, filter), [list, pins, filter]);
   const selected = list?.reports.find((r) => r.id === selectedId);
 
-  const select = (id: number) => { setSelectedId(id); writeLocal(SELECTED_KEY, String(id)); };
+  const select = (id: number) => { picked.current = true; setSelectedId(id); writeLocal(SELECTED_KEY, String(id)); };
   const togglePin = (id: number) => {
     const next = pins.includes(id) ? pins.filter((p) => p !== id) : [...pins, id];
     setPins(next);
     void window.kovan.setSetting('mixpanel.pins', next);
   };
-  const onResult = useCallback((r: MixpanelResult) => setCached((c) => ({ ...c, [r.reportId]: r })), []);
+  const onResult = useCallback((r: MixpanelResult) => setCached((c) => ({ ...(c ?? {}), [r.reportId]: r })), []);
 
   const notReady = status && (!status.connected || status.problem);
   // A secret Mixpanel turned down, or a project it doesn't know: nothing in
@@ -771,7 +864,7 @@ export function MixpanelView() {
                     {open && (
                       <ul className="rows">
                         {g.reports.map((r) => {
-                          const res = cached[r.id];
+                          const res = cached?.[r.id];
                           const hl = headline(res);
                           return (
                             <li key={r.id}>
@@ -808,12 +901,14 @@ export function MixpanelView() {
           <MixpanelSetup status={status} />
         ) : refused && !selected ? (
           <MixpanelSetup status={status} refused={list?.error} />
-        ) : selected ? (
+        ) : selected && !cached ? null : selected ? (
           <ReportPane
             key={selected.id}
             report={selected}
             status={status}
             pinned={pins.includes(selected.id)}
+            {...(cached?.[selected.id] ? { initial: cached[selected.id] } : {})}
+            fetch={picked.current}
             onTogglePin={() => togglePin(selected.id)}
             onResult={onResult}
             {...(added.includes(selected.id) ? {

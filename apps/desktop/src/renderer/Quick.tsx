@@ -12,9 +12,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useMenuDismiss } from './menuDismiss';
 import {
-  NV_REVIEW_DEFAULT_MODEL, NV_REVIEW_SUFFIX, NV_REVIEW_TOOL_ID, REVIEW_EVENT_LABEL, describeChange, formatAge, isNvReviewModel,
+  AGENT_FAMILY_NAME, NV_REVIEW_DEFAULT_MODEL, NV_REVIEW_SUFFIX, NV_REVIEW_TOOL_ID, REVIEW_EVENT_LABEL, describeChange, formatAge, isNvReviewModel,
   parseReviewToolModel, priceFor, reviewToolLabel, reviewToolModel,
-  type PriceRule, type ReviewTool, type QuickBasis, type QuickKind, type QuickResult, type ReviewEvent, type ReviewVerdict
+  type AgentFamily, type PriceRule, type ReviewTool, type QuickBasis, type QuickKind, type QuickResult, type ReviewEvent, type ReviewVerdict
 } from '@kovan/core';
 import { Prose } from './Prose';
 import { CheckIcon, ChevronIcon, CloseIcon, CopyIcon } from './icons';
@@ -159,7 +159,7 @@ export function QuickButton({
       </button>
       {picking && (
         <QuickModelPicker
-          kind={kind} label={label} model={model} place={place}
+          review={kind === 'pull-review'} label={label} model={model} place={place}
           onPick={(next) => { void setModel(next); setPicking(false); }}
           onClose={() => setPicking(false)}
         />
@@ -177,17 +177,34 @@ const REVIEWERS_PROVIDER = '~reviewers';
 /**
  * The tag's popover: a provider, then one of its models, or any name typed
  * in. Providers are opencode's (`opencode models`, asked when the popover
- * first opens) and, for the review, NVIDIA through your `nv-review` function.
+ * first opens); for the review, also NVIDIA through your `nv-review`
+ * function; for the review and Mixpanel's Discuss (`reviewers`), also the
+ * reviewers you added in Settings — Claude Code, Codex, your own commands.
  */
-function QuickModelPicker({ kind, label, model, place, onPick, onClose }: {
-  kind: QuickKind; label: string; model: string; place: MenuPlace; onPick: (model: string) => void; onClose: () => void;
+export function QuickModelPicker({
+  review = false, reviewers: withReviewers = review, agents: withAgents = false, label, model, place, className, onPick, onClose
+}: {
+  /** The pull request review: NVIDIA and your reviewers besides opencode. */
+  review?: boolean;
+  /** Your reviewers besides opencode, without NVIDIA. */
+  reviewers?: boolean;
+  /**
+   * With the reviewers, the Claude Code and Codex agents Kovan found for its
+   * Agents tab, offered as they are, with nothing to add in Settings.
+   */
+  agents?: boolean;
+  label: string; model: string; place: MenuPlace;
+  /** Extra classes, e.g. to open upward. */
+  className?: string;
+  onPick: (model: string) => void; onClose: () => void;
 }) {
-  const review = kind === 'pull-review';
   const [available, setAvailable] = useState<string[]>();
   const [reviewers, setReviewers] = useState<ReviewTool[]>([]);
+  /** Agents not added as reviewers: their commands and which CLI each is. */
+  const [agents, setAgents] = useState<{ command: string; family?: AgentFamily }[]>([]);
   const [provider, setProvider] = useState(() => {
     const picked = parseReviewToolModel(model);
-    if (picked) return picked.id === NV_REVIEW_TOOL_ID ? NV_PROVIDER : REVIEWERS_PROVIDER;
+    if (picked) return picked.id === NV_REVIEW_TOOL_ID && review ? NV_PROVIDER : REVIEWERS_PROVIDER;
     return model.split('/')[0] ?? '';
   });
   const nv = provider === NV_PROVIDER;
@@ -199,18 +216,25 @@ function QuickModelPicker({ kind, label, model, place, onPick, onClose }: {
 
   useEffect(() => {
     void window.kovan.quickModelsAvailable().then(setAvailable);
-    if (review) void window.kovan.reviewTools().then((tools) => setReviewers(tools.filter((t) => t.id !== NV_REVIEW_TOOL_ID)));
-  }, [review]);
+    if (withReviewers) void window.kovan.reviewTools().then((tools) => setReviewers(tools.filter((t) => t.id !== NV_REVIEW_TOOL_ID)));
+    if (withAgents) void window.kovan.reviewToolCandidates().then((found) => setAgents(found.filter((c) => c.kind === 'agent')));
+  }, [withReviewers, withAgents]);
 
   const opencodeProviders = [...new Set((available ?? []).map((m) => m.split('/')[0]!))].sort();
-  const providers = review ? [NV_PROVIDER, REVIEWERS_PROVIDER, ...opencodeProviders] : opencodeProviders;
+  const providers = [...(review ? [NV_PROVIDER] : []), ...(withReviewers ? [REVIEWERS_PROVIDER] : []), ...opencodeProviders];
   const suggestions = own
-    ? reviewers.map((t) => reviewToolModel(t.id, t.model))
+    ? [...reviewers.map((t) => reviewToolModel(t.id, t.model)), ...agents.map((a) => reviewToolModel(a.command))]
     : nv
     ? [...new Set([...NV_SUGGESTIONS, ...(isNvReviewModel(model) ? [model.slice(0, -NV_REVIEW_SUFFIX.length)] : [])])].map((m) => `${m}${NV_REVIEW_SUFFIX}`)
     : (available ?? []).filter((m) => m.startsWith(`${provider}/`));
   const shown = (m: string) => (own ? reviewToolLabel(m) : nv ? m.slice(0, -NV_REVIEW_SUFFIX.length) : m.slice(m.indexOf('/') + 1));
-  const kindOf = (m: string) => reviewers.find((t) => t.id === parseReviewToolModel(m)?.id)?.kind;
+  const kindOf = (m: string): string => {
+    const id = parseReviewToolModel(m)?.id;
+    const tool = reviewers.find((t) => t.id === id);
+    if (tool) return tool.kind;
+    const family = agents.find((a) => a.command === id)?.family;
+    return family ? AGENT_FAMILY_NAME[family] : 'agent';
+  };
   const submit = () => {
     const value = typed.trim();
     if (!value) return;
@@ -219,17 +243,17 @@ function QuickModelPicker({ kind, label, model, place, onPick, onClose }: {
 
   return (
     <div
-      className={place.alignRight ? 'menu quick-model-menu align-right' : 'menu quick-model-menu'}
+      className={['menu quick-model-menu', place.alignRight ? 'align-right' : '', className ?? ''].join(' ').trim()}
       style={place.maxWidth ? { maxWidth: place.maxWidth } : undefined}
       role="dialog" aria-label={`${label} model`} onClick={(e) => e.stopPropagation()}>
       <div className="menu-head">{label} with</div>
       <label className="quick-model-field">
         <span>Provider</span>
-        <select value={provider} onChange={(e) => { setProvider(e.target.value); setTyping(false); }} disabled={!available && !review}>
+        <select value={provider} onChange={(e) => { setProvider(e.target.value); setTyping(false); }} disabled={!available && !withReviewers}>
           {!available && !nv && <option value={provider}>Loading…</option>}
           {available && !providers.includes(provider) && <option value={provider}>{provider || 'Choose…'}</option>}
           {providers.map((p) => (
-            <option key={p} value={p}>{p === NV_PROVIDER ? 'NVIDIA · nv-review' : p === REVIEWERS_PROVIDER ? 'Your reviewers' : p}</option>
+            <option key={p} value={p}>{p === NV_PROVIDER ? 'NVIDIA · nv-review' : p === REVIEWERS_PROVIDER ? (review ? 'Your reviewers' : 'Claude Code, Codex, your commands') : p}</option>
           ))}
         </select>
       </label>
@@ -238,17 +262,19 @@ function QuickModelPicker({ kind, label, model, place, onPick, onClose }: {
           <button key={m} type="button" role="option" aria-selected={m === model} className={m === model ? 'active' : ''} onClick={() => onPick(m)}>
             <span className="quick-model-id">{shown(m)}</span>
             {(nv || (!own && /free/i.test(m))) && <span className="quick-tag">FREE</span>}
-            {own && <span className="quick-model-kind">{kindOf(m) === 'agent' ? 'agent' : 'command'}</span>}
+            {own && <span className="quick-model-kind">{kindOf(m)}</span>}
           </button>
         ))}
-        {own && suggestions.length === 0 && <p className="menu-empty">No reviewers added yet.</p>}
+        {own && suggestions.length === 0 && (
+          <p className="menu-empty">{review ? 'No reviewers added yet.' : 'No Claude Code, Codex or command found yet.'}</p>
+        )}
         {!nv && !own && available && suggestions.length === 0 && <p className="menu-empty">No models listed for this provider.</p>}
         {!nv && !own && !available && <p className="menu-empty">Asking opencode for its models…</p>}
       </div>
       <div className="menu-rule" />
-      {review && (
+      {withReviewers && (
         <button type="button" className="quick-model-type quick-model-add" onClick={() => { onClose(); openSettings('agents'); }}>
-          + Add a reviewer…
+          {review ? '+ Add a reviewer…' : '+ Add one of your own commands…'}
         </button>
       )}
       {own ? null : typing ? (

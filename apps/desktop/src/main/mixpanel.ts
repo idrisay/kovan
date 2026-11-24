@@ -2,31 +2,38 @@
  * Mixpanel in Kovan (item 177): the main-process half.
  *
  * Nothing here runs on a timer and nothing is polled. The report list is
- * asked for when the Mixpanel tab opens, a report's numbers when you open
- * it, and the model only when you ask a question in Discuss. Mixpanel's
- * Query API allows 60 queries an hour per project, so answers are cached
- * (in memory and on disk) and reused for `FRESH_MS` unless you press Refresh.
+ * asked for once, the first time the Mixpanel tab opens with none kept, and
+ * again only on its Reload button or new credentials. A report's numbers are
+ * asked for when you pick it in the list, and reused for `FRESH_MS` unless
+ * you press Refresh (Mixpanel's Query API allows 60 queries an hour per
+ * project). Coming back to the tab asks for nothing. The model runs only
+ * when you ask a question in Discuss.
  *
- * Kept on disk in `mixpanel/state.json`: the last numbers per report (so the
- * list shows values after a restart without asking again), the Discuss
- * conversation per report and the notes saved from it.
+ * Kept on disk in `mixpanel/state.json`: the report list and the last
+ * numbers per report (so the tab shows them after a restart without asking
+ * again), the Discuss conversation per report and the notes saved from it.
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import {
   MIXPANEL_QUERIES_PER_QUESTION, QUICK_DEFAULT_MODEL, describeMixpanelQuery, discussInstruction, discussMaterial,
-  parseMixpanelQuery, parseMixpanelRegion, parseMixpanelReportRef,
+  parseMixpanelQuery, parseMixpanelRegion, parseMixpanelReportRef, parseReviewToolModel,
   type DiscussMessage, type DiscussQueryRun, type MixpanelRegion, type MixpanelReport, type MixpanelResult
 } from '@kovan/core';
 import { Credentials, HttpClient, MixpanelClient } from '@kovan/providers';
 import type { DesktopHost } from './host';
 import type { QuickModel } from './quick';
+import type { ReviewTools } from './reviewTools';
 
 /** How long a report's numbers count as fresh. */
 const FRESH_MS = 15 * 60_000;
-/** How long the report list counts as fresh. */
-const LIST_FRESH_MS = 10 * 60_000;
+
+/** A smoke run on a throwaway profile: Mixpanel is a fixture, never the network. */
+const SMOKE = Boolean(process.env['KOVAN_SMOKE'] && process.env['KOVAN_USER_DATA']);
+
+/** How often a smoke run's fixture was asked, so it can tell a revisit asked nothing. */
+export const mixpanelAsked = { list: 0, numbers: 0 };
 const THREAD_LIMIT = 40;
 const NOTES_LIMIT = 30;
 
@@ -58,6 +65,8 @@ export interface MixpanelProgress {
 }
 
 interface Saved {
+  /** The last report list read from Mixpanel, without the reports added by link. */
+  list?: MixpanelReportList;
   results: Record<string, MixpanelResult>;
   threads: Record<string, DiscussMessage[]>;
   notes: Record<string, string[]>;
@@ -68,7 +77,6 @@ export class MixpanelService {
   private readonly file: string;
   private saved: Saved = { results: {}, threads: {}, notes: {} };
   private readonly loaded: Promise<void>;
-  private list?: MixpanelReportList;
   private events?: { at: number; names: string[] };
   /** One question per report at a time. */
   private readonly asking = new Set<number>();
@@ -78,7 +86,8 @@ export class MixpanelService {
   constructor(
     private readonly host: DesktopHost,
     private readonly credentials: Credentials,
-    private readonly quick: QuickModel
+    private readonly quick: QuickModel,
+    private readonly reviewTools: ReviewTools
   ) {
     this.http = new HttpClient(host.log);
     this.file = path.join(host.files.stateDir(), 'mixpanel', 'state.json');
@@ -86,8 +95,9 @@ export class MixpanelService {
     // New credentials mean another project, maybe: forget the list.
     credentials.onDidChange((id) => {
       if (id === 'mixpanel') {
-        this.list = undefined;
+        delete this.saved.list;
         this.events = undefined;
+        void this.persist();
       }
     });
   }
@@ -99,7 +109,7 @@ export class MixpanelService {
   private async load(): Promise<void> {
     try {
       const raw = JSON.parse(await readFile(this.file, 'utf8')) as Partial<Saved>;
-      this.saved = { results: raw.results ?? {}, threads: raw.threads ?? {}, notes: raw.notes ?? {} };
+      this.saved = { results: raw.results ?? {}, threads: raw.threads ?? {}, notes: raw.notes ?? {}, ...(raw.list ? { list: raw.list } : {}) };
     } catch {
       // First run, or a damaged file: start empty rather than fail the tab.
     }
@@ -139,6 +149,7 @@ export class MixpanelService {
     const status = await this.status();
     if (!status.connected) throw new Error('Mixpanel is not connected. Add a service account in Settings › Connections.');
     if (status.problem) throw new Error(status.problem);
+    if (SMOKE) return smokeClient();
     const secret = await this.credentials.token('mixpanel');
     if (!secret) throw new Error('Mixpanel is not connected. Add a service account in Settings › Connections.');
     const s = this.settings();
@@ -154,19 +165,27 @@ export class MixpanelService {
     }));
   }
 
+  /**
+   * The saved reports. The kept list is answered as it is, however old, unless
+   * `force` (the Reload button) or the last try failed: opening the tab must
+   * not ask Mixpanel again each time.
+   */
   async reports(force = false): Promise<MixpanelReportList> {
     await this.loaded;
-    if (!force && this.list && Date.now() - this.list.at < LIST_FRESH_MS) return this.withAdded(this.list);
+    const kept = this.saved.list;
+    if (!force && kept && !kept.error) return this.withAdded(kept);
+    let list: MixpanelReportList;
     try {
-      const reports = await (await this.client()).listReports();
-      this.list = { reports, at: Date.now() };
+      list = { reports: await (await this.client()).listReports(), at: Date.now() };
     } catch (err) {
-      this.list = {
-        reports: this.list?.reports ?? [], error: describeMixpanelError(err, 'list your reports'),
+      list = {
+        reports: kept?.reports ?? [], error: describeMixpanelError(err, 'list your reports'),
         errorKind: mixpanelErrorKind(err), at: Date.now()
       };
     }
-    return this.withAdded(this.list);
+    this.saved.list = list;
+    void this.persist();
+    return this.withAdded(list);
   }
 
   private withAdded(list: MixpanelReportList): MixpanelReportList {
@@ -223,8 +242,32 @@ export class MixpanelService {
     };
   }
 
+  /**
+   * What Discuss runs on: its own pick from the composer's model tag, else the
+   * quick model. An opencode `provider/model`, or `sonnet (claude)` (see
+   * `reviewToolModel`): one of your reviewers, or a Claude Code or Codex from
+   * the Agents tab by its command (`ReviewTools.agentAsTool`).
+   */
   model(): string {
     return this.host.config.get('mixpanel.discussModel', '') || this.host.config.get('quick.model', '') || QUICK_DEFAULT_MODEL;
+  }
+
+  async setModel(model: string): Promise<string> {
+    const value = model.trim();
+    if (value) await this.host.config.set('mixpanel.discussModel', value);
+    return this.model();
+  }
+
+  /** One round of Discuss on whichever model is picked. */
+  private async answer(model: string, material: string, instruction: string): Promise<{ text?: string; error?: string }> {
+    const picked = parseReviewToolModel(model);
+    if (!picked) return this.quick.askOnce(model, material, instruction);
+    // A reviewer from Settings, or a Claude Code or Codex from the Agents tab.
+    const tool = this.reviewTools.find(picked.id) ?? await this.reviewTools.agentAsTool(picked.id);
+    if (!tool) throw new Error(`Kovan can't find ${picked.id} any more. Pick another model under the question box.`);
+    // A reviewer reads one prompt on stdin rather than an attached file.
+    const prompt = `${instruction}\n\n--- The attached file ---\n\n${material}`;
+    return { text: await this.reviewTools.ask({ ...tool, model: picked.model }, prompt) };
   }
 
   async clearThread(reportId: number): Promise<void> {
@@ -287,7 +330,7 @@ export class MixpanelService {
         progress(round === 0 ? 'Thinking' : 'Reading the query result');
         const left = MIXPANEL_QUERIES_PER_QUESTION - runs.length;
         const material = discussMaterial({ report, result, events, history, question: text, runs, today, notes: this.saved.notes[report.id] });
-        const out = await this.quick.askOnce(model, material, discussInstruction(left));
+        const out = await this.answer(model, material, discussInstruction(left));
         if (!out.text) throw new Error(out.error ?? 'The model returned no answer.');
         const { query, error } = parseMixpanelQuery(out.text, today);
         if ((!query && !error) || left <= 0) {
@@ -319,6 +362,28 @@ export class MixpanelService {
     }
     return this.saved.threads[report.id]!;
   }
+}
+
+/** Two weekly Insights reports, counted, for the smoke run. */
+function smokeClient(): MixpanelClient {
+  const weeks = Array.from({ length: 8 }, (_, i) => new Date(Date.now() - (7 - i) * 7 * 86_400_000).toISOString().slice(0, 10));
+  const fake: Pick<MixpanelClient, 'listReports' | 'insights' | 'eventNames' | 'segmentation'> = {
+    listReports: async () => {
+      mixpanelAsked.list++;
+      return [
+        { id: 101, name: 'Weekly signups', type: 'insights', dashboard: { id: 1, title: 'Growth' } },
+        { id: 102, name: 'Lessons started', type: 'insights', dashboard: { id: 1, title: 'Growth' } }
+      ];
+    },
+    insights: async (reportId: number) => {
+      mixpanelAsked.numbers++;
+      const points = weeks.map((label, i) => ({ label, value: 400 + i * 35 + (reportId % 7) * 10 }));
+      return { reportId, series: [{ name: 'Sign up', points }], overTime: true, fetchedAt: Date.now() };
+    },
+    eventNames: async () => ['Sign up', 'Lesson started'],
+    segmentation: async () => []
+  };
+  return fake as MixpanelClient;
 }
 
 export function mixpanelErrorKind(err: unknown): MixpanelErrorKind {
