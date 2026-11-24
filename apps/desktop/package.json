@@ -1,6 +1,6 @@
 {
   "name": "@kovan/desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
@@ -13,6 +13,7 @@
     "smoke": "node scripts/build-dictate.mjs && electron-vite build && KOVAN_SMOKE=1 electron .",
     "smoke:seeded": "node scripts/build-dictate.mjs && electron-vite build && KOVAN_SMOKE=seeded electron .",
     "smoke:live": "node scripts/build-dictate.mjs && electron-vite build && KOVAN_SMOKE=live electron .",
+    "demo": "node scripts/demo.mjs",
     "typecheck": "tsc --noEmit",
     "install:app": "npm run dist && node ../../scripts/install-app.mjs",
     "smoke:workspace": "node scripts/build-dictate.mjs && electron-vite build && KOVAN_SMOKE=workspace electron ."
@@ -43,6 +44,7 @@
     "@fontsource/space-grotesk": "^5.3.0",
     "@lezer/highlight": "^1.2.3",
     "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-image": "^0.8.0",
     "@xterm/xterm": "^5.5.0",
     "dompurify": "^3.4.15",
     "highlight.js": "^11.12.0",
@@ -58,7 +60,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.2.1",
+    "electron": "^44.5.1",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "react": "^18.3.1",
@@ -100,33 +102,99 @@
         "NSUserNotificationAlertStyle": "banner",
         "NSMicrophoneUsageDescription": "Kovan listens only while you dictate: double-tap ⌘ to start, and again to stop.",
         "NSSpeechRecognitionUsageDescription": "Kovan turns what you dictate into text on this Mac."
-      }
+      },
+      "extraResources": [
+        {
+          "from": "resources/trayTemplate.png",
+          "to": "trayTemplate.png"
+        },
+        {
+          "from": "resources/trayTemplate@2x.png",
+          "to": "trayTemplate@2x.png"
+        },
+        {
+          "from": "resources/bin/kovan-dictate",
+          "to": "bin/kovan-dictate"
+        },
+        {
+          "from": "resources/claude-mod",
+          "to": "claude-mod",
+          "filter": [
+            "**/*",
+            "!**/tests/**",
+            "!**/.claude-plugin/types/**",
+            "!**/tsconfig.json"
+          ]
+        }
+      ]
     },
-    "electronVersion": "33.4.11",
+    "electronVersion": "44.5.1",
     "asarUnpack": [
       "**/node_modules/node-pty/**",
       "out/main/ptyHost.mjs"
     ],
     "npmRebuild": true,
-    "extraResources": [
-      {
-        "from": "resources/trayTemplate.png",
-        "to": "trayTemplate.png"
-      },
-      {
-        "from": "resources/trayTemplate@2x.png",
-        "to": "trayTemplate@2x.png"
-      },
-      {
-        "from": "resources/bin/kovan-dictate",
-        "to": "bin/kovan-dictate"
-      }
-    ]
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "Development",
+      "icon": "resources/icon.png",
+      "executableName": "kovan",
+      "synopsis": "What is blocked on you, handed to a coding agent",
+      "maintainer": "idrisay <idrisaydev@gmail.com>",
+      "extraResources": [
+        {
+          "from": "resources/trayLinux.png",
+          "to": "trayLinux.png"
+        },
+        {
+          "from": "resources/icon.png",
+          "to": "icon.png"
+        },
+        {
+          "from": "resources/claude-mod",
+          "to": "claude-mod",
+          "filter": [
+            "**/*",
+            "!**/tests/**",
+            "!**/.claude-plugin/types/**",
+            "!**/tsconfig.json"
+          ]
+        }
+      ],
+      "artifactName": "Kovan-${version}-${arch}.${ext}"
+    },
+    "deb": {
+      "depends": [
+        "libsecret-1-0",
+        "libnotify4",
+        "libxss1",
+        "libnss3",
+        "libgbm1",
+        "libasound2 | libasound2t64"
+      ],
+      "packageName": "kovan"
+    }
   },
   "description": "Tells you what is blocked on you, and hands it to a coding agent.",
   "author": {
     "name": "idrisay",
     "email": "idrisaydev@gmail.com"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "homepage": "https://kovan.idris-ay.ch"
 }

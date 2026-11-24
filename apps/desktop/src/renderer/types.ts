@@ -1,7 +1,7 @@
 import type {
-  ActivityEvent, GitHubBudget, QuickCommand, JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport
+  ActivityEvent, GitHubBudget, QuickCommand, JiraIssue, ProviderId, PullSummary, ModelFamily, PriceCheckRunner, PriceProposal, PriceRule, QuickJob, QuickKind, QuickResult, ReviewEvent, SentryFrame, SentryIssue, UsageRecord, AgentsReport, ReviewTool, AgentFamily, PersonPulls, PersonTickets, Teammate, GroupReviewPull
 } from '@kovan/core';
-import type { PullDetail, ReviewComment, ReviewThread, Reviewer } from '@kovan/providers';
+import type { PullDetail, ReviewComment, ReviewThread, Reviewer, TicketPull } from '@kovan/providers';
 import type { AgentRun, RunFile, Runner, RunKind } from '@kovan/agent';
 import type {
   ChangeKind, DiffSide, FileChange, FileDiff, RepoStatus, RunTarget
@@ -11,6 +11,9 @@ import type {
 } from '../main/workspace';
 import type { TestEnvironmentSave, TestEnvironmentState, TestSelection } from '../main/testEnvironments';
 import type { ModelList } from '../main/modelSearch';
+import type { MixpanelProgress, MixpanelReportList, MixpanelStatus } from '../main/mixpanel';
+import type { KovanCommandStatus } from '../main/kovanCommand';
+import type { DiscussMessage, MixpanelReport, MixpanelResult } from '@kovan/core';
 
 export type {
   PullDetail, ReviewComment, ReviewThread, Reviewer, AgentRun, RunFile, Runner, RunKind, RunTarget,
@@ -37,6 +40,13 @@ import type { RunnerLimits } from '../main/agentLimits';
  *  see the note on `Snapshot['refreshedAt']` in `main/poller.ts`. */
 export type PolledProvider = 'github' | 'jira' | 'sentry';
 
+/** A shell a new terminal can open in — see `main/shells.ts`. */
+export interface ShellOption {
+  path: string;
+  name: string;
+  login: boolean;
+}
+
 export interface SessionInfo {
   id: string;
   title: string;
@@ -53,6 +63,8 @@ export interface SessionInfo {
   /** The title the program running in a plain terminal set — see `SessionInfo.task` in main. */
   task?: string;
   renamed?: boolean;
+  /** The shell a plain terminal runs, when it isn't the login shell (item 126). */
+  shell?: string;
   /** The quick command (item 91) running in it, if any. */
   commandId?: string;
   /** What the agent says it is doing (item 112) — see `status` on `SessionInfo` in main. */
@@ -100,12 +112,18 @@ export interface Subject {
   pull?: PullSummary;
   issue?: JiraIssue;
   sentry?: { issue: SentryIssue; frames: SentryFrame[] };
+  /**
+   * A review of several pull requests for one ticket (item 171): the others
+   * reviewed with `pull`, and merged ones read for context. Only on a review.
+   */
+  together?: { key: string; pulls: GroupReviewPull[]; context: PullSummary[] };
 }
 
 export interface KovanApi {
   snapshot(): Promise<Snapshot>;
   refresh(): Promise<Snapshot>;
   refreshProvider(id: PolledProvider): Promise<Snapshot>;
+  platform: string;
   openExternal(url: string): Promise<void>;
   credentialFields(): Promise<Record<string, { key: string; label: string; placeholder?: string; secret?: boolean }[]>>;
   missingFields(id: ProviderId): Promise<string[]>;
@@ -121,8 +139,18 @@ export interface KovanApi {
   reviewerCandidates(repo: string): Promise<{ people: { login: string; count: number }[]; teams: { slug: string; name: string }[] }>;
   requestReviewers(repo: string, number: number, people: string[], teams: string[]): Promise<void>;
   ticketDetail(key: string): Promise<JiraIssue>;
+  /** One pull request as the lists show it, fetched by number (item 144). */
+  pullSummary(repo: string, number: number): Promise<PullSummary>;
+  /** Just a ticket's status: one small request, for the PR header's ticket chip. */
+  ticketStatus(key: string): Promise<{ status: string; statusCategory: string }>;
   /** Widens the merged window to `limit` and returns the republished snapshot. */
   loadMoreMerged(limit: number): Promise<Snapshot>;
+  /** Item 164: who the person picker lists, asked when it first opens. */
+  teammates(service: 'github' | 'jira'): Promise<Teammate[]>;
+  /** A teammate's pull requests, `merged` of their merged ones. */
+  personPulls(login: string, merged: number): Promise<PersonPulls>;
+  /** A teammate's tickets, by Jira account id. */
+  personTickets(accountId: string): Promise<PersonTickets>;
 
   quickState(kind: QuickKind, subject: string): Promise<QuickState>;
   /** Starts the job and returns at once; progress arrives through `onQuick`. */
@@ -142,6 +170,23 @@ export interface KovanApi {
   quickModelSet(kind: QuickKind, model: string): Promise<void>;
   /** `provider/model` for everything opencode can run. Asked on a picker's first open. */
   quickModelsAvailable(): Promise<string[]>;
+  cliStatus(): Promise<KovanCommandStatus>;
+  cliInstall(): Promise<KovanCommandStatus & { message: string }>;
+  cliRemove(): Promise<KovanCommandStatus & { message: string }>;
+  mixpanelStatus(): Promise<MixpanelStatus>;
+  mixpanelReports(force?: boolean): Promise<MixpanelReportList>;
+  mixpanelCached(): Promise<Record<string, MixpanelResult>>;
+  mixpanelResult(id: number, type: MixpanelReport['type'], force?: boolean): Promise<MixpanelResult>;
+  mixpanelAdd(ref: string, name?: string): Promise<MixpanelReport>;
+  mixpanelRemoveAdded(id: number): Promise<void>;
+  mixpanelThread(id: number): Promise<{ messages: DiscussMessage[]; notes: string[]; busy: boolean; model: string }>;
+  mixpanelThreadClear(id: number): Promise<void>;
+  /** Discuss's model: an opencode `provider/model` or a reviewer's `model (id)`. Returns the model now in use. */
+  mixpanelModelSet(model: string): Promise<string>;
+  mixpanelAsk(report: MixpanelReport, question: string): Promise<DiscussMessage[]>;
+  mixpanelNoteAdd(id: number, text: string): Promise<string[]>;
+  mixpanelNoteRemove(id: number, index: number): Promise<string[]>;
+  onMixpanelProgress(listener: (progress: MixpanelProgress) => void): () => void;
   /** A web-searching model looks up today's list prices for these rows. Proposals only — nothing is saved. */
   priceCheck(runner: PriceCheckRunner, model: string, rules: PriceRule[]): Promise<{ proposals: PriceProposal[] } | { error: string }>;
   priceCheckCancel(): Promise<void>;
@@ -159,6 +204,9 @@ export interface KovanApi {
   runningAgentsForce(key: string): Promise<{ key: string; stopped: boolean; left: number }>;
   onRunningAgents(listener: (report: AgentsReport) => void): () => void;
   /** The idle reminder was clicked. */
+  onOpenWorkspace(listener: (id: string, folder?: string, file?: { path: string; line?: number }) => void): () => void;
+  /** "Open in Kovan" from the pane beside Claude: a file's diff (item 148). */
+  onOpenDiff(listener: (target: { repo: string; file: string; side: 'staged' | 'unstaged' | 'untracked' }) => void): () => void;
   onShowAgents(listener: () => void): () => void;
 
   runners(): Promise<Runner[]>;
@@ -169,6 +217,25 @@ export interface KovanApi {
   modelsSearch(command: string): Promise<ModelList | { error: string }>;
   /** Every status of the loaded tickets' Jira projects, To Do → Done. */
   ticketStatuses(): Promise<{ name: string; category: string }[]>;
+  /** Reviewers for the Review button (item 143): nv-review first. */
+  reviewTools(): Promise<ReviewTool[]>;
+  reviewToolSave(tool: Partial<ReviewTool>): Promise<{ ok: boolean; error?: string; tools: ReviewTool[] }>;
+  /** Removes one; nv-review stays. */
+  reviewToolRemove(id: string): Promise<ReviewTool[]>;
+  /** Agents and commands found on this machine and not added yet. */
+  reviewToolCandidates(): Promise<{ command: string; kind: 'agent' | 'command'; family?: AgentFamily; how: string }[]>;
+  /** Whether the shell can find a command now: 'function', 'command', 'none'… */
+  reviewToolCheck(command: string): Promise<string>;
+  /** Whether the shell finds it, and what its --help says: model flag or variable, stdin or file, key files. */
+  reviewToolSetup(command: string): Promise<{
+    found: string;
+    help?: { modelFlag?: string; modelEnv?: string; promptAs?: 'stdin' | 'file'; models: string[]; keyFiles: string[] };
+    keys: { path: string; exists: boolean }[];
+  }>;
+  /** Saves a key where the command's help says it reads it, readable by you only. Never read back. */
+  reviewToolSaveKey(file: string, value: string): Promise<{ ok: boolean; error?: string }>;
+  /** Runs the planted-bug test pull request through it. */
+  reviewToolTest(tool: Partial<ReviewTool>): Promise<{ ok: boolean; checks: { label: string; ok: boolean; note?: string }[] }>;
   /** The clipboard's image saved as a PNG; '' when it holds none. */
   clipboardImagePath(): Promise<string>;
   /** Puts text on the clipboard, through main so it works whatever has focus. */
@@ -181,6 +248,8 @@ export interface KovanApi {
   /** Environments and test accounts. Passwords never come back — only which are saved. */
   testEnvironments(): Promise<TestEnvironmentState>;
   testEnvironmentsSave(next: TestEnvironmentSave): Promise<TestEnvironmentState>;
+  /** A ticket's open and merged pull requests, for a review of them together (item 171). */
+  ticketPulls(key: string): Promise<TicketPull[]>;
   defaultCwd(repo?: string): Promise<string | undefined>;
   startAgent(
     request: {
@@ -245,6 +314,9 @@ export interface KovanApi {
   onActivityToast(listener: (events: ActivityEvent[]) => void): () => void;
   /** A notification was clicked: open this subject ('' = the inbox). */
   onActivityOpen(listener: (subject: string) => void): () => void;
+  /** A session a notification or the menu bar asked for before this window was ready (item 182). */
+  sessionOpenPending(): Promise<string | undefined>;
+  onSessionOpen(listener: (id: string) => void): () => void;
   /** Writes what threw to `~/Library/Logs/Kovan/kovan.log` (item 83). */
   logError(report: RendererErrorReport): Promise<void>;
   /** Shows the log file selected in Finder. */
@@ -253,7 +325,13 @@ export interface KovanApi {
 
   workspaces(): Promise<{ list: Workspace[]; active?: string }>;
   workspaceCreate(): Promise<Workspace | undefined>;
-  workspaceActivate(id: string): Promise<void>;
+  /**
+   * Switches this window's workspace; other windows keep theirs (item 157).
+   * False when another window already shows it and came forward instead.
+   */
+  workspaceActivate(id: string): Promise<boolean>;
+  /** Another window, on a workspace no window shows yet (item 157). */
+  newWindow(): Promise<void>;
   workspaceAddFolder(id: string): Promise<Workspace | undefined>;
   workspaceRemoveFolder(id: string, folder: string): Promise<Workspace | undefined>;
   /** Same folders in a new order; anything else is refused and returns undefined. */
@@ -270,14 +348,18 @@ export interface KovanApi {
   workspaceRevert(repo: string, changes: FileChange[]): Promise<void>;
   workspaceTree(dir: string): Promise<Entry[]>;
   workspaceRead(file: string): Promise<FileBody>;
+  /** A workspace image as a data URL, for the Markdown preview (item 161). */
+  workspaceImage(file: string): Promise<string | undefined>;
   workspaceWrite(file: string, text: string, expected?: FileStamp): Promise<WriteResult>;
 
   sessions(): Promise<SessionInfo[]>;
-  sessionBuffer(id: string): Promise<string>;
+  sessionBuffer(id: string): Promise<{ data: string; cols?: number; rows?: number; truncated: boolean }>;
   sessionWrite(id: string, data: string): Promise<void>;
   sessionResize(id: string, cols: number, rows: number): Promise<void>;
   sessionClose(id: string): Promise<void>;
   sessionRename(id: string, title: string): Promise<void>;
+  /** Installed shells from /etc/shells, login shell first (item 126). */
+  shells(): Promise<ShellOption[]>;
   openTerminal(cwd?: string, subject?: string, title?: string): Promise<SessionInfo>;
   onSessionOutput(listener: (id: string, data: string) => void): () => void;
   onSessions(listener: (list: SessionInfo[]) => void): () => void;

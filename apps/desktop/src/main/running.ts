@@ -153,7 +153,7 @@ export class RunningAgents {
 
       await this.lookUpCwds(found.filter((a) => !this.cwds.has(a.key)).map((a) => ({ key: a.key, pid: a.row.pid })));
       if (this.watchers > 0 && now - this.portsAt >= PORTS_MS) {
-        this.ports = parseListening(await run('/usr/sbin/lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpcn']));
+        this.ports = parseListening(await run(LSOF, ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpcn']));
         this.portsAt = now;
       }
       const configs = await claudeConfigDirs();
@@ -244,7 +244,7 @@ export class RunningAgents {
 
   private async lookUpCwds(missing: { key: string; pid: number }[]): Promise<void> {
     if (missing.length === 0) return;
-    const cwds = parseCwds(await run('/usr/sbin/lsof', ['-a', '-d', 'cwd', '-Fpn', '-p', missing.map((m) => m.pid).join(',')]));
+    const cwds = parseCwds(await run(LSOF, ['-a', '-d', 'cwd', '-Fpn', '-p', missing.map((m) => m.pid).join(',')]));
     for (const { key, pid } of missing) {
       const cwd = cwds.get(pid);
       if (cwd) this.cwds.set(key, cwd);
@@ -289,7 +289,7 @@ export class RunningAgents {
     for (const agent of fresh) this.notified.add(agent.key);
     if (fresh.length === 0) return;
     if (!this.host.config.get('agents.remind', true) || !this.host.config.get('notify.enabled', true)) return;
-    if (process.env['KOVAN_SMOKE'] || !Notification.isSupported()) return;
+    if ((process.env['KOVAN_SMOKE'] && process.env['KOVAN_SMOKE'] !== 'demo') || !Notification.isSupported()) return;
 
     const threshold = formatIdle(report.idleMs);
     const memory = formatMemory(idle.reduce((sum, a) => sum + a.memory, 0));
@@ -384,6 +384,9 @@ async function signal(targets: Target[], name: NodeJS.Signals): Promise<void> {
     }
   }
 }
+
+/** Where lsof is: macOS ships it in /usr/sbin; on Linux it's a package, found on PATH. */
+const LSOF = process.platform === 'darwin' ? '/usr/sbin/lsof' : 'lsof';
 
 function run(file: string, args: string[]): Promise<string> {
   return new Promise((resolve) => {

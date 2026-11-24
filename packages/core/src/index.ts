@@ -37,14 +37,17 @@ export * from './promptSettings';
 // code is reached through `@kovan/core/node` instead, which only the main
 // process imports.
 export * from './prompts';
+export * from './promptTemplates';
 export * from './testAccounts';
 export * from './quick';
+export * from './reviewTools';
 export * from './usage';
 export * from './activity';
 export * from './priceCheck';
 export * from './modelSearch';
 export * from './folders';
 export * from './processes';
+export * from './agentAlerts';
 export * from './terminalTitle';
 export * from './shellPath';
 export * from './dictation';
@@ -55,3 +58,10 @@ export * from './quickOpen';
 export * from './runPages';
 export * from './limits';
 export * from './problems';
+export * from './externalUrl';
+export * from './pins';
+export * from './claudeMod';
+export * from './openRequest';
+export * from './people';
+export * from './mixpanel';
+export * from './kovanCommand';

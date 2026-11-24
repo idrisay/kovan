@@ -1,0 +1,652 @@
+import { describe, expect, mock, test } from 'claude-code/testing'
+
+import { changeGroups, checkName, goalFirst, porcelainPaths, reviewerNames, reviewersIn, reviewOutcome, reviewSummary, failReason, reviewLogs, codexModel, modelLine, opencodeModel, reviewerModels, runModels, shortModel, sourceModels, splitSources, taskNotices, chipLabels, findLinks, packChips, cutAtHunk, fitPath, homeShort, modelName, resets, summarize, tokens, usageLine } from '../hooks/register'
+
+/** `git rev-parse --show-toplevel --show-prefix` for a folder under /repo. */
+function gitPlace(e: unknown): string {
+  const cwd = (e as { init?: { cwd?: string } }).init?.cwd ?? '/repo'
+  return `/repo\n${cwd === '/repo' ? '' : `${cwd.slice('/repo/'.length)}/`}\n`
+}
+
+const PANE = { component: 'Pane', requestId: 'kovan', props: { title: 'Kovan', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } } } as never
+
+describe('helpers', () => {
+  test('names checks by what the command runs', async () => {
+    expect(checkName('npm run typecheck')).toBe('Typecheck')
+    expect(checkName('npx tsc --noEmit')).toBe('Typecheck')
+    expect(checkName('npm test -- player')).toBe('Tests')
+    expect(checkName('pytest -q')).toBe('Tests')
+    expect(checkName('npx eslint src')).toBe('Lint')
+    expect(checkName('git status')).toBeUndefined()
+    expect(checkName('npm run type-check && npx eslint . --ext .ts')).toBe('Typecheck')
+    expect(checkName('cd web && NODE_ENV=test pnpm test:unit')).toBe('Tests')
+    expect(checkName('python -m pytest -q')).toBe('Tests')
+    expect(checkName('cargo clippy')).toBe('Lint')
+    expect(checkName('php artisan test --filter Lesson')).toBe('Tests')
+    expect(checkName('gh pr view 12 --json body | grep -i test')).toBeUndefined()
+    expect(checkName('echo "lint likely test"')).toBeUndefined()
+    expect(checkName('grep -rn "typecheck" package.json')).toBeUndefined()
+    expect(checkName('cat tests/a.test.ts')).toBeUndefined()
+  })
+
+  test('summarizes a run by its telling line', async () => {
+    expect(summarize('...\n Tests  14 passed (14)\n Duration 2s\n')).toBe('Tests  14 passed (14)')
+    expect(summarize('src/a.ts(42,3): error TS2339: nope\n')).toBe('src/a.ts(42,3): error TS2339: nope')
+    expect(summarize('just this\n')).toBe('')
+    expect(summarize('(node:1) Warning: something\n(Use `node --trace-warnings ...`)\n')).toBe('')
+  })
+
+  test('cuts a long diff where a hunk starts', async () => {
+    const lines = ['diff --git a/x b/x', '@@ -1 +1 @@', '-a', '+b', '@@ -9 +9 @@', '-c', '+d']
+    expect(cutAtHunk(lines, 5)).toEqual(lines.slice(0, 4))
+    expect(cutAtHunk(lines, 10)).toEqual(lines)
+  })
+
+  test('writes the usage line', async () => {
+    expect(modelName('claude-opus-5-5')).toBe('Opus 5.5')
+    expect(modelName('claude-sonnet-5-5[1m]')).toBe('Sonnet 5.5')
+    expect(tokens(402_000)).toBe('402k')
+    expect(tokens(1_000_000)).toBe('1.0M')
+    const now = new Date(2026, 9, 7, 13, 48).getTime()
+    expect(resets(new Date(2026, 9, 7, 15, 40).toISOString(), now)).toBe('15:40')
+    expect(resets(new Date(2026, 9, 12, 9, 0).toISOString(), now)).toBe('Mon')
+    expect(usageLine({
+      model: 'claude-opus-5-5', effort: 'high', ctxTokens: 402_000, ctxWindow: 1_000_000, ctxPercent: 40,
+      session: { percent: 62, resetsAt: new Date(2026, 9, 7, 15, 40).toISOString() },
+      weekly: { percent: 31, resetsAt: new Date(2026, 9, 12, 9, 0).toISOString() },
+      cost: 1.031
+    }, now)).toBe('Opus 5.5 · ctx 402k/1M 40% · 5h 62% → 15:40 · wk 31% → Mon · $1.03')
+  })
+})
+
+test('the pane shows the goal, the plan with Now and Next, and empty changes', async ($, on) => {
+  mock.env(on, { KOVAN_GOAL: 'Stop the player controls jumping', KOVAN_GOAL_KEY: 'ACME-2453' })
+  // No git and no package.json here: the pane must still draw.
+  on('process.run', () => ({ value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('fs.read', () => { throw new Error('no such file') })
+  on('session.cwd', () => ({ value: '/tmp/repo' }))
+  on('clock.now', () => ({ value: new Date(2026, 9, 7, 13, 48).getTime() }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000, tokens: 402_000, percent: 40 }, rateLimits: [] } }))
+  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }))
+
+  await $.tool.call({
+    tool: 'TodoWrite',
+    todos: [
+      { content: 'Add a test for the sticky bar', status: 'completed', activeForm: 'Adding a test' },
+      { content: 'Fix the type error', status: 'in_progress', activeForm: 'Fixing the type error' },
+      { content: 'Check it at iPad width', status: 'pending', activeForm: 'Checking iPad width' },
+      { content: 'Write the report', status: 'pending', activeForm: 'Writing the report' }
+    ]
+  } as never)
+
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /GOAL · ACME-2453/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1 of 4 done/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /✓ Add a test for the sticky bar/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /● Fix the type error/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /next/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /No files changed yet/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Opus 5.5$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('an edit lists the file with its counts, and a click opens its diff', async ($, on) => {
+  const DIFF = 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-const a = 1\n+const a = 2\n'
+  mock.env(on, {})
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('clock.now', () => ({ value: 1_000 }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('fs.read', () => { throw new Error('no such file') })
+  on('fs.exists', () => ({ value: true }))
+  on('process.run', ($, e) => {
+    const argv = (e as unknown as { argv: string[] }).argv.join(' ')
+    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (argv.startsWith('git rev-parse')) return out(gitPlace(e))
+    if (argv.startsWith('git ls-files')) return out('src/a.ts\n')
+    if (argv.startsWith('git diff --numstat')) return out('6\t2\tsrc/a.ts\n')
+    if (argv.startsWith('git diff HEAD')) return out(DIFF)
+    return out('', 1)
+  })
+  on('tool.call', { tool: 'Edit' }, () => ({ result: {} as never }))
+
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/src/a.ts', old_string: 'const a = 1', new_string: 'const a = 2' } as never)
+
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /\+6 −2/ })).toBeDefined()
+  expect(await ui.find({ type: 'Code' })).toBeUndefined()
+  await ui.press({ key: 'file:/repo/src/a.ts' })
+  const code = await ui.find({ type: 'Code' })
+  expect(code?.props['source']).toBe(DIFF.replace(/\n$/, ''))
+  expect(code?.props['format']).toBe('diff')
+  await ui.press({ key: 'file:/repo/src/a.ts' })
+  expect(await ui.find({ type: 'Code' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('Open in Kovan writes a request into the folder Kovan watches and shows its reply', async ($, on) => {
+  const DIFF = 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-const a = 1\n+const a = 2\n'
+  const written: Record<string, string> = {}
+  const toasts: string[] = []
+  mock.env(on, { KOVAN_OPEN_DIR: '/kovan/open' })
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('clock.now', () => ({ value: 1_000 }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('process.run', ($, e) => {
+    const argv = (e as unknown as { argv: string[] }).argv.join(' ')
+    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (argv.startsWith('git rev-parse')) return out(gitPlace(e))
+    if (argv.startsWith('git ls-files')) return out('src/a.ts\n')
+    if (argv.startsWith('git diff --numstat')) return out('1\t1\tsrc/a.ts\n')
+    if (argv.startsWith('git diff HEAD')) return out(DIFF)
+    return out('', 1)
+  })
+  on('fs.write', ($, e) => {
+    const { path, text } = e as unknown as { path: string; text: string }
+    written[path] = text
+    // Kovan answers at once.
+    written[path.replace(/\.json$/, '.reply')] = JSON.stringify({ ok: true, message: 'Opened src/a.ts in Kovan.' })
+    return { value: undefined }
+  })
+  on('fs.exists', ($, e) => {
+    const p = (e as unknown as { path: string }).path
+    return { value: p in written || !p.startsWith('/kovan/') }
+  })
+  on('fs.read', ($, e) => {
+    const p = (e as unknown as { path: string }).path
+    if (p in written) return { value: written[p] }
+    throw new Error('no such file')
+  })
+  on('ui.toast', ($, e) => { toasts.push((e as unknown as { text: string }).text); return { value: undefined } })
+  on('tool.call', { tool: 'Edit' }, () => ({ result: {} as never }))
+
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/src/a.ts', old_string: 'const a = 1', new_string: 'const a = 2' } as never)
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ key: 'kovan:/repo/src/a.ts' })).toBeUndefined()
+  await ui.press({ key: 'file:/repo/src/a.ts' })
+  await ui.press({ key: 'kovan:/repo/src/a.ts' })
+  const request = Object.entries(written).find(([p]) => p.startsWith('/kovan/open/') && p.endsWith('.json'))
+  expect(JSON.parse(request?.[1] ?? '{}')).toEqual({ repo: '/repo', file: '/repo/src/a.ts' })
+  expect(toasts).toEqual(['Opened src/a.ts in Kovan.'])
+  await ui.unmount()
+})
+
+
+describe('changes across repositories', () => {
+  const f = (path: string, repo: string, rel: string) => ({ path, repo, rel, add: 1, del: 0, isNew: false })
+
+  test('one repository is the plain list', async () => {
+    expect(changeGroups([f('/r/web/a.ts', '/r/web', 'a.ts')], ['/r/web']).flat).toBe(true)
+    expect(changeGroups([f('/r/web/a.ts', '/r/web', 'a.ts')], []).flat).toBe(true)
+  })
+
+  test("groups by repository, the session's folders first and listed even with no changes, then files in none", async () => {
+    const g = changeGroups([
+      f('/x/other/z.ts', '/x/other', 'z.ts'),
+      f('/r/web/a.ts', '/r/web', 'a.ts'),
+      f('/Users/me/.claude/notes.md', '', '~/.claude/notes.md')
+    ], ['/r/api', '/r/web'])
+    expect(g.flat).toBe(false)
+    expect(g.repos.map((r) => [r.name, r.files.map((x) => x.rel)])).toEqual([['api', []], ['web', ['a.ts']], ['other', ['z.ts']]])
+    expect(g.others.map((x) => x.rel)).toEqual(['~/.claude/notes.md'])
+  })
+
+  test('cuts a long path from the front, keeping the name', async () => {
+    expect(fitPath('src/a.ts', 40)).toBe('src/a.ts')
+    expect(fitPath('~/.claude/projects/-Users-me-Test-api/memory/feedback.md', 30)).toBe('…/memory/feedback.md')
+    expect(fitPath('~/.claude/projects/-Users-me-Test-api/memory/feedback.md', 30).length).toBeLessThanOrEqual(30)
+  })
+
+  test('shortens home to ~', async () => {
+    expect(homeShort('/Users/me/.claude/x.md', '/Users/me')).toBe('~/.claude/x.md')
+    expect(homeShort('/etc/hosts', '/Users/me')).toBe('/etc/hosts')
+  })
+})
+
+test('a session over two repositories counts each file in its own, and a file in none has no Open in Kovan', async ($, on) => {
+  const written: Record<string, string> = {}
+  mock.env(on, { KOVAN_OPEN_DIR: '/kovan/open', HOME: '/Users/me', KOVAN_FOLDERS: JSON.stringify(['/r/api', '/r/web']) })
+  on('clock.now', () => ({ value: 1_000 }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('session.cwd', () => ({ value: '/r/api' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('fs.exists', () => ({ value: true }))
+  on('fs.read', ($, e) => {
+    const p = (e as unknown as { path: string }).path
+    if (p in written) return { value: written[p] }
+    if (p === '/Users/me/.claude/notes.md') return { value: 'remember this\n' }
+    throw new Error('no such file')
+  })
+  on('fs.write', ($, e) => {
+    const { path, text } = e as unknown as { path: string; text: string }
+    written[path] = text
+    written[path.replace(/\.json$/, '.reply')] = JSON.stringify({ ok: true, message: 'Opened.' })
+    return { value: undefined }
+  })
+  on('ui.toast', () => ({ value: undefined }))
+  on('process.run', ($, e) => {
+    const { argv, init } = e as unknown as { argv: string[]; init?: { cwd?: string } }
+    const cmd = argv.join(' ')
+    const cwd = init?.cwd ?? ''
+    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (cmd.startsWith('git rev-parse')) {
+      const root = ['/r/api', '/r/web'].find((r) => cwd === r || cwd.startsWith(`${r}/`))
+      return root ? out(`${root}\n${cwd === root ? '' : `${cwd.slice(root.length + 1)}/`}\n`) : out('', 128)
+    }
+    if (cmd.startsWith('git ls-files') && cwd === '/r/web') return out('src/a.ts\n')
+    if (cmd.startsWith('git diff --numstat') && cwd === '/r/web') return out('3\t1\tsrc/a.ts\n')
+    return out('', cmd.startsWith('git') ? 0 : 1)
+  })
+  on('tool.call', { tool: 'Edit' }, () => ({ result: {} as never }))
+  await $.tool.call({ tool: 'Edit', file_path: '/r/web/src/a.ts', old_string: 'a', new_string: 'b' } as never)
+  await $.tool.call({ tool: 'Edit', file_path: '/Users/me/.claude/notes.md', old_string: 'a', new_string: 'b' } as never)
+
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^api$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /no changes/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^web$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Other files/ })).toBeDefined()
+  expect(await ui.find({ key: 'file:/r/web/src/a.ts' })).toBeDefined()
+
+  await ui.press({ key: 'file:/r/web/src/a.ts' })
+  await ui.press({ key: 'kovan:/r/web/src/a.ts' })
+  const request = Object.entries(written).find(([p]) => p.endsWith('.json'))
+  expect(JSON.parse(request?.[1] ?? '{}')).toEqual({ repo: '/r/web', file: '/r/web/src/a.ts' })
+
+  await ui.press({ key: 'file:/Users/me/.claude/notes.md' })
+  const code = await ui.find({ type: 'Code' })
+  expect(code?.props['format']).toBe('source')
+  expect(code?.props['source']).toBe('remember this')
+  expect(await ui.find({ key: 'kovan:/Users/me/.claude/notes.md' })).toBeUndefined()
+  await ui.unmount()
+})
+
+describe('links in the chat', () => {
+  test('chips drop the shared repo start and pack into rows', async () => {
+    const pulls = ['acme-frontend#2736', 'acme-frontend#2680', 'acme-backend#821'].map((key) => ({ kind: 'pull' as const, key }))
+    const labels = chipLabels([...pulls, { kind: 'page' as const, key: 'app.acme.test/en' }])
+    expect(labels).toEqual(['frontend#2736', 'frontend#2680', 'backend#821', 'app.acme.test/en'])
+    expect(chipLabels([{ kind: 'pull', key: 'cli#9000' }, { kind: 'pull', key: 'acme-backend#1' }])).toEqual(['cli#9000', 'acme-backend#1'])
+    // 13 + 3 + 13 + 3 + 11 = 43 fits 45; the page goes on the next row.
+    expect(packChips(labels, 45)).toEqual([[0, 1, 2], [3]])
+    expect(packChips(labels, 10)).toEqual([[0], [1], [2], [3]])
+  })
+
+  test('finds pull requests, Figma designs, tickets and local pages, each once, in order', async () => {
+    const text = [
+      'See https://github.com/acme/acme-frontend/pull/2789 and https://github.com/acme/acme-backend/pull/868/files,',
+      'again https://github.com/acme/acme-frontend/pull/2789#discussion. Not https://github.com/acme/acme-frontend/issues/5.',
+      'Design: https://www.figma.com/design/yoC3L27adNyJv9lr8EWg7D/Contact-Us-Popup?node-id=1-2 (the target).',
+      'Ticket https://acme.atlassian.net/browse/ACME-1234. Page: https://app.acme.test/en/ and http://localhost:3000/lesson/12?x=1.',
+      'Not https://api.atlassian.com/ex/jira/x nor https://json-schema.org/draft/2020-12/schema nor https://claude.ai/code/session_1'
+    ].join(' ')
+    expect(findLinks(text).map((l) => `${l.kind} ${l.key}`)).toEqual([
+      'pull acme-frontend#2789', 'pull acme-backend#868', 'figma Contact Us Popup', 'ticket ACME-1234',
+      'page app.acme.test/en', 'page localhost:3000/lesson/12'
+    ])
+    expect(findLinks(text)[1]?.url).toBe('https://github.com/acme/acme-backend/pull/868')
+    expect(findLinks(text, true).map((l) => l.key)).toEqual(['acme-frontend#2789', 'acme-backend#868'])
+  })
+})
+
+test("a pull request linked in a command's output shows in its state's color, the goal's own first", async ($, on) => {
+  mock.env(on, { KOVAN_GOAL_KEY: 'acme-backend#868' })
+  on('clock.now', () => ({ value: 1_000 }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('fs.read', () => { throw new Error('no such file') })
+  on('process.run', ($, e) => {
+    const argv = (e as unknown as { argv: string[] }).argv
+    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (argv[0] === 'gh' && argv[3] === '2789') return out(JSON.stringify({ title: 'feat(qa): lesson+exercise smoke test', state: 'OPEN', isDraft: false }))
+    return out('', 1)
+  })
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'https://github.com/acme/acme-frontend/pull/2789\nhttps://github.com/acme/acme-backend/pull/868\n', stderr: '', interrupted: false } as never }))
+
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --fill' } as never)
+  // The title is asked of gh in the background, not in the tool call's way.
+  for (let i = 0; i < 50; i++) await Promise.resolve()
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^LINKS ─+ 2$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^frontend#2789$/ })).toBeDefined()
+  // Design C: the chip takes its state's color, and shows no title.
+  const chip = JSON.stringify(await ui.find({ type: 'Text', text: /^frontend#2789$/ }))
+  expect(chip).toContain('"props":{"color":"success"}')
+  expect(chip).toContain('{"type":"Link","props":{"href":"https://github.com/acme/acme-frontend/pull/2789"')
+  expect(await ui.find({ type: 'Text', text: /lesson\+exercise smoke test/ })).toBeUndefined()
+  // Item 166: the goal's own pull request is listed, ahead of the newer one.
+  const row = JSON.stringify(await ui.find({ type: 'Text', text: /backend#868/ }))
+  expect(row.indexOf('backend#868')).toBeGreaterThan(-1)
+  expect(row.indexOf('backend#868')).toBeLessThan(row.indexOf('frontend#2789'))
+  await ui.unmount()
+})
+
+describe('item 165', () => {
+  test("reads git status's paths, a rename's new one only", async () => {
+    expect(porcelainPaths(' M src/a.ts\0?? new file.ts\0R  b.ts\0old b.ts\0 D gone.ts\0')).toEqual(['src/a.ts', 'new file.ts', 'b.ts', 'gone.ts'])
+    expect(porcelainPaths('')).toEqual([])
+  })
+})
+
+test("a file a shell command changed is listed, what was changed before the session isn't, and Changes shows every diff", async ($, on) => {
+  mock.env(on, { KOVAN_OPEN_DIR: '/kovan/open', HOME: '/Users/me', KOVAN_FOLDERS: JSON.stringify(['/r/api', '/r/web']) })
+  let status = ' M old-work.ts\0'
+  on('clock.now', () => ({ value: 1_000 }))
+  on('session.cwd', () => ({ value: '/r/api' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('fs.exists', () => ({ value: true }))
+  on('fs.read', () => { throw new Error('no such file') })
+  on('ui.panes', () => ({ value: [{ id: 'kovan', title: 'Kovan' }, { id: 'kovan-changes', title: 'Changes' }] as never }))
+  on('process.run', ($, e) => {
+    const { argv, init } = e as unknown as { argv: string[]; init?: { cwd?: string } }
+    const cmd = argv.join(' ')
+    const cwd = init?.cwd ?? ''
+    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (cmd.startsWith('git rev-parse')) {
+      const root = ['/r/api', '/r/web'].find((r) => cwd === r || cwd.startsWith(`${r}/`))
+      return root ? out(`${root}\n${cwd === root ? '' : `${cwd.slice(root.length + 1)}/`}\n`) : out('', 128)
+    }
+    if (cmd.startsWith('git status')) return out(cwd === '/r/web' ? status : '')
+    if (cmd.startsWith('git ls-files') && cwd === '/r/web') return out('src/a.ts\nsrc/b.ts\n')
+    if (cmd.startsWith('git diff --numstat') && cwd === '/r/web') return out('1\t1\tsrc/a.ts\n2\t0\tsrc/b.ts\n')
+    if (cmd === 'git diff HEAD -- src/a.ts') return out('@@ -1 +1 @@\n-a\n+b\n')
+    if (cmd === 'git diff HEAD -- src/b.ts') return out('@@ -1 +1,3 @@\n x\n+y\n+z\n')
+    return out('', cmd.startsWith('git') ? 0 : 1)
+  })
+  on('tool.call', { tool: 'Edit' }, () => ({ result: {} as never }))
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false } as never }))
+
+  // The first edit reads the session's folders, and what git calls changed then.
+  await $.tool.call({ tool: 'Edit', file_path: '/r/web/src/a.ts', old_string: 'a', new_string: 'b' } as never)
+  status = ' M old-work.ts\0 M src/a.ts\0 M src/b.ts\0'
+  await $.tool.call({ tool: 'Bash', command: "python3 - <<'EOF'\nopen('src/b.ts','a').write('y\\nz\\n')\nEOF" } as never)
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ key: 'file:/r/web/src/b.ts' })).toBeDefined()
+  expect(await ui.find({ key: 'file:/r/web/old-work.ts' })).toBeUndefined()
+  await ui.unmount()
+
+  const changes = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', component: 'Pane', requestId: 'kovan-changes', props: { title: 'Changes', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } } } as never)
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+  expect(await changes.find({ type: 'Text', text: /^web$/ })).toBeDefined()
+  const json = JSON.stringify(await changes.find({ type: 'Box' }))
+  expect(json).toContain('-a\\n+b')
+  expect(json).toContain('+y\\n+z')
+  expect(await changes.find({ key: 'changes-kovan:/r/web/src/b.ts' })).toBeDefined()
+  await changes.unmount()
+})
+
+test('Kovan sessions are asked to keep a task list the pane can show', async ($, on) => {
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'You are Claude.', scope: 'shared' as const }] }))
+  const composed = await $.prompt.compose({ model: 'claude-opus-5-5', promptModel: 'claude-opus-5-5', surfaces: [], tools: ['TaskCreate', 'TaskUpdate'], outputStyle: null, traits: [] })
+  const mine = composed.sections.find((x) => x.id === 'kovan:plan')
+  expect(mine?.scope).toBe('session')
+  expect(mine?.text).toContain('TaskCreate')
+  // Added after the engine's own sections, never in place of them.
+  expect(composed.sections.length).toBeGreaterThan(1)
+  expect(composed.sections.at(-1)?.id).toBe('kovan:plan')
+})
+
+test("the goal's link goes first, the rest keep their order", async () => {
+  const l = (key: string) => ({ key })
+  expect(goalFirst([l('a'), l('goal'), l('b')], 'goal').map((x) => x.key)).toEqual(['goal', 'a', 'b'])
+  expect(goalFirst([l('a'), l('b')], 'goal').map((x) => x.key)).toEqual(['a', 'b'])
+  expect(goalFirst([l('a')], undefined).map((x) => x.key)).toEqual(['a'])
+})
+
+const nvSource = () => 'local primary="${NV_MODEL:-deepseek-ai/deepseek-v4.1-flash}"\nlocal fallback="${NV_FALLBACK-minimaxai/minimax-m3.1-flash z-ai/glm-5.3-flash}"'
+
+describe('external reviewers (item 167)', () => {
+  const names = ['or-review', 'cc-review', 'nv-review', 'opencode']
+  test('reads the names Kovan hands over', async () => {
+    expect(reviewerNames('["nv-review (kimi)","or-review","nv-review","bad name;rm"]')).toEqual(['nv-review', 'or-review', 'bad'])
+    expect(reviewerNames(undefined)).toEqual([])
+    expect(reviewerNames('not json')).toEqual([])
+  })
+
+  test('finds the reviewers a command runs, not those it only mentions', async () => {
+    expect(reviewersIn('/Users/me/.local/bin/or-review $R/prompt.md -o $R/or.md > $R/or.log 2>&1; echo "or-review exit $?"', names)).toEqual(['or-review'])
+    expect(reviewersIn('zsh -c "source $SNAP; NV_STREAM=0 nv-review" < p.md > nv.md', names)).toEqual(['nv-review'])
+    expect(reviewersIn('opencode run --agent plan "$(cat p.md)"', names)).toEqual(['opencode'])
+    expect(reviewersIn('echo "Requirements review (nv-review, opencode)" > "$KOVAN_STATUS"', names)).toEqual([])
+    expect(reviewersIn('for c in or-review cc-review; do type $c; done', names)).toEqual([])
+    expect(reviewersIn('head -30 /Users/me/.local/bin/or-review', names)).toEqual([])
+  })
+
+  test("reads each reviewer's own exit line and its verdict", async () => {
+    const out = 'or-review exit 0\nnv-review exit 1\n**VERDICT:** REQUEST_CHANGES\n'
+    expect(reviewOutcome(out, 'or-review')).toEqual({ exit: 0, failed: false, verdict: 'REQUEST_CHANGES', lines: 'or-review exit 0' })
+    expect(reviewOutcome(out, 'nv-review').exit).toBe(1)
+    expect(reviewOutcome('nothing', 'cc-review')).toEqual({})
+  })
+
+  test('reads the status lines agents print, whoever printed them, the last one winning', async () => {
+    const all = ['or-review', 'cc-review', 'nv-review', 'openrouter', 'opencode', 'cc-token', 'cc-orca']
+    const retry = 'cc-token retry rc=1\ncc-orca attempt 1 failed\ncc-orca attempt 2 failed\ncc-orca attempt 3 failed\n\n[exited with code 0]\n'
+    expect(reviewOutcome(retry, 'cc-token', all)).toMatchObject({ exit: 1, failed: true })
+    expect(reviewOutcome(retry, 'cc-orca', all)).toMatchObject({ failed: true })
+    expect(reviewOutcome('cc-orca attempt 1 failed\ncc-orca retry ok (attempt 2)', 'cc-orca', all).failed).toBe(false)
+    const done = 'cc-review(token+orca) rc=1\nor-review rc=1\nopenrouter rc=0\nnv-review rc=0\n'
+    expect(reviewOutcome(done, 'cc-review', all)).toMatchObject({ exit: 1, failed: true })
+    expect(reviewOutcome(done, 'openrouter', all)).toMatchObject({ exit: 0, failed: false })
+    // A status goes to the reviewer named nearest before it; a model id is not a reviewer.
+    const log = 'cc-review: cc-token FAILED after 2s — Failed to authenticate. API Error: 403 x\noc-review: openrouter/thinkingmachines/inkling:free ok in 305s'
+    expect(reviewOutcome(log, 'cc-token', all)).toMatchObject({ failed: true })
+    expect(reviewOutcome(log, 'cc-review', all).failed).toBeUndefined()
+    expect(reviewOutcome(log, 'openrouter', all).failed).toBeUndefined()
+    // nv-review moving on to its next model is not the end of it.
+    expect(reviewOutcome('nv-review: deepseek-ai/deepseek-v4.1-flash failed, retrying with z-ai/glm-5.3-flash', 'nv-review', all).failed).toBeUndefined()
+    // A sourced shell's title sequences are not output.
+    expect(reviewOutcome('\u001b]2;typeset -f cc-token > /dev/null || { print -u2 ; exit 1; }\u0007cc-review: cc-token starting', 'cc-token', all).failed).toBeUndefined()
+  })
+
+  test('says why a reviewer failed in a few words', async () => {
+    expect(failReason("cc-review: cc-token FAILED after 2s — Failed to authenticate. API Error: 403 User's credit limit is insufficient, remaining credit limit: ＄0.000000")).toBe('no credit (403)')
+    expect(failReason('API Error: 403 This model cannot use part of your gift balance')).toBe('no credit (403)')
+    expect(failReason('cc-review: cc-orca FAILED after 2s — API Error: Request rejected (429) · Free model capacity is limited right now. Retry shortly, or add credits')).toBe('rate-limited (429)')
+    expect(failReason('or-review: every model failed:\n  nvidia/nemotron-3-ultra-550b-a55b:free (HTTP 429: Rate limit exceeded: free-models-per-day. Add 10 credits')).toBe('rate-limited (429)')
+    expect(failReason('nv-review: {"status": 410, "title": "Gone", "detail": "model reached its end of life"}')).toBe('model retired')
+    expect(failReason('curl: (28) Operation timed out after 240006 milliseconds')).toBe('timed out')
+    expect(failReason('nv-review: empty response body')).toBe('empty response')
+    expect(failReason('oc-review: opencode/minimax-m3.1-flash-free failed after 0s (rc=1) — Error: \u001b[0mUnexpected error')).toBe('server error')
+    expect(failReason('nv-review: no key at /Users/me/.config/nvidia/key')).toBe('bad or missing key')
+    expect(failReason('cc-review: cc-token FAILED after 9s — something odd happened')).toBe('something odd happened')
+    expect(failReason('all fine')).toBeUndefined()
+  })
+
+  test("finds the logs a reviewer's command writes to", async () => {
+    const S = '/tmp/s'
+    const command = `S=${S}; R=$S/rev; ( /Users/me/.local/bin/cc-review token $R/prompt.md -C $S/src -o $R/cc.token.md > $R/cc-token-retry.log 2>&1; echo "cc-token retry rc=$?" ) & ( for i in 1 2 3; do cc-review orca $R/prompt.md -o $R/cc.orca.md > $R/cc-orca-retry.log 2>&1 && break; echo "cc-orca attempt $i failed"; done ) & wait`
+    expect(reviewLogs(command, 'cc-token')).toEqual([`${S}/rev/cc-token-retry.log`])
+    expect(reviewLogs(command, 'cc-orca')).toEqual([`${S}/rev/cc-orca-retry.log`])
+    expect(reviewLogs(command, 'cc-review')).toEqual([`${S}/rev/cc.token.md`, `${S}/rev/cc-token-retry.log`, `${S}/rev/cc.orca.md`, `${S}/rev/cc-orca-retry.log`])
+    expect(reviewLogs('nv-review < p.md > ~/r/nv.md 2> "$UNSET/nv.err"', 'nv-review', '/Users/me')).toEqual(['/Users/me/r/nv.md'])
+  })
+
+  test('reads task notifications', async () => {
+    const text = 'x\n<task-notification>\n<task-id>b8sa1ongy</task-id>\n<output-file>/t/b8.output</output-file>\n<status>completed</status>\n<summary>Background command "Run reviewer" completed (exit code 0)</summary>\n</task-notification>'
+    expect(taskNotices(text)).toEqual([{ id: 'b8sa1ongy', status: 'completed', exit: 0, outputFile: '/t/b8.output' }])
+  })
+
+  test('sums the section up', async () => {
+    expect(reviewSummary([{ name: 'a', state: 'done' }, { name: 'b', state: 'failed' }, { name: 'c', state: 'waiting' }])).toBe('1 of 3 done · 1 failed')
+  })
+
+  test("reads each reviewer's models from its own source and config", async () => {
+    const nv = 'nv-review () {\n\tlocal primary="${NV_MODEL:-deepseek-ai/deepseek-v4.1-flash}" \n\tlocal fallback="${NV_FALLBACK-minimaxai/minimax-m3.1-flash z-ai/glm-5.3-flash}" \n}'
+    expect(sourceModels(nv)).toEqual(['deepseek-ai/deepseek-v4.1-flash', 'minimaxai/minimax-m3.1-flash', 'z-ai/glm-5.3-flash'])
+    expect(sourceModels('cc-orca () {\n\tlocal model="${CC_ORCA_MODEL:-z-ai/glm-5.3-flash-free}" \n}')).toEqual(['z-ai/glm-5.3-flash-free'])
+    const py = '#!/usr/bin/env python3\nDEFAULT_MODELS = [\n    "minimax/minimax-m3.1-flash:free",  # 1M ctx\n    "openrouter/free",  # OpenRouter\'s own router\n]\n'
+    expect(sourceModels(py)).toEqual(['minimax/minimax-m3.1-flash:free', 'openrouter/free'])
+    expect(sourceModels(`${py}\n# Tried through OpenCode.\nOPENCODE_FALLBACK = "openrouter/thinkingmachines/inkling:free"\n`)).toEqual(['minimax/minimax-m3.1-flash:free', 'openrouter/free', 'openrouter/thinkingmachines/inkling:free'])
+    expect(shortModel('openrouter/thinkingmachines/inkling:free')).toBe('inkling:free')
+    expect(sourceModels('#!/bin/zsh\nmodel=""')).toEqual([])
+    expect(shortModel('deepseek-ai/deepseek-v4.1-flash')).toBe('deepseek-v4.1-flash')
+    expect(shortModel('nvidia/nvidia/nemotron-3-ultra-550b-a55b')).toBe('nemotron-3-ultra-550b-a55b')
+    expect(shortModel('openrouter/free')).toBe('openrouter/free')
+    expect(opencodeModel('{"model":"opencode/a-free","agent":{"plan":{"model":"opencode/b-free"}}}')).toBe('opencode/b-free')
+    expect(opencodeModel('not json')).toBeUndefined()
+    expect(codexModel('model = "gpt-6-sol"\nmodel_reasoning_effort = "max"\n[profiles.x]\nmodel = "other"\n')).toBe('gpt-6-sol · max')
+    expect(splitSources('noise\n@@kovan-source nv-review\nbody\n@@kovan-source openrouter')).toEqual({ 'nv-review': 'body\n', openrouter: '' })
+  })
+
+  test('a reviewer that runs others shows theirs, and a command can pick its own', async () => {
+    const all = reviewerModels(
+      { 'nv-review': nvSource(), 'cc-token': '${CC_TOKEN_MODEL:-minimax/minimax-m3.1-flash}', 'cc-review': 'cc-token or cc-orca', 'cc-orca': '${CC_ORCA_MODEL:-z-ai/glm-5.3-flash-free}', openrouter: '' },
+      { opencode: ['opencode/minimax-m3.1-flash-free'] }
+    )
+    expect(all['opencode']).toEqual({ models: ['minimax-m3.1-flash-free'] })
+    expect(all['cc-review']).toEqual({ models: [], via: ['cc-token', 'cc-orca'] })
+    expect(all['openrouter']).toBeUndefined()
+    expect(modelLine({ name: 'cc-review', state: 'waiting' }, all)).toBe('cc-token minimax-m3.1-flash · cc-orca glm-5.3-flash-free')
+    expect(modelLine({ name: 'nv-review', state: 'waiting' }, all)).toBe('deepseek-v4.1-flash → minimax-m3.1-flash → glm-5.3-flash')
+    expect(modelLine({ name: 'openrouter', state: 'waiting' }, all)).toBe('')
+
+    const nv = all['nv-review']!.models
+    expect(runModels('nv-review < p.md > nv.md; echo "nv-review exit $?"', 'nv-review', nv)).toBeUndefined()
+    expect(runModels('NV_MODEL=z-ai/glm-5.3 nv-review < p.md', 'nv-review', nv)).toEqual(['glm-5.3', 'minimax-m3.1-flash', 'glm-5.3-flash'])
+    expect(runModels('NV_MODEL=z-ai/glm-5.3 NV_FALLBACK= nv-review < p.md', 'nv-review', nv)).toEqual(['glm-5.3'])
+    expect(runModels('zsh -c "source $SNAP; NV_MODEL=x/y-z nv-review" < p.md', 'nv-review', nv)).toEqual(['y-z', 'minimax-m3.1-flash', 'glm-5.3-flash'])
+    expect(runModels('or-review -m nvidia/nemotron-3-ultra-550b-a55b:free --max-tokens 40000 p.md', 'or-review', [])).toEqual(['nemotron-3-ultra-550b-a55b:free'])
+    expect(runModels('opencode run --agent plan --model=opencode/deepseek-v4.1-flash-free "go"', 'opencode', [])).toEqual(['deepseek-v4.1-flash-free'])
+    expect(modelLine({ name: 'nv-review', state: 'running', models: ['glm-5.3'] }, all)).toBe('glm-5.3')
+  })
+})
+
+test('each reviewer shows not run yet, running, then done or failed', async ($, on) => {
+  mock.env(on, { KOVAN_REVIEWERS: JSON.stringify(['or-review', 'nv-review', 'cc-review']) })
+  let clock = 0
+  on('clock.now', () => ({ value: clock }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('fs.read', ($, e) => {
+    const p = (e as unknown as { path: string }).path
+    if (p === '/tasks/bg1.output') return { value: 'nv-review exit 0\nVERDICT: APPROVE\n' }
+    throw new Error('no such file')
+  })
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  // The engine taking the prompt in, as it does a background task's notification.
+  on('prompt.submit', ($, e) => e as never)
+  on('tool.call', { tool: 'Bash' }, ($, e) => {
+    const command = String((e as unknown as { command: string }).command)
+    if (command.includes('nv-review')) return { result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bg1' } as never }
+    return { result: { stdout: 'or-review exit 2\n', stderr: '', interrupted: false } as never }
+  })
+  const rows = async (ui: { find: (q: never) => Promise<unknown> }) => JSON.stringify(await ui.find({ type: 'Box' } as never))
+
+  let ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^REVIEWERS ─+ 0 of 3 done$/ })).toBeDefined()
+  expect(await rows(ui)).toContain('not run yet')
+  await ui.unmount()
+
+  await $.tool.call({ tool: 'Bash', command: 'zsh -c "source $SNAP; nv-review" < p.md > nv.md; echo "nv-review exit $?"', run_in_background: true } as never)
+  clock = 3 * 60_000
+  await $.tool.call({ tool: 'Bash', command: '/Users/me/.local/bin/or-review p.md -o or.md; echo "or-review exit $?"' } as never)
+  ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  let json = await rows(ui)
+  expect(json).toContain('running · 3m')
+  expect(json).toContain('exit 2')
+  expect(await ui.find({ type: 'Text', text: /^REVIEWERS ─+ 0 of 3 done · 1 failed$/ })).toBeDefined()
+  await ui.unmount()
+
+  clock = 5 * 60_000
+  await $.prompt.submit({ text: '<task-notification>\n<task-id>bg1</task-id>\n<output-file>/tasks/bg1.output</output-file>\n<status>completed</status>\n<summary>Background command "nv" completed (exit code 0)</summary>\n</task-notification>' } as never)
+  for (let i = 0; i < 100; i++) await Promise.resolve()
+  ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  json = await rows(ui)
+  expect(json).toContain('APPROVE')
+  expect(json).toContain('done · 5m')
+  expect(await ui.find({ type: 'Text', text: /^REVIEWERS ─+ 1 of 3 done · 1 failed$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test("each reviewer's models show under it, read at session start", async ($, on) => {
+  mock.env(on, { KOVAN_REVIEWERS: JSON.stringify(['nv-review', 'opencode', 'cc-review', 'cc-orca']), HOME: '/Users/me' })
+  on('clock.now', () => ({ value: 0 }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('command.register', () => ({ value: { command: 'kovan' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('fs.read', ($, e) => {
+    if ((e as unknown as { path: string }).path === '/Users/me/.config/opencode/opencode.json') return { value: '{"model":"opencode/minimax-m3.1-flash-free"}' }
+    throw new Error('no such file')
+  })
+  const sources = `@@kovan-source nv-review\n${nvSource()}\n@@kovan-source cc-review\ncc-review runs cc-orca\n@@kovan-source cc-orca\n\${CC_ORCA_MODEL:-z-ai/glm-5.3-flash-free}\n`
+  on('process.run', ($, e) => {
+    const argv = (e as unknown as { argv: string[] }).argv
+    // Never an interactive zsh on Claude's own terminal (item 168): it would stop Claude.
+    if (argv.includes('-ic')) expect(argv.slice(0, 4)).toEqual(['/usr/bin/perl', '-MPOSIX', '-e', 'POSIX::setsid(); exec @ARGV or die'])
+    const zsh = argv.includes('-ic')
+    return { value: { exitCode: zsh ? 0 : 1, stdout: zsh ? sources : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bg1' } as never }))
+
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  for (let i = 0; i < 100; i++) await Promise.resolve()
+  let ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: 'deepseek-v4.1-flash → minimax-m3.1-flash → glm-5.3-flash' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'minimax-m3.1-flash-free' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'cc-orca glm-5.3-flash-free' })).toBeDefined()
+  await ui.unmount()
+
+  // A run that names its own model shows that one.
+  await $.tool.call({ tool: 'Bash', command: 'NV_MODEL=z-ai/glm-5.3 NV_FALLBACK= nv-review < p.md > nv.md; echo "nv-review exit $?"', run_in_background: true } as never)
+  ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: 'glm-5.3' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'deepseek-v4.1-flash → minimax-m3.1-flash → glm-5.3-flash' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a reviewer whose retry job ends with code 0 but printed failures shows failed, with the reason from its log', async ($, on) => {
+  mock.env(on, { KOVAN_REVIEWERS: JSON.stringify(['nv-review', 'cc-token', 'cc-orca']) })
+  on('clock.now', () => ({ value: 0 }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  const files: Record<string, string> = {
+    '/tasks/bj.output': 'cc-token retry rc=1\ncc-orca attempt 1 failed\ncc-orca attempt 3 failed\n\n[exited with code 0]\n',
+    '/s/rev/cc-token-retry.log': "\u001b]2;typeset -f cc-token > /dev/null || { print -u2 ; exit 1; }\u0007cc-review: cc-token starting\ncc-review: cc-token FAILED after 2s — Failed to authenticate. API Error: 403 User's credit limit is insufficient\n",
+    '/s/rev/cc-orca-retry.log': 'cc-review: cc-orca FAILED after 2s — API Error: Request rejected (429) · Free model capacity is limited right now. Retry shortly, or add credits\n'
+  }
+  on('fs.read', ($, e) => {
+    const text = files[(e as unknown as { path: string }).path]
+    if (text === undefined) throw new Error('no such file')
+    return { value: text }
+  })
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('prompt.submit', ($, e) => e as never)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bj' } as never }))
+
+  await $.tool.call({ tool: 'Bash', command: 'S=/s; R=$S/rev; ( cc-review token $R/p.md -o $R/cc.token.md > $R/cc-token-retry.log 2>&1; echo "cc-token retry rc=$?" ) & ( for i in 1 2 3; do cc-review orca $R/p.md > $R/cc-orca-retry.log 2>&1 && break; echo "cc-orca attempt $i failed"; done ) & wait', run_in_background: true } as never)
+  await $.prompt.submit({ text: '<task-notification>\n<task-id>bj</task-id>\n<output-file>/tasks/bj.output</output-file>\n<status>completed</status>\n<summary>Background command "retry" completed (exit code 0)</summary>\n</task-notification>' } as never)
+  for (let i = 0; i < 1000; i++) await Promise.resolve()
+
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^REVIEWERS ─+ 0 of 3 done · 2 failed$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'no credit (403)' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'rate-limited (429)' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('no reviewers asked for, no section', async ($, on) => {
+  mock.env(on, {})
+  on('clock.now', () => ({ value: 0 }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] } }))
+  const ui = await $.ui.mount({ plugin: 'kovan', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^REVIEWERS/ })).toBeUndefined()
+  await ui.unmount()
+})

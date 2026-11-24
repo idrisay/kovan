@@ -136,6 +136,13 @@ const sameLogin = (a?: string, b?: string) => (a ?? '').toLowerCase() === (b ?? 
 
 type Fresh = Omit<ActivityEvent, 'read'>;
 
+/** The event a review is, when it decides something; a commenting review is a comment. */
+function verdictOf(state?: string): 'approved' | 'changes-requested' | undefined {
+  if (state === 'APPROVED') return 'approved';
+  if (state === 'CHANGES_REQUESTED') return 'changes-requested';
+  return undefined;
+}
+
 export function diffActivity(
   seen: ActivitySeen,
   poll: ActivityPoll,
@@ -178,15 +185,34 @@ export function diffActivity(
 
         const count = pull.commentCount;
         const hadCount = before.commentBasis === COMMENT_BASIS ? before.comments[id] : undefined;
+        if (count === undefined || hadCount === undefined || count <= hadCount || sameLogin(pull.lastCommenter, viewer)) {
+          continue;
+        }
         // A review counts as a comment (item 92's cheaper query), so an
-        // approval raises the count too — it's already its own event.
-        const decidedNow = decided.some((event) => event.subject === id);
-        if (count !== undefined && hadCount !== undefined && count > hadCount && !decidedNow &&
-            !sameLogin(pull.lastCommenter, viewer)) {
+        // approval raises the count too, and it is an approval, not a comment
+        // (item 130). The overall decision moving says so only where the
+        // repository requires reviews: elsewhere GitHub leaves
+        // `reviewDecision` empty, and the newest review's own state is the
+        // only sign. A rise of more than one had something else in it too.
+        const verdict = verdictOf(pull.lastReviewState);
+        const decidedNow = decided.find((event) => event.subject === id);
+        if (verdict && decidedNow?.kind === verdict) {
+          decidedNow.who ??= pull.lastCommenter;
+        } else if (verdict && !decidedNow) {
+          decided.push({
+            id: `${verdict}:${id}:${pull.lastCommentAt ?? pull.updatedAt}`,
+            kind: verdict, at: now, subject: id, label: short(pull), title: pull.title,
+            ...(pull.lastCommenter ? { who: pull.lastCommenter } : {}),
+            url: pull.url
+          });
+        }
+        const others = count - hadCount - (verdict || decidedNow ? 1 : 0);
+        if (others > 0) {
           commented.push({
             id: `new-comment:${id}:${count}`,
             kind: 'new-comment', at: now, subject: id, label: short(pull), title: pull.title,
-            ...(pull.lastCommenter ? { who: pull.lastCommenter } : {}),
+            // Who wrote the newest is who reviewed; somebody else may have commented.
+            ...(pull.lastCommenter && !verdict ? { who: pull.lastCommenter } : {}),
             url: pull.url
           });
         }

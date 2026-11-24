@@ -20,20 +20,33 @@
  * `KOVAN_SHOT=<path>` also writes a PNG of the window.
  */
 
-import { app, clipboard, type BrowserWindow } from 'electron';
-import { existsSync } from 'node:fs';
+import { app, BrowserWindow, clipboard, ClipboardItem } from 'electron';
+import { latestDockMenu } from './dockMenu';
+import { existsSync, readdirSync } from 'node:fs';
+import * as os from 'node:os';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Agents } from './agents';
 import type { ActivityFeed } from './activityFeed';
 import type { Poller, Snapshot } from './poller';
+import type { PersonPulls, PullSummary } from '@kovan/core';
 import { Sessions } from './sessions';
 import { PtyHosts } from './ptyClient';
 import { AgentStatus } from './agentStatus';
+import { mixpanelAsked } from './mixpanel';
 import { reviewBasis, trackProblems } from '@kovan/core';
 import { RunStore, type Runner } from '@kovan/agent';
 
-export type SmokeMode = '1' | 'seeded' | 'live' | 'pty' | 'workspace';
+export type SmokeMode = '1' | 'seeded' | 'live' | 'pty' | 'workspace' | 'demo';
+
+/**
+ * Demo mode (`npm run demo`): the app as you'd use it — windows, tray,
+ * terminals, real notifications — but every queue, detail and person comes
+ * from the fixtures in this file, never from GitHub, Jira or Sentry. For
+ * recording videos without showing real work. Needs a throwaway profile
+ * (`KOVAN_USER_DATA`), like every other fixture.
+ */
+export const DEMO = process.env['KOVAN_SMOKE'] === 'demo' && Boolean(process.env['KOVAN_USER_DATA']);
 
 const FIXTURE = {
   number: 42,
@@ -107,7 +120,8 @@ const OPEN_PULLS = [
 /** Someone else's pull request, waiting on the viewer's review. */
 const REVIEW_PULL = {
   ...FIXTURE,
-  headRef: 'feat/unrelated-change',
+  // Item 171's smoke needs a ticket on it; every other run keeps it ticketless.
+  headRef: process.env['KOVAN_SMOKE_ITEM171'] ? 'feat/ACME-2500-invoice-pdf' : 'feat/unrelated-change',
   number: 205,
   title: 'Split the invoice PDF generator out of the request path',
   repo: 'acme/billing',
@@ -182,11 +196,87 @@ export function fixtureSnapshot(mergedCount: number): Snapshot {
     loadingMerged: false,
     tickets: [TICKET, TICKET_LOW, TICKET_HIGHEST],
     sentryIssues: [SENTRY_ISSUE],
-    connected: ['github' as const, 'sentry' as const],
+    // Item 145's flow keeps a pinned ticket that isn't in the list, which
+    // waits for Jira to have answered.
+    connected: process.env['KOVAN_SMOKE_ITEM145'] ? ['github' as const, 'jira' as const, 'sentry' as const] : ['github' as const, 'sentry' as const],
     errors: [],
     refreshing: false,
-    refreshedAt: { github: Date.now() - 90_000 },
+    refreshedAt: process.env['KOVAN_SMOKE_ITEM145'] ? { github: Date.now() - 90_000, jira: Date.now() - 90_000 } : { github: Date.now() - 90_000 },
     refreshingProviders: []
+  };
+}
+
+/**
+ * The demo's story, one step per Refresh. Launch: one pull request blocked.
+ * After the first Refresh, #118's checks fail and it joins the blocked list,
+ * so the real "Blocked on you" notification fires — film that with the
+ * window closed or behind another app.
+ */
+export function demoSnapshot(refreshes: number, mergedCount: number): Snapshot {
+  const base = fixtureSnapshot(mergedCount);
+  const now = Date.now();
+  const connected = ['github' as const, 'jira' as const, 'sentry' as const];
+  const refreshedAt = { github: now, jira: now, sentry: now };
+  if (refreshes === 0) return { ...base, connected, refreshedAt };
+  const broken = { ...OPEN_PULLS[0]!, checks: 'failure' as const, updatedAt: new Date(now - 60_000).toISOString() };
+  return {
+    ...base,
+    connected,
+    refreshedAt,
+    blocked: [broken, ...base.blocked],
+    mine: base.mine.map((p) => (p.number === broken.number && p.repo === broken.repo ? broken : p))
+  };
+}
+
+/** Item 164: the person picker's people, and one teammate's queues. */
+export function teammatesFixture(service: 'github' | 'jira') {
+  return service === 'github'
+    ? [
+        { id: 'alice-dev', name: 'Lena Della Cagna', handle: 'alice-dev', open: 3 },
+        { id: 'dave-dev', name: 'Marco Vitali', handle: 'dave-dev', open: 1 },
+        { id: 'jonas-h', name: 'Jonas Huber', handle: 'jonas-h', open: 0 }
+      ]
+    : [
+        { id: '712020:lena', name: 'Lena Della Cagna', open: 2 },
+        { id: '712020:marco', name: 'Marco Vitali', open: 0 }
+      ];
+}
+
+export function personPullsFixture(login: string, merged: number): PersonPulls {
+  const base: PullSummary = { ...FIXTURE, author: login };
+  return {
+    open: [
+      { ...REVIEW_PULL, author: login },
+      { ...base, number: 210, title: 'Retry the Stripe webhook on 5xx', reviewDecision: 'approved', mergeable: 'mergeable', unresolvedThreads: 0 },
+      { ...base, number: 211, title: 'Offline lesson cache', isDraft: true, unresolvedThreads: 0 }
+    ],
+    reviewRequested: [{ ...base, number: 212, title: 'Parent dashboard weekly summary', author: 'dave-dev', reviewDecision: 'review_required' }],
+    merged: mergedFixture(Math.min(merged, 4)).map((p) => ({ ...p, author: login })),
+    mergedTotal: 4
+  };
+}
+
+/** ACME-2500's pull requests, for "Review together" (item 171). */
+export function ticketPullsFixture(key: string) {
+  if (key !== 'ACME-2500') return [];
+  const at = (n: number, extra: Partial<PullSummary>): PullSummary => ({
+    ...REVIEW_PULL, number: n, url: `https://example.invalid/pr/${n}`, ...extra
+  });
+  return [
+    { pull: REVIEW_PULL, changedSinceYourReview: false },
+    { pull: at(88, { repo: 'acme/web', title: 'ACME-2500 Invoice download button uses the new PDF endpoint' }), changedSinceYourReview: false },
+    { pull: at(311, { repo: 'acme/jobs', title: 'ACME-2500 Render invoice PDFs on the worker queue' }), yourReview: 'CHANGES_REQUESTED', changedSinceYourReview: true },
+    { pull: at(12, { repo: 'acme/infra', title: 'ACME-2500 Worker queue for PDF jobs' }), yourReview: 'APPROVED', changedSinceYourReview: false },
+    { pull: at(80, { repo: 'acme/billing', title: 'ACME-2500 Invoice PDF template', mergedAt: new Date(Date.now() - 86_400_000).toISOString() }), yourReview: 'APPROVED', changedSinceYourReview: false }
+  ];
+}
+
+export function personTicketsFixture() {
+  return {
+    tickets: [
+      { ...TICKET, key: 'ACME-2571', summary: 'Parent dashboard weekly summary', assignee: 'Lena Della Cagna' },
+      { ...TICKET_LOW, key: 'ACME-2588', summary: 'Teacher export to CSV', assignee: 'Lena Della Cagna' }
+    ]
   };
 }
 
@@ -214,7 +304,7 @@ const SENTRY_ISSUE = {
 export function sentryFramesFixture(_issueId: string) {
   return [
     { filename: 'node_modules/react-dom/cjs/react-dom.production.js', function: 'commitRoot', lineNo: 12, inApp: false },
-    { filename: 'checkout/summary.tsx', function: 'renderCheckoutSummary', lineNo: 41, resolvedPath: '/Users/idrisay/Desktop/coding/ikatia/app/baton/checkout/summary.tsx', inApp: true },
+    { filename: 'checkout/summary.tsx', function: 'renderCheckoutSummary', lineNo: 41, resolvedPath: '/Users/idrisay/Desktop/coding/ikatia/app/kovan/checkout/summary.tsx', inApp: true },
     { filename: 'checkout/total.ts', function: 'formatTotal', lineNo: 9, inApp: true }
   ];
 }
@@ -321,7 +411,11 @@ export function diffFixture(): string {
   ].join('\n');
 }
 
-export function ticketFixture(_key: string) {
+export function ticketFixture(key: string) {
+  // Item 145: a pinned ticket that isn't in the list must come back as itself.
+  if (process.env['KOVAN_SMOKE_ITEM145'] && key !== TICKET.key) {
+    return { ...TICKET, key, summary: `Fixture ticket ${key}, reassigned away`, url: `https://example.invalid/browse/${key}` };
+  }
   // The quick-model shot needs a thread long enough for "Condense" to appear
   // (more than the latest ten). Only under that flag, so every other shot of
   // the ticket pane keeps the one comment it was taken with.
@@ -539,7 +633,7 @@ export async function smokePty(
     renameSticks: renamed?.title === 'renamed by smoke',
     renameKeptSubject: renamed?.subject === subjectBefore,
     running: sessions.list()[0]?.running,
-    bufferBytes: sessions.buffer(session.id).length,
+    bufferBytes: sessions.buffer(session.id).data.length,
     runnersFound: runners.length,
     runnerNames: runners.map((r) => r.name).slice(0, 8),
     targets: (await agents.targets()).map((x) => x.label).slice(0, 4),
@@ -646,9 +740,117 @@ export async function smokeUi(
     return { item119: await driveItem119(win, process.env['KOVAN_SMOKE_ITEM119']) };
   }
 
+  // Item 127: search everything in the title bar.
+  if (process.env['KOVAN_SMOKE_ITEM127'] && mode === 'seeded') {
+    return { item127: await driveItem127(win, process.env['KOVAN_SMOKE_ITEM127']) };
+  }
+
+  // Item 131: Jira's logo beside a ticket's title, in both themes.
+  if (process.env['KOVAN_SMOKE_ITEM139'] && mode === 'seeded') {
+    return { item139: await driveItem139(win, process.env['KOVAN_SMOKE_ITEM139']) };
+  }
+  if (process.env['KOVAN_SMOKE_LINUX'] && mode === 'seeded') {
+    return { linux: await driveLinux(win, process.env['KOVAN_SMOKE_LINUX']) };
+  }
+  if (process.env['KOVAN_SMOKE_SECURITY'] && mode === 'seeded') {
+    return { security: await driveSecurity(win, process.env['KOVAN_SMOKE_SECURITY']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM136'] && mode === 'seeded') {
+    return { item136: await driveItem136(win, process.env['KOVAN_SMOKE_ITEM136']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM172'] && mode === 'seeded') {
+    return { item172: await driveItem172(win, process.env['KOVAN_SMOKE_ITEM172']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM181'] && mode === 'seeded') {
+    return { item181: await driveItem181(win, process.env['KOVAN_SMOKE_ITEM181']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM180'] && mode === 'seeded') {
+    return { item180: await driveItem180(win, process.env['KOVAN_SMOKE_ITEM180']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM179'] && mode === 'seeded') {
+    return { item179: await driveItem179(win, process.env['KOVAN_SMOKE_ITEM179']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM174'] && mode === 'seeded') {
+    return { item174: await driveItem174(win, process.env['KOVAN_SMOKE_ITEM174']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM173'] && mode === 'seeded') {
+    return { item173: await driveItem173(win, process.env['KOVAN_SMOKE_ITEM173']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM171'] && mode === 'seeded') {
+    return { item171: await driveItem171(win, process.env['KOVAN_SMOKE_ITEM171']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM165'] && mode === 'seeded') {
+    return { item165: await driveItem165(win, process.env['KOVAN_SMOKE_ITEM165']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM164'] && mode === 'seeded') {
+    return { item164: await driveItem164(win, process.env['KOVAN_SMOKE_ITEM164']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM163'] && mode === 'seeded') {
+    return { item163: await driveItem163(win, process.env['KOVAN_SMOKE_ITEM163'], process.env['KOVAN_PHASE'] ?? '1') };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM161'] && mode === 'seeded') {
+    return { item161: await driveItem161(win, process.env['KOVAN_SMOKE_ITEM161']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM160'] && mode === 'seeded' && sessions) {
+    return { item160: await driveItem160(win, sessions, process.env['KOVAN_SMOKE_ITEM160']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM158'] && mode === 'seeded' && sessions) {
+    return { item158: await driveItem158(win, sessions, process.env['KOVAN_SMOKE_ITEM158']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM157'] && mode === 'seeded') {
+    return { item157: await driveItem157(win, process.env['KOVAN_SMOKE_ITEM157']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM135'] && mode === 'seeded') {
+    return { item135: await driveItem135(win, process.env['KOVAN_SMOKE_ITEM135']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM133'] && mode === 'seeded') {
+    return { item133: await driveItem133(win, process.env['KOVAN_SMOKE_ITEM133']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM132'] && mode === 'seeded') {
+    return { item132: await driveItem132(win, process.env['KOVAN_SMOKE_ITEM132']) };
+  }
+  if (process.env['KOVAN_SMOKE_ITEM131'] && mode === 'seeded') {
+    return { item131: await driveItem131(win, process.env['KOVAN_SMOKE_ITEM131']) };
+  }
+
+  // Item 129: a full-screen program's bottom lines survive a trip to another view.
+  if (process.env['KOVAN_SMOKE_ITEM129'] && mode === 'seeded') {
+    return { item129: await driveItem129(win, process.env['KOVAN_SMOKE_ITEM129']) };
+  }
+
+  // Item 126: the shell switch in Sessions' + menu.
+  if (process.env['KOVAN_SMOKE_ITEM126'] && mode === 'seeded') {
+    return { item126: await driveItem126(win, process.env['KOVAN_SMOKE_ITEM126']) };
+  }
+
+  // Item 124: Summarize, Review and Condense, chosen in Settings › Agents.
+  if (process.env['KOVAN_SMOKE_ITEM124'] && mode === 'seeded') {
+    return { item124: await driveItem124(win, process.env['KOVAN_SMOKE_ITEM124']) };
+  }
+
   // Item 120: connection problems in the status bar.
   if (process.env['KOVAN_SMOKE_ITEM120'] && mode === 'seeded') {
     return { item120: await driveItem120(win, process.env['KOVAN_SMOKE_ITEM120']) };
+  }
+
+  // Item 148: Open in Kovan from the pane beside Claude.
+  if (process.env['KOVAN_SMOKE_ITEM148'] && mode === 'seeded') {
+    return { item148: await driveItem148(win, process.env['KOVAN_SMOKE_ITEM148']) };
+  }
+
+  // Item 145: pin in place.
+  if (process.env['KOVAN_SMOKE_ITEM145'] && mode === 'seeded') {
+    return { item145: await driveItem145(win, process.env['KOVAN_SMOKE_ITEM145']) };
+  }
+
+  // Item 144: a notification opens in Kovan, never the browser by itself.
+  if (process.env['KOVAN_SMOKE_ITEM144'] && mode === 'seeded') {
+    return { item144: await driveItem144(win, process.env['KOVAN_SMOKE_ITEM144']) };
+  }
+
+  // Item 143: adding a reviewer, testing it, and picking it on the Review button.
+  if (process.env['KOVAN_SMOKE_ITEM143'] && mode === 'seeded') {
+    return { item143: await driveItem143(win, process.env['KOVAN_SMOKE_ITEM143']) };
   }
 
   // Item 118: the detail header, per density.
@@ -959,10 +1161,10 @@ export async function smokeUi(
     await new Promise((r) => setTimeout(r, 500));
     await read(win, `document.querySelector('.rows .row')?.click()`);
     await until(win, `document.querySelector('.quick-copy')`, 10_000);
-    clipboard.writeText('');
+    await clipboard.writeText('');
     await read(win, `document.querySelector('.quick-copy').click()`);
     await until(win, `document.querySelector('.quick-copy.copied')`, 5_000);
-    report['copied'] = clipboard.readText() === text;
+    report['copied'] = (await clipboard.readText()) === text;
     report['button'] = await read(win, `document.querySelector('.quick-copy').textContent`);
     await read(win, `document.querySelector('.quick-copy').closest('.quick-card').scrollIntoView({ block: 'start' })`);
     await new Promise((r) => setTimeout(r, 300));
@@ -3881,6 +4083,1841 @@ async function driveItem116(win: BrowserWindow, prefix: string): Promise<Record<
  * and on comfortable, that the toolbar stays while the pane scrolls.
  * `KOVAN_DENSITY=compact` for the compact run.
  */
+/**
+ * Item 124: the quick-model buttons start hidden, appear the moment they are
+ * ticked in Settings › Agents (behind the sheet), and go again when unticked.
+ */
+/** Item 127: ⌘K, typing, ⇥ scopes, ⏎ to open, `>` for actions — by real key events. */
+async function driveItem127(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(600);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const key = async (keyCode: string, modifiers: ('meta' | 'shift')[] = []) => {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+    await pause(250);
+  };
+  const type = async (text: string) => { await win.webContents.insertText(text); await pause(400); };
+  const groups = () => read(win, `Array.from(document.querySelectorAll('.tsearch-list [role=group]')).map((g) => g.getAttribute('aria-label') + ': ' + Array.from(g.querySelectorAll('.tsearch-row')).map((r) => r.querySelector('.tsearch-key').textContent + ' ' + r.querySelector('.tsearch-title').textContent + ' [' + r.querySelector('.tsearch-meta').textContent + ']').join(' | '))`);
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rows .row')`, 15_000);
+  const report: Record<string, unknown> = {};
+  report['idle'] = await read(win, `document.querySelector('.tsearch input')?.placeholder`);
+  await snap('idle');
+  await key('K', ['meta']);
+  report['openedByCmdK'] = await read(win, `Boolean(document.querySelector('.tsearch.open')) && document.activeElement === document.querySelector('.tsearch input')`);
+  report['empty'] = await groups();
+  await snap('empty');
+  await type('retry');
+  report['retry'] = await groups();
+  report['highlight'] = await read(win, `Array.from(document.querySelectorAll('.tsearch-title mark')).slice(0, 3).map((m) => m.textContent)`);
+  await snap('retry');
+  await key('Tab');
+  report['scopeAfterTab'] = await read(win, `document.querySelector('.tsearch-scope.on')?.textContent`);
+  report['retryPullsOnly'] = await groups();
+  await key('Tab', ['shift']);
+  await key('Enter');
+  await pause(800);
+  report['openedTitle'] = await read(win, `document.querySelector('.detail h2, main h2')?.textContent`);
+  report['closedAfterEnter'] = await read(win, `!document.querySelector('.tsearch.open')`);
+  await key('K', ['meta']);
+  await type('> settings');
+  report['actions'] = await groups();
+  await snap('actions');
+  await key('Enter');
+  await pause(800);
+  report['settingsOpened'] = await read(win, `Boolean(document.querySelector('.settings-list'))`);
+  await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+  if (!(await until(win, `!document.querySelector('.settings-list')`, 2_000))) await key('Escape');
+  await until(win, `!document.querySelector('.settings-list')`, 2_000);
+  await pause(300);
+  await key('K', ['meta']);
+  await type('zzzz nothing');
+  report['noMatch'] = await read(win, `document.querySelector('.tsearch-empty')?.textContent`);
+  await key('Escape');
+  report['closedByEscape'] = await read(win, `!document.querySelector('.tsearch.open')`);
+  return report;
+}
+
+/**
+ * Item 126: picks bash in the + menu's shell switch, opens a terminal, and
+ * checks what actually runs in it — then that the choice stuck, and that
+ * Settings › Text & terminal shows the same one.
+ */
+/**
+ * Item 139: a ticket with its agent terminal docked to the right, taking most
+ * of a wide window. The ticket's own width, not the window's, must decide
+ * whether the side column (token usage, sessions, history) sits beside the
+ * text or under it.
+ */
+async function driveItem139(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.setSize(1600, 1000);
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  await until(win, `document.querySelector('.rail-item[data-view="tickets"]')`, 15_000);
+  await read(win, `localStorage.setItem('kovan.terminal-dock', 'right'); localStorage.setItem('kovan.terminal-width', '1000')`);
+  await read(win, `document.querySelector('.rail-item[data-view="tickets"]').click()`);
+  await until(win, `document.querySelector('.rows .row')`, 5_000);
+  await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+  await until(win, `document.querySelector('.detail-place-icon')`, 8_000);
+  const layout = () => read(win, `(() => {
+    const scroll = document.querySelector('.detail-scroll'), main = document.querySelector('.detail-main'), side = document.querySelector('.detail-side');
+    const r = (e) => e ? Math.round(e.getBoundingClientRect().width) : null;
+    return { pane: r(document.querySelector('.pane')), ticket: r(scroll), main: r(main), side: r(side),
+      sideBySide: Boolean(main && side && side.getBoundingClientRect().left > main.getBoundingClientRect().right - 1),
+      terminal: r(document.querySelector('.detail-terminal')) };
+  })()`);
+  report['before'] = await layout();
+  // The toolbar's >_ opens a terminal for this ticket, docked in it.
+  await read(win, `document.querySelector('.detail-place-icon[aria-label="Open a terminal for this"]')?.click()`);
+  report['dockedRight'] = await until(win, `document.querySelector('.detail-terminal.dock-right')`, 10_000);
+  await pause(800);
+  report['docked'] = await layout();
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-docked.png`, (await win.webContents.capturePage()).toPNG());
+  return report;
+}
+
+/**
+ * Kovan on Linux: Ctrl in place of ⌘ (but a terminal keeps Ctrl+K), the
+ * desktop's own frame, open-at-login as an autostart entry, and the terminal
+ * host's socket in the private runtime folder.
+ */
+async function driveLinux(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+  };
+  const ctrl = async (key: string) => {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: key, modifiers: ['control'] });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key, modifiers: ['control'] });
+    await pause(400);
+  };
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  report['platform'] = await read(win, `document.documentElement.dataset.platform`);
+  report['labels'] = await read(win, `[...document.querySelectorAll('kbd')].map((k) => k.textContent)`);
+  report['titlebarPadding'] = await read(win, `getComputedStyle(document.querySelector('.titlebar')).paddingLeft`);
+  report['menuBarHidden'] = win.isMenuBarAutoHide();
+  await read(win, `document.activeElement?.blur()`);
+  await ctrl('K');
+  report['ctrlKOpensSearch'] = await read(win, `Boolean(document.querySelector('.tsearch.open'))`);
+  await shot('search');
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+  await pause(300);
+
+  // In a terminal, Ctrl+K is the shell's (cut to end of line).
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  const folders = await read(win, `window.kovan.settings().then((s) => s['repos.folders'])`) as string[];
+  await read(win, `window.kovan.openTerminal(${JSON.stringify(folders[0])}, undefined, 'linux check')`);
+  await until(win, `document.querySelector('.xterm-helper-textarea')`, 10_000);
+  await read(win, `document.querySelector('.xterm-helper-textarea').focus()`);
+  await pause(1_500);
+  await ctrl('K');
+  report['ctrlKInTerminalOpensSearch'] = await read(win, `Boolean(document.querySelector('.tsearch.open'))`);
+  await shot('terminal');
+
+  await read(win, `window.kovan.setSetting('launchAtLogin', true)`);
+  await pause(500);
+  const entry = path.join(process.env['XDG_CONFIG_HOME'] || path.join(os.homedir(), '.config'), 'autostart', 'kovan.desktop');
+  report['autostart'] = existsSync(entry) ? (await readFile(entry, 'utf8')).split('\n').find((l) => l.startsWith('Exec=')) : null;
+  await read(win, `window.kovan.setSetting('launchAtLogin', false)`);
+  await pause(500);
+  report['autostartRemoved'] = !existsSync(entry);
+  const runtime = process.env['XDG_RUNTIME_DIR'];
+  report['socketInRuntimeDir'] = runtime ? readdirSync(runtime).filter((n) => n.startsWith('kovan-pty-')) : 'no XDG_RUNTIME_DIR';
+  return report;
+}
+
+/**
+ * The security review's fixes (2026-10): the window is sandboxed on Electron
+ * 44, a screenshot still pastes after the clipboard API change, and links that
+ * aren't http(s) or mailto never reach the OS. The clipboard is put back after.
+ */
+async function driveSecurity(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const report: Record<string, unknown> = {};
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  report['electron'] = process.versions.electron;
+  // Exists at runtime; Electron's own types leave it out.
+  report['sandboxed'] = (win.webContents as unknown as { getLastWebPreferences(): { sandbox?: boolean } | null }).getLastWebPreferences()?.sandbox;
+  report['bridge'] = await read(win, `typeof window.kovan?.sessionWrite`);
+  report['nodeInWindow'] = await read(win, `typeof require + ' / ' + typeof process`);
+
+  const saved = await clipboard.read().catch(() => []);
+  try {
+    const png = (await win.webContents.capturePage({ x: 0, y: 0, width: 40, height: 40 })).toPNG();
+    await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(png)], { type: 'image/png' }) })]);
+    const file = await read(win, `window.kovan.clipboardImagePath()`) as string;
+    report['paste'] = file ? { file: file.split('/').slice(-2).join('/'), bytes: (await readFile(file)).length, png: png.length } : null;
+  } finally {
+    if (saved.length) await clipboard.write(saved).catch(() => undefined);
+  }
+
+  const before = Date.now();
+  await read(win, `window.kovan.openExternal('file:///System/Applications/Calculator.app')`);
+  await read(win, `window.open('file:///System/Applications/Calculator.app')`);
+  await read(win, `window.kovan.openExternal('vscode://file/etc/hosts')`);
+  await new Promise((r) => setTimeout(r, 800));
+  report['refusedLinksElapsed'] = Date.now() - before;
+  await writeFile(`${prefix}-done.txt`, 'ok');
+  return report;
+}
+
+/** Item 136: GitHub, Jira and Sentry icons in grey, in each toolbar and the rail. */
+async function driveItem136(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  await until(win, `document.querySelector('.rail-item[data-view="sentry"]')`, 15_000);
+  for (const [view, service] of [['pulls', 'GitHub'], ['tickets', 'Jira'], ['sentry', 'Sentry']] as const) {
+    await read(win, `document.querySelector('.rail-item[data-view="${view}"]')?.click()`);
+    await until(win, `document.querySelector('.rows .row')`, 5_000);
+    await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+    const sel = `.detail-place-icon[aria-label="Open on ${service}"]`;
+    report[service] = await until(win, `document.querySelector('${sel} svg')`, 5_000)
+      ? await read(win, `getComputedStyle(document.querySelector('${sel} svg path')).fill`) : null;
+    await pause(500);
+    const box = await read(win, `(() => { const r = document.querySelector('${sel}').getBoundingClientRect(); return { x: Math.max(0, Math.round(r.x - 260)), y: Math.max(0, Math.round(r.y - 14)), width: 380, height: Math.round(r.height + 28) }; })()`) as Electron.Rectangle;
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${service}.png`, (await win.webContents.capturePage(box)).toPNG());
+  }
+  const rail = await read(win, `(() => { const r = document.querySelector('.rail-item[data-view="sentry"]').getBoundingClientRect(); return { x: 0, y: Math.max(0, Math.round(r.y - 140)), width: 70, height: 280 }; })()`) as Electron.Rectangle;
+  await writeFile(`${prefix}-rail.png`, (await win.webContents.capturePage(rail)).toPNG());
+  return report;
+}
+
+/**
+ * Item 135: the Dock menu. Two workspaces are seeded in the profile's
+ * settings.json before launch; the menu's own click handlers are called, the
+ * same ones macOS calls.
+ */
+async function driveItem135(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const menu = latestDockMenu();
+  if (!menu) return { menu: null };
+  await menu.refresh();
+  const describe = () => menu.template().map((i) => i.type === 'separator' ? '---' : `${i.checked ? '✓ ' : ''}${i.label}${i.icon ? ' [icon]' : ''}`);
+  const click = (label: string) => (menu.template().find((i) => i.label === label)?.click as (() => void) | undefined)?.();
+  const state = () => read(win, `({
+    view: document.querySelector('.rail-item.active')?.dataset.view,
+    workspace: document.querySelector('.ws-main')?.innerText.split('\\n')[0],
+    roots: [...document.querySelectorAll('[data-root-row]')].map((r) => r.dataset.rootRow.split('/').pop() + (r.querySelector('.repo-main')?.getAttribute('aria-expanded') === 'true' ? ' (open)' : ''))
+  })`);
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  const report: Record<string, unknown> = {};
+  report['menu'] = describe();
+  const other = menu.template().find((i) => i.type === 'checkbox' && !i.checked)?.label as string;
+  click(other);
+  await until(win, `document.querySelector('.rail-item.active')?.dataset.view === 'workspace' && document.querySelector('[data-root-row]')`, 8_000);
+  await pause(600);
+  report['afterWorkspace'] = await state();
+  report['menuAfter'] = describe();
+  const folder = menu.template().filter((i) => i.click && i.type !== 'checkbox').pop()?.label as string;
+  await read(win, `document.querySelectorAll('.ws-root .repo-main[aria-expanded="true"]').forEach((b) => b.click())`);
+  await pause(300);
+  report['collapsed'] = await state();
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]').click()`);
+  await pause(400);
+  click(folder);
+  await pause(1_200);
+  report['afterFolder'] = { picked: folder, ...(await state() as object) };
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-folder.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-folder.png`);
+  report['afterShot'] = await state();
+  await pause(1_500);
+  report['later'] = await state();
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-later.png`, (await win.webContents.capturePage()).toPNG());
+  return report;
+}
+
+/**
+ * Items 162 and 163, over two launches. Phase 1 opens `notes/report.md` and
+ * the PNG beside it (it must show as the picture, not "Binary file"), then
+ * flushes storage. Phase 2, a fresh launch on the same profile, must land on
+ * the Workspace view with both tabs back, the PNG current, and the folders
+ * that were open still open.
+ */
+/**
+ * Item 164: someone else's pull requests and tickets. Opens the person button
+ * beside each list's title, picks a teammate, reads the sections that come
+ * back, and goes back to you with Esc on one list and "Back to you" on the other.
+ */
+async function driveItem164(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const list = () => read(win, `({
+    button: document.querySelector('.person-button')?.innerText.trim(),
+    other: document.querySelector('.person-button')?.classList.contains('other'),
+    back: Boolean(document.querySelector('.person-back')),
+    tooltip: document.querySelector('.person-button')?.title,
+    placeholder: document.querySelector('#q')?.placeholder,
+    groups: [...document.querySelectorAll('.queue-list section')].map((s) => s.querySelector('.group-head, button')?.innerText.replace(/\\s+/g, ' ').trim()),
+    rows: [...document.querySelectorAll('.queue-list .row')].map((r) => r.innerText.split('\\n')[0] + ' ' + (r.innerText.split('\\n')[1] ?? '')).slice(0, 8)
+  })`);
+  const menu = () => read(win, `[...document.querySelectorAll('.person-menu button[role="menuitemradio"]')].map((b) => b.innerText.replace(/\\s+/g, ' ').trim())`);
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]').click()`);
+  await until(win, `document.querySelector('.person-button')`, 8_000);
+  const pullsBefore = await list();
+  await read(win, `document.querySelector('.person-button').click()`);
+  await until(win, `document.querySelectorAll('.person-menu button[role="menuitemradio"]').length > 1`, 8_000);
+  const pullMenu = await menu();
+  await shot('pulls-menu');
+  await read(win, `[...document.querySelectorAll('.person-menu button')].find((b) => b.innerText.includes('Lena')).click()`);
+  await until(win, `document.querySelectorAll('.queue-list section').length > 0`, 8_000);
+  await pause(400);
+  const pullsLena = await list();
+  await read(win, `document.querySelectorAll('.queue-list .row')[0]?.click()`);
+  await pause(800);
+  const pane = await read(win, `document.querySelector('.pane h1, .pane h2')?.innerText`);
+  await shot('pulls-lena');
+  await read(win, `document.querySelector('#q').focus()`);
+  await read(win, `document.querySelector('#q').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await pause(300);
+  const pullsAfterEsc = await list();
+
+  await read(win, `document.querySelector('.rail-item[data-view="tickets"]').click()`);
+  await until(win, `document.querySelector('.person-button')`, 8_000);
+  await read(win, `document.querySelector('.person-button').click()`);
+  await until(win, `document.querySelectorAll('.person-menu button[role="menuitemradio"]').length > 1`, 8_000);
+  const ticketMenu = await menu();
+  await read(win, `[...document.querySelectorAll('.person-menu button')].find((b) => b.innerText.includes('Lena')).click()`);
+  await until(win, `document.querySelectorAll('.queue-list .row').length > 0`, 8_000);
+  await pause(400);
+  const ticketsLena = await list();
+  await shot('tickets-lena');
+  await read(win, `document.querySelector('.person-back').click()`);
+  await pause(300);
+  const ticketsBack = await list();
+  return { pullsBefore, pullMenu, pullsLena, pane, pullsAfterEsc, ticketMenu, ticketsLena, ticketsBack };
+}
+
+async function driveItem163(win: BrowserWindow, prefix: string, phase: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const state = () => read(win, `({
+    view: document.querySelector('.rail-item.active')?.dataset.view,
+    tabs: [...document.querySelectorAll('.tabs .tab')].map((t) => t.querySelector('.tab-label').innerText.trim() + (t.classList.contains('active') ? ' (current)' : '')),
+    open: [...document.querySelectorAll('.tree-row')].map((r) => r.textContent.trim()),
+    image: (() => { const i = document.querySelector('.image-view img'); return i ? { width: i.naturalWidth, height: i.naturalHeight } : null; })(),
+    binaryText: document.body.innerText.includes('Binary file'),
+    status: document.querySelector('.tab-body .status-bar')?.innerText.replace(/\\s+/g, ' ')
+  })`);
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  const pane = () => read(win, `({ view: document.querySelector('.rail-item.active')?.dataset.view, selected: document.querySelector('.queue .row.selected, .queue .row[aria-selected="true"], .queue .row.active')?.innerText.split('\\n').slice(0, 2).join(' '), title: document.querySelector('.pane h1, .pane h2')?.innerText })`);
+  if (phase === 'p1') {
+    await read(win, `document.querySelector('.rail-item[data-view="pulls"]').click()`);
+    await until(win, `document.querySelectorAll('.queue .row').length > 1`, 8_000);
+    await read(win, `document.querySelectorAll('.queue .row')[1].click()`);
+    await pause(800);
+    const report = { beforeQuit: await pane() };
+    const { session } = await import('electron');
+    await session.defaultSession.flushStorageData();
+    await pause(500);
+    return report;
+  }
+  if (phase === 'p2') {
+    await until(win, `document.querySelector('.pane h1, .pane h2')`, 10_000);
+    await pause(800);
+    return { afterRelaunch: await pane() };
+  }
+  if (phase === '2') {
+    await until(win, `document.querySelector('.image-view img')?.naturalWidth > 0`, 10_000);
+    await pause(800);
+    const report = { afterRelaunch: await state() };
+    await shot('relaunch');
+    return report;
+  }
+  const clickRow = (name: string) => read(win, `[...document.querySelectorAll('.tree-row')].find((r) => r.textContent.trim() === '${name}')?.click()`);
+  await read(win, `document.querySelector('.rail-item[data-view="workspace"]').click()`);
+  await until(win, `[...document.querySelectorAll('.tree-row')].some((r) => r.textContent.trim() === 'notes')`, 8_000);
+  await clickRow('notes');
+  await until(win, `[...document.querySelectorAll('.tree-row')].some((r) => r.textContent.trim() === 'images')`, 8_000);
+  await clickRow('report.md');
+  await pause(500);
+  await clickRow('images');
+  await until(win, `[...document.querySelectorAll('.tree-row')].some((r) => r.textContent.trim().endsWith('.png'))`, 8_000);
+  await read(win, `[...document.querySelectorAll('.tree-row')].find((r) => r.textContent.trim().endsWith('.png')).click()`);
+  await until(win, `document.querySelector('.image-view img')?.naturalWidth > 0`, 8_000);
+  await pause(800);
+  const report = { beforeQuit: await state() };
+  await shot('image');
+  const { session } = await import('electron');
+  await session.defaultSession.flushStorageData();
+  await pause(500);
+  return report;
+}
+
+/**
+ * Item 161: a Markdown file's preview. Opens `notes/report.md` in the seeded
+ * workspace: Preview renders it with its local image read through main, a
+ * `#heading` link scrolls, script is gone, typing shows in Split before a
+ * save, and a link to another note opens it in a tab.
+ */
+async function driveItem161(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const clickRow = (name: string) => read(win, `[...document.querySelectorAll('.tree-row')].find((r) => r.innerText.trim() === '${name}')?.click()`);
+  const mode = (label: string) => read(win, `[...document.querySelectorAll('.md-modes .seg')].find((b) => b.textContent.trim() === '${label}').click()`);
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="workspace"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="workspace"]').click()`);
+  await until(win, `[...document.querySelectorAll('.tree-row')].some((r) => r.innerText.trim() === 'notes')`, 8_000);
+  await clickRow('notes');
+  await until(win, `[...document.querySelectorAll('.tree-row')].some((r) => r.innerText.trim() === 'report.md')`, 8_000);
+  await clickRow('report.md');
+  await until(win, `document.querySelector('.md-modes')`, 8_000);
+  const report: Record<string, unknown> = {};
+  report['modes'] = await read(win, `[...document.querySelectorAll('.md-modes .seg')].map((b) => b.innerText + (b.classList.contains('on') ? ' (on)' : ''))`);
+  await mode('Preview');
+  await pause(1_200);
+  report['preview'] = await read(win, `(() => {
+    const p = document.querySelector('.md-preview');
+    const imgs = [...p.querySelectorAll('img')].map((i) => ({ alt: i.alt, loaded: i.naturalWidth, missing: i.classList.contains('missing'), onerror: i.hasAttribute('onerror') }));
+    return {
+      editorHidden: document.querySelector('.md-source').offsetParent === null,
+      h1: p.querySelector('h1')?.id, h2: p.querySelector('h2')?.id,
+      tableRows: p.querySelectorAll('table tr').length, checkboxes: p.querySelectorAll('input[type=checkbox]').length,
+      code: Boolean(p.querySelector('pre code')), quote: Boolean(p.querySelector('blockquote')),
+      script: Boolean(p.querySelector('script')), imgs
+    };
+  })()`);
+  await shot('preview');
+  await read(win, `[...document.querySelectorAll('.md-preview a')].find((a) => a.innerText === 'the status').click()`);
+  await pause(500);
+  report['anchorScrolled'] = await read(win, `({ down: document.querySelector('.md-preview-scroll').scrollTop > 0, sideways: document.querySelector('.md-preview-scroll').scrollLeft })`);
+  await shot('anchor');
+
+  // Split: an unsaved edit shows in the preview.
+  await mode('Split');
+  await pause(500);
+  await read(win, `(() => { const v = document.querySelector('.md-source .cm-content').cmView?.view ?? null; return Boolean(v); })()`);
+  win.webContents.focus();
+  await read(win, `document.querySelector('.md-source .cm-content').focus()`);
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Up', modifiers: ['meta'] });
+  for (const ch of '## Typed live\n') {
+    if (ch === '\n') win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+    else win.webContents.sendInputEvent({ type: 'char', keyCode: ch });
+  }
+  await pause(800);
+  report['split'] = await read(win, `({ both: document.querySelector('.md-source').offsetParent !== null && Boolean(document.querySelector('.md-preview')), typed: [...document.querySelectorAll('.md-preview h1, .md-preview h2')].some((h) => h.innerText === 'Typed live'), unsaved: Boolean(document.querySelector('.tab-dirty')) })`);
+  await shot('split');
+
+  // ⌘⇧V back to the source, and a relative link opens the other note.
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'V', modifiers: ['meta', 'shift'] });
+  await pause(400);
+  report['afterShortcut'] = await read(win, `[...document.querySelectorAll('.md-modes .seg')].find((b) => b.classList.contains('on'))?.innerText`);
+  await mode('Preview');
+  await pause(500);
+  await read(win, `[...document.querySelectorAll('.md-preview a')].find((a) => a.innerText === 'other note').click()`);
+  await pause(1_000);
+  report['tabs'] = await read(win, `[...document.querySelectorAll('.tabs .tab')].map((t) => t.innerText.trim())`);
+  return report;
+}
+
+/**
+ * Item 160: inline images. A session runs `KOVAN_IMGCAT` (an imgcat that
+ * writes iTerm2's image escape) on `KOVAN_IMAGE`; the terminal must draw it
+ * on its image layer instead of printing the escape as text.
+ */
+async function driveItem160(win: BrowserWindow, sessions: Sessions, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="sessions"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]').click()`);
+  await pause(500);
+  const before = sessions.list().length;
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'J', modifiers: ['meta'] });
+  for (let i = 0; i < 60 && sessions.list().length === before; i++) await pause(250);
+  await pause(1_500);
+  const session = sessions.list().at(-1);
+  if (!session) return { session: null, before };
+  sessions.write(session.id, `clear; ${process.env['KOVAN_IMGCAT']} ${process.env['KOVAN_IMAGE']}; echo after-image\r`);
+  await pause(2_500);
+  const report = await read(win, `(() => {
+    const layer = [...document.querySelectorAll('.xterm-image-layer')].find((c) => c.offsetParent !== null);
+    const text = [...document.querySelectorAll('.xterm-rows')].map((r) => r.innerText).join('\\n');
+    let painted = 0;
+    if (layer) {
+      const data = layer.getContext('2d').getImageData(0, 0, layer.width, layer.height).data;
+      for (let i = 3; i < data.length; i += 4) if (data[i] > 0) painted++;
+    }
+    return { layer: Boolean(layer), painted, after: text.includes('after-image'), escapeAsText: text.includes('1337;File') };
+  })()`);
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-image.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-image.png`);
+  return report as Record<string, unknown>;
+}
+
+/**
+ * Item 158: ⌘J, as in VS Code. In the Workspace view it docks a terminal
+ * under the editor in the open file's repository, hides it, and shows the same
+ * one again; on a pull request it docks that pull request's terminal; in
+ * Sessions it starts a new session.
+ */
+async function driveItem158(win: BrowserWindow, sessions: Sessions, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const cmdJ = async () => {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'J', modifiers: ['meta'] });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'J', modifiers: ['meta'] });
+    await pause(3_000);
+  };
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const docked = () => read(win, `(() => {
+    const t = [...document.querySelectorAll('.detail-terminal')].find((e) => e.offsetParent !== null);
+    return t ? { where: t.closest('.editor-pane') ? 'workspace' : t.closest('.pane') ? 'pane' : 'other', xterm: Boolean(t.querySelector('.xterm')), head: t.querySelector('.term-head')?.innerText ?? '' } : null;
+  })()`);
+  const count = () => sessions.list().length;
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="workspace"]')`, 15_000);
+  const report: Record<string, unknown> = { sessionsAtStart: count() };
+
+  await read(win, `document.querySelector('.rail-item[data-view="workspace"]').click()`);
+  await until(win, `[...document.querySelectorAll('.tree-row')].some((r) => r.innerText.includes('README.md'))`, 8_000);
+  await read(win, `[...document.querySelectorAll('.tree-row')].find((r) => r.innerText.includes('README.md')).click()`);
+  await pause(600);
+  await cmdJ();
+  report['workspaceOpen'] = { docked: await docked(), sessions: count(), cwd: sessions.list().at(-1)?.cwd };
+  await shot('workspace');
+  await cmdJ();
+  report['workspaceHidden'] = { docked: await docked(), sessions: count() };
+  await cmdJ();
+  report['workspaceAgain'] = { docked: await docked(), sessions: count() };
+
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]').click()`);
+  await until(win, `document.querySelector('.queue .row')`, 8_000);
+  await read(win, `document.querySelector('.queue .row').click()`);
+  await pause(800);
+  await cmdJ();
+  report['pull'] = { docked: await docked(), sessions: count(), subject: sessions.list().at(-1)?.subject };
+  await shot('pull');
+
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]').click()`);
+  await pause(600);
+  const before = count();
+  await cmdJ();
+  report['sessionsView'] = { before, after: count() };
+  return report;
+}
+
+/**
+ * Item 157: one window per workspace. Seed settings.json with three
+ * workspaces before launch. New Window from the Dock menu opens a second one
+ * on a workspace no window shows; each window keeps its own workspace when the
+ * other switches; a Dock pick of a shown workspace brings its window forward
+ * instead of opening another; ⌘⇧N opens one more; and the open windows are
+ * saved for the next launch.
+ */
+async function driveItem157(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const menu = latestDockMenu();
+  if (!menu) return { menu: null };
+  await menu.refresh();
+  const click = (label: string) => (menu.template().find((i) => i.label === label)?.click as (() => void) | undefined)?.();
+  const windows = () => BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).sort((a, b) => a.id - b.id);
+  const each = async () => Promise.all(windows().map(async (w) => ({
+    title: w.getTitle(),
+    workspace: await read(w, `window.kovan.workspaces().then((r) => r.list.find((w) => w.id === r.active)?.name ?? null)`),
+    shown: await read(w, `document.querySelector('.ws-main')?.innerText.split('\\n')[0] ?? null`),
+    focused: w.isFocused()
+  })));
+  const saved = async () => JSON.parse(await readFile(path.join(app.getPath('userData'), 'settings.json'), 'utf8'))['windows.workspaces'];
+  const waitFor = async (count: number) => {
+    const deadline = Date.now() + 15_000;
+    while (windows().length < count && Date.now() < deadline) await pause(100);
+    const last = windows().at(-1)!;
+    // Seeded runs have no poller; the new window gets the fixture like the first.
+    await until(last, `document.querySelector('#root')?.children.length > 0`, 15_000);
+    last.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+    await until(last, `document.querySelector('.rail')`, 15_000);
+    return last;
+  };
+  const toWorkspace = async (w: BrowserWindow) => {
+    await read(w, `document.querySelector('.rail-item[data-view="workspace"]').click()`);
+    await until(w, `document.querySelector('.ws-main')`, 8_000);
+    await pause(400);
+  };
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await toWorkspace(win);
+  const report: Record<string, unknown> = {};
+  report['menu'] = menu.template().map((i) => i.type === 'separator' ? '---' : `${i.checked ? '✓ ' : ''}${i.label}`);
+  report['start'] = await each();
+
+  // New Window: an empty one on its start page (item 159).
+  click('New Window');
+  const second = await waitFor(2);
+  await until(second, `document.querySelector('.ws-start')`, 8_000);
+  await pause(400);
+  report['afterNewWindow'] = await each();
+  report['startPage'] = await read(second, `document.querySelector('.ws-start').innerText`);
+  second.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-empty.png`, (await second.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-empty.png`);
+
+  // It picks beta on the start page; the first window keeps alpha.
+  await read(second, `[...document.querySelectorAll('.ws-start-link')].find((b) => b.innerText === 'beta').click()`);
+  await until(second, `document.querySelector('.ws-main')`, 8_000);
+  await pause(600);
+  report['afterPick'] = await each();
+
+  // ⌘⇧N, then alpha on its start page: alpha's window comes forward and the
+  // new one stays empty.
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'N', modifiers: ['meta', 'shift'] });
+  const third = await waitFor(3);
+  await until(third, `document.querySelector('.ws-start')`, 8_000);
+  await read(third, `[...document.querySelectorAll('.ws-start-link')].find((b) => b.innerText === 'alpha').click()`);
+  await pause(800);
+  report['afterPickShownElsewhere'] = { count: windows().length, windows: await each() };
+
+  // A Dock pick of a workspace a window shows: that window, no new one.
+  click('beta');
+  await pause(800);
+  report['afterDockPickShown'] = { count: windows().length, windows: await each() };
+  report['saved'] = await saved();
+
+  second.close();
+  await pause(500);
+  report['savedAfterClose'] = await saved();
+
+  for (const [i, w] of windows().entries()) {
+    w.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-window${i + 1}.png`, (await w.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-window${i + 1}.png`);
+  }
+  return report;
+}
+
+/**
+ * Item 133: a red service chip and the toast's Details, clicked with the real
+ * mouse (sendInputEvent), not `.click()`, must open the problems popover.
+ */
+async function driveItem133(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const mouse = async (selector: string) => {
+    const r = await read(win, `(() => { const r = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return r ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null; })()`) as { x: number; y: number } | null;
+    if (!r) return false;
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: r.x, y: r.y });
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+    await pause(400);
+    return true;
+  };
+  const open = () => read(win, `document.querySelector('.problems-pop')?.innerText.slice(0, 120) ?? null`);
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.statusbar [data-provider]')`, 15_000);
+  const report: Record<string, unknown> = {};
+  const timeout = 'Request to https://sentry.io/api/0/organizations/acme/issues/ timed out after 15000ms';
+  const last = trackProblems([], [{ provider: 'sentry', message: timeout }], [], Date.now());
+  win.webContents.send('kovan:snapshot', { ...fixtureSnapshot(10), connected: ['github', 'jira', 'sentry'], errors: [{ provider: 'sentry', message: timeout }] });
+  win.webContents.send('kovan:problems', { log: last.log, started: [last.log[0]] });
+  await pause(600);
+  report['toast'] = Boolean(await read(win, `document.querySelector('.problem-toast')`));
+  report['detailsClicked'] = await mouse('.problem-toast-actions .link');
+  report['afterDetails'] = await open();
+  await mouse('.detail-pane, main');
+  await pause(300);
+  report['closedByOutside'] = !(await open());
+  report['chipClicked'] = await mouse('.statusbar [data-provider="sentry"]');
+  report['afterChip'] = await open();
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-chip.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-chip.png`);
+  report['chipClickedAgain'] = await mouse('.statusbar [data-provider="sentry"]');
+  report['toggledShut'] = !(await open());
+  return report;
+}
+
+/** The terminal icon (item 132): the rail with Sessions selected. */
+async function driveItem132(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  report['railFound'] = await until(win, `document.querySelector('.rail-item[data-view="sessions"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  report['boxless'] = await read(win, `!document.querySelector('.rail-item[data-view="sessions"] svg rect')`);
+  await pause(800);
+  const box = await read(win, `(() => { const r = document.querySelector('.rail-item[data-view="sessions"]').getBoundingClientRect(); return { x: 0, y: Math.max(0, Math.round(r.y - 120)), width: 260, height: 240 }; })()`) as Electron.Rectangle;
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-rail.png`, (await win.webContents.capturePage(box)).toPNG());
+  console.log(`shot: ${prefix}-rail.png`);
+  return report;
+}
+
+async function driveItem131(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  report['railFound'] = await until(win, `document.querySelector('.rail-item[data-view="tickets"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="tickets"]')?.click()`);
+  await until(win, `document.querySelector('.rows .row')`, 5_000);
+  await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+  report['iconFound'] = await until(win, `document.querySelector('.detail-place-icon[aria-label="Open on Jira"] svg rect')`, 5_000);
+  for (const theme of ['dark', 'light']) {
+    // The tokens follow the root's data-theme; this is only a look at both.
+    await read(win, `document.documentElement.dataset.theme = ${JSON.stringify(theme)}`);
+    await pause(800);
+    const box = await read(win, `(() => { const r = document.querySelector('.detail-place-icon[aria-label="Open on Jira"]').getBoundingClientRect(); return { x: Math.max(0, Math.round(r.x - 260)), y: Math.max(0, Math.round(r.y - 14)), width: 340, height: Math.round(r.height + 28) }; })()`) as Electron.Rectangle;
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${theme}.png`, (await win.webContents.capturePage(box)).toPNG());
+    console.log(`shot: ${prefix}-${theme}.png`);
+  }
+  return report;
+}
+
+async function driveItem129(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(600);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  report['railFound'] = await until(win, `document.querySelector('.rail-item[data-view="sessions"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  // A folder from the profile's settings.json (written before launch), so
+  // the session is listed in Sessions.
+  const folders = await read(win, `window.kovan.settings().then((s) => s['repos.folders'])`) as string[];
+  const folder = folders[0]!;
+  const opened = await read(win, `window.kovan.openTerminal(${JSON.stringify(folder)}, undefined, 'tui 129')`) as { id: string };
+  await until(win, `document.querySelector('.term .xterm-rows')`, 10_000);
+  // The shell's prompt first: typed into a half-started shell, the line can
+  // run before the profile has finished, and the prompt then lands on top.
+  await until(win, `Array.from(document.querySelectorAll('.term .xterm-rows > div')).some((r) => r.textContent.trim())`, 15_000);
+  await pause(2_500);
+  // Draws like Claude Code: a box at the bottom drawn once, then only the
+  // cells that change rewritten in place — a timer ticking in the status line.
+  const script = path.join(app.getPath('userData'), 'tui129.py');
+  await writeFile(script, [
+    'import shutil, signal, sys, time',
+    'out = sys.stdout.write',
+    'def at(row, col, text): out(f"\\x1b[{row};{col}H{text}")',
+    'def draw(*_):',
+    '    global w, h',
+    '    w, h = shutil.get_terminal_size()',
+    '    out("\\x1b[2J\\x1b[H")',
+    '    for i in range(12): print(f"{i:02d} " + "history " * 8)',
+    '    at(h - 4, 1, "╭" + "─" * (w - 2) + "╮")',
+    '    at(h - 3, 1, "│ > typed here".ljust(w - 1) + "│")',
+    '    at(h - 2, 1, "╰" + "─" * (w - 2) + "╯")',
+    '    at(h - 1, 1, "  status tick 0s   tokens 0")',
+    '    sys.stdout.flush()',
+    // Like Claude Code: a resize draws everything again.
+    'signal.signal(signal.SIGWINCH, draw)',
+    'draw()',
+    // More ticks than the 256 KB a replay keeps, so the box itself is no
+    // longer in the replay: only the ticks are, as after a long Claude turn.
+    'for tick in range(1, 40001):',
+    '    at(h - 1, 15, str(tick % 10)); at(h - 1, 27, str(tick % 7)); at(h - 3, 15, "")',
+    'sys.stdout.flush()',
+    'time.sleep(3600)'
+  ].join('\n'));
+  await read(win, `window.kovan.sessionWrite(${JSON.stringify(opened.id)}, ${JSON.stringify(`clear; python3 '${script}'\r`)})`);
+  await until(win, `Array.from(document.querySelectorAll('.term .xterm-rows > div')).some((r) => r.textContent.includes('typed here'))`, 15_000);
+  await pause(2_500);
+  const screen = () => read(win, `Array.from(document.querySelectorAll('.term .xterm-rows > div')).map((r) => r.textContent.replace(/\\s+$/, '')).filter(Boolean).slice(-5)`);
+  report['before'] = await screen();
+  await snap('before');
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await pause(1_500);
+  report['termGoneWhileAway'] = await read(win, `!document.querySelector('.term .xterm-rows')`);
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  await until(win, `document.querySelector('.term .xterm-rows')`, 5_000);
+  await pause(1_000);
+  report['after'] = await screen();
+  report['same'] = JSON.stringify(report['before']) === JSON.stringify(report['after']);
+  await snap('after');
+  // A new window has no kept xterm and replays the output, which by now has
+  // lost the box to the cap: it has to have the program draw it again.
+  report['replay'] = await read(win, `window.kovan.sessionBuffer(${JSON.stringify(opened.id)}).then((r) => ({ grid: r.cols + 'x' + r.rows, truncated: r.truncated, startsWith: JSON.stringify(r.data.slice(0, 12)) }))`);
+  win.webContents.reload();
+  await until(win, `document.querySelector('#root')?.children.length > 0`, 15_000);
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  await until(win, `document.querySelector('.rail-item[data-view="sessions"]')`, 10_000);
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  await until(win, `document.querySelector('.term .xterm-rows')`, 5_000);
+  await pause(2_000);
+  report['afterReload'] = await screen();
+  // The redraw restarts the counters; everything else must match.
+  const counters = (lines: unknown) => JSON.stringify(lines).replace(/tick \d+|tokens \d+/g, '');
+  report['sameAfterReload'] = counters(report['afterReload']) === counters(report['before']);
+  await snap('after-reload');
+  await read(win, `window.kovan.sessionClose(${JSON.stringify(opened.id)})`);
+  return report;
+}
+
+async function driveItem126(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(800);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  // The watched folder comes from the profile's settings.json, written before
+  // launch: a reload to pick up a new one would drop the seeded data.
+  win.show();
+  win.focus();
+  const report: Record<string, unknown> = {};
+  report['railFound'] = await until(win, `document.querySelector('.rail-item[data-view="sessions"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  report['plusFound'] = await until(win, `document.querySelector('.new-session-host button')`, 5_000);
+  if (!report['plusFound']) return report;
+  const openMenu = async () => {
+    await read(win, `document.querySelector('.new-session-host button').click()`);
+    await until(win, `document.querySelector('.new-session-host .menu')`, 5_000);
+  };
+  const segments = () => read(win, `Array.from(document.querySelectorAll('.shell-switch .seg')).map((b) => b.textContent + (b.classList.contains('on') ? ' ✓' : ''))`);
+
+  await openMenu();
+  report['segmentsAtFirst'] = await segments();
+  await snap('menu-default');
+  await read(win, `Array.from(document.querySelectorAll('.shell-switch .seg')).find((b) => b.textContent === 'More…')?.click()`);
+  await pause(200);
+  report['more'] = await read(win, `Array.from(document.querySelectorAll('.new-session-host .menu > button')).map((b) => b.textContent)`);
+  await snap('menu-more');
+  await read(win, `Array.from(document.querySelectorAll('.shell-switch .seg')).find((b) => b.textContent === 'bash')?.click()`);
+  await pause(300);
+  report['segmentsAfterBash'] = await segments();
+  await read(win, `Array.from(document.querySelectorAll('.new-session-host .menu > button')).find((b) => !b.closest('.shell-switch') && b.textContent.includes('acme-web'))?.click()`);
+  await until(win, `document.querySelector('.row-shell')`, 10_000);
+  await pause(2_500);
+  const sessions = await read(win, `window.kovan.sessions()`) as { id: string; shell?: string }[];
+  report['sessionShell'] = sessions.map((x) => x.shell);
+  report['rowTag'] = await read(win, `document.querySelector('.row-shell')?.textContent`);
+  report['saved'] = await read(win, `window.kovan.settings().then((s) => s['terminal.shell'])`);
+  // What the pty really runs: the shell itself writes its name and version to a file.
+  const out = path.join(app.getPath('userData'), 'shell126.txt');
+  await read(win, `window.kovan.sessionWrite(${JSON.stringify(sessions[0]?.id)}, ${JSON.stringify(`echo "$0 $BASH_VERSION" > '${out}'\r`)})`);
+  await pause(1_500);
+  report['ptyRuns'] = await readFile(out, 'utf8').then((t) => t.trim(), () => 'nothing written');
+  await snap('terminal-bash');
+
+  await openMenu();
+  report['segmentsReopened'] = await segments();
+  await read(win, `document.body.click()`);
+  await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);
+  await until(win, `document.querySelector('.settings-list')`, 5_000);
+  report['textSummary'] = await read(win, `document.querySelector('.settings-row[data-section="text"] .settings-row-summary')?.textContent`);
+  await read(win, `document.querySelector('.settings-row[data-section="text"] .settings-row-head')?.click()`);
+  await pause(500);
+  report['settingValue'] = await read(win, `Array.from(document.querySelectorAll('.settings-row.open label')).find((l) => l.textContent.includes('Shell for new terminals'))?.querySelector('select')?.value`);
+  await snap('settings');
+  return report;
+}
+
+async function driveItem124(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(1_500);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rows .row')`, 15_000);
+  const report: Record<string, unknown> = {};
+  const headerButtons = () => read(win, `Array.from(document.querySelectorAll('.detail-toolbar-end button, .detail-head .detail-actions button')).map((b) => b.textContent.trim()).filter(Boolean)`);
+  const cards = () => read(win, `Array.from(document.querySelectorAll('.quick-card h3, .quick-card .quick-card-title')).map((h) => h.textContent.trim())`);
+  const openPull = async () => {
+    await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+    await pause(400);
+    await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+    await pause(1_200);
+  };
+  const box = (label: string) => `Array.from(document.querySelectorAll('.settings-row.open .checkbox-row')).find((r) => r.textContent.trim() === ${JSON.stringify(label)})?.querySelector('input')`;
+
+  await openPull();
+  report['offButtons'] = await headerButtons();
+  await snap('pull-default');
+
+  await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);
+  await until(win, `document.querySelector('.settings-list')`, 5_000);
+  await read(win, `document.querySelector('.settings-row[data-section="agents"] .settings-row-head')?.click()`);
+  await pause(500);
+  report['boxesAtFirst'] = await read(win, `Array.from(document.querySelectorAll('.settings-row.open .checkbox-row')).slice(0, 3).map((r) => r.textContent.trim() + ': ' + r.querySelector('input').checked)`);
+  report['quickModelShown'] = await read(win, `Array.from(document.querySelectorAll('.settings-row.open h3')).map((h) => h.textContent)`);
+  report['agentsSummary'] = await read(win, `document.querySelector('.settings-row[data-section="agents"] .settings-row-summary')?.textContent`);
+  await snap('settings-default');
+  await read(win, `${box('Summarize')}?.click()`);
+  await read(win, `${box('Review')}?.click()`);
+  await pause(400);
+  report['buttonsBehindSheet'] = await headerButtons();
+  await snap('settings-ticked');
+  await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+  await pause(600);
+  report['onButtons'] = await headerButtons();
+  await snap('pull-on');
+
+  // Off again, Condense too: every quick button and the quick model settings go.
+  await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);
+  await until(win, `document.querySelector('.settings-list')`, 5_000);
+  if (!(await read(win, `Boolean(document.querySelector('.settings-row.open[data-section="agents"]'))`))) {
+    await read(win, `document.querySelector('.settings-row[data-section="agents"] .settings-row-head')?.click()`);
+    await pause(500);
+  }
+  for (const label of ['Summarize', 'Review', 'Condense earlier comments']) await read(win, `${box(label)}?.click()`);
+  await pause(400);
+  report['quickModelWhenAllOff'] = await read(win, `Array.from(document.querySelectorAll('.settings-row.open h3')).map((h) => h.textContent)`);
+  report['agentsSummaryAllOff'] = await read(win, `document.querySelector('.settings-row[data-section="agents"] .settings-row-summary')?.textContent`);
+  await snap('settings-all-off');
+  await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+  await pause(600);
+  report['offAgainButtons'] = await headerButtons();
+  report['cardsWhenOff'] = await cards();
+  report['saved'] = await read(win, `window.kovan.settings().then((s) => ({ summarize: s['buttons.summarize'], review: s['buttons.review'], condense: s['buttons.condense'] }))`);
+  return report;
+}
+
+/**
+ * Item 165: Open in Kovan for a repository on another workspace than the
+ * window's opens the diff in that same window, not in a new one for the
+ * other workspace.
+ */
+/**
+ * Item 171: the review sheet of a pull request whose ticket has more open
+ * ones lists them ticked (one you reviewed with nothing new, unticked), the
+ * prompt names them all, and unticking one takes it back out.
+ */
+async function driveItem171(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.setSize(1600, 1040);
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).some(e => e.textContent === '205')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).find(e => e.textContent === '205')?.closest('button')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === 'Review in an agent')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Review in an agent')?.click()`);
+  await until(win, `document.querySelector('.together')`, 10_000);
+  await until(win, `document.getElementById('run-prompt')?.value.includes('together')`, 10_000);
+  await pause(600);
+  const state = () => read(win, `(() => {
+    const rows = Array.from(document.querySelectorAll('.together-row')).map((r) => ({
+      id: r.querySelector('.together-id')?.textContent, checked: r.querySelector('input').checked,
+      disabled: r.querySelector('input').disabled, state: r.querySelector('.together-state')?.textContent }));
+    const prompt = document.getElementById('run-prompt').value;
+    const sheet = document.querySelector('.sheet').getBoundingClientRect();
+    return { rows, note: document.querySelector('.together-note')?.textContent ?? null,
+      button: document.querySelector('.sheet-foot .primary')?.textContent, sheetWidth: Math.round(sheet.width), windowWidth: innerWidth,
+      promptHead: prompt.split('\\n').slice(0, 7).join('\\n'),
+      names: ['/pr/205', '/pr/88', '/pr/311', '/pr/12', '/pr/80'].filter((u) => prompt.includes(u)) };
+  })()`);
+  const report: Record<string, unknown> = { ticked: await state() };
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-ticked.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-ticked.png`);
+  // Untick acme/web#88: out of the prompt and the button's count.
+  await read(win, `Array.from(document.querySelectorAll('.together-row')).find(r => r.textContent.includes('#88'))?.querySelector('input').click()`);
+  await until(win, `!document.getElementById('run-prompt').value.includes('/pr/88')`, 5_000);
+  await pause(400);
+  report['unticked'] = await state();
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-unticked.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-unticked.png`);
+  return report;
+}
+
+/**
+ * Item 174: the Review button's model menu stays inside the pull request's
+ * pane when a terminal is docked to its right.
+ */
+async function driveItem174(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.setSize(1440, 900);
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  // Both quick buttons on, as the user has them; they're off by default.
+  await read(win, `Promise.all([window.kovan.setSetting('buttons.summarize', true), window.kovan.setSetting('buttons.review', true)])`);
+  win.webContents.reload();
+  await pause(2_500);
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).some(e => e.textContent === '205')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).find(e => e.textContent === '205')?.closest('button')?.click()`);
+  const tagged = await until(win, `document.querySelector('.quick-model')`, 8_000);
+  // The pull request's own terminal, docked right as in the report.
+  await read(win, `document.querySelector('[aria-label="Open a terminal for this"]')?.click()`);
+  await until(win, `document.querySelector('.detail-terminal')`, 10_000);
+  await read(win, `document.querySelector('[aria-label="Dock right"]')?.click()`);
+  await until(win, `document.querySelector('.detail-terminal.dock-right')`, 5_000);
+  await pause(800);
+  const report: Record<string, unknown> = { tagged, docked: await read(win, `Boolean(document.querySelector('.detail-terminal.dock-right'))`) };
+  for (const which of ['summarize', 'review'] as const) {
+    await read(win, `(() => { const all = document.querySelectorAll('.quick-model'); all[${which === 'summarize' ? 0 : 'all.length - 1'}]?.click(); })()`);
+    await until(win, `document.querySelector('.quick-model-menu')`, 5_000);
+    await pause(600);
+    report[which] = await read(win, `(() => {
+      const m = document.querySelector('.quick-model-menu'); const t = document.querySelector('.detail-terminal');
+      if (!m || !t) return { menu: Boolean(m), terminal: Boolean(t) };
+      const menu = m.getBoundingClientRect();
+      const term = t.getBoundingClientRect();
+      return { menu: [Math.round(menu.left), Math.round(menu.right)], terminalLeft: Math.round(term.left),
+        alignRight: m.classList.contains('align-right'), clear: menu.right <= term.left && menu.left >= 0 };
+    })()`);
+    // The first capture can hand back the frame before; the second is current.
+    win.webContents.invalidate();
+    await pause(300);
+    await win.webContents.capturePage();
+    await pause(500);
+    await writeFile(`${prefix}-${which}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${which}.png`);
+    await read(win, `document.body.click()`);
+    await until(win, `!document.querySelector('.quick-model-menu')`, 3_000);
+  }
+  return report;
+}
+
+/**
+ * Connects Mixpanel (the `smokeClient` fixture) on the throwaway profile and
+ * puts its tab in the rail. Items 179 and 180.
+ */
+async function mixpanelFixtureTab(win: BrowserWindow): Promise<void> {
+  win.setSize(1440, 900);
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `Promise.all([
+    window.kovan.setSetting('mixpanel.region', 'eu'), window.kovan.setSetting('mixpanel.projectId', '12345'),
+    window.kovan.setSetting('mixpanel.username', 'kovan.smoke'), window.kovan.setSecret('mixpanel', 'smoke-secret'),
+    window.kovan.setSetting('mixpanel.rail', true)
+  ])`);
+  win.webContents.reload();
+  await new Promise((r) => setTimeout(r, 2_500));
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  await until(win, `document.querySelector('.rail-item[data-view="mixpanel"]')`, 15_000);
+}
+
+/**
+ * Item 181: Settings › Prompts. From a ticket's run sheet, "Change it for
+ * every run" opens the Implement prompt on top of the sheet; a misspelled
+ * placeholder is named; a saved edit and new shared values rebuild the open
+ * sheet's prompt; Reset brings the built-in text back.
+ */
+async function driveItem181(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const failures: string[] = [];
+  const expect = (ok: unknown, what: string) => { if (!ok) failures.push(what); };
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await win.webContents.capturePage();
+    await pause(400);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const type = (selector: string, js: string) => read(win, `(() => {
+    const box = document.querySelector(${JSON.stringify(selector)});
+    const next = (${js})(box.value);
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(box, next);
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  const runPrompt = () => read(win, `document.getElementById('run-prompt')?.value ?? ''`) as Promise<string>;
+  const button = (scope: string, text: string) =>
+    `Array.from(document.querySelectorAll('${scope} button')).find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
+
+  win.setSize(1440, 900);
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `window.kovan.setSetting('prompt.conventions', ${JSON.stringify({
+    baseBranch: 'develop', checks: ['npm run type-check'], untouchable: [], pullRequestReviewers: ['gidyb — Gidy', 'ledanni — Danni']
+  })})`);
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  await read(win, `document.querySelector('.rail-item[data-view="tickets"]')?.click()`);
+  await pause(300);
+  await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('button')).some(b => /in an agent/.test(b.textContent))`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('button')).find(b => /in an agent/.test(b.textContent))?.click()`);
+  await until(win, `document.getElementById('run-prompt')?.value.includes('Open the pull request against develop')`, 10_000);
+  const first = await runPrompt();
+  expect(first.includes('Request a review from gidyb — Gidy and ledanni — Danni') && first.includes('no test plan'), 'run sheet prompt before');
+
+  // The link opens Settings at this prompt, on top of the sheet.
+  await read(win, `${button('.run-sheet, .sheet', 'Change it for every run')}.click()`);
+  await until(win, `document.querySelector('.prompt-settings')`, 5_000);
+  const opened = await read(win, `(() => {
+    const tab = document.querySelector('.prompt-tab[aria-selected="true"]')?.textContent ?? '';
+    const s = document.querySelector('.sheet.settings').getBoundingClientRect();
+    const top = document.elementFromPoint(s.left + s.width / 2, s.top + 30);
+    return { tab, onTop: Boolean(top?.closest('.sheet.settings')), sheetStillOpen: Boolean(document.getElementById('run-prompt')) };
+  })()`) as { tab: string; onTop: boolean; sheetStillOpen: boolean };
+  expect(opened.tab.startsWith('Implement a ticket') && opened.onTop && opened.sheetStillOpen, `opened ${JSON.stringify(opened)}`);
+
+  // A misspelled name is named; then the real edit.
+  await type('.prompt-text', `(v) => v + '\\n\${prReviewer}'`);
+  await pause(150);
+  const typo = await read(win, `document.querySelector('.prompt-editor .settings-note.error')?.textContent ?? ''`);
+  expect(String(typo).includes('${prReviewer}'), `typo note ${String(typo)}`);
+  await type('.prompt-text', `(v) => v.replace('\\n\${prReviewer}', '').replace('and nothing else — no test plan.', 'and a short test plan.')`);
+  await read(win, `${button('.prompt-actions', 'Preview')}.click()`);
+  await until(win, `document.querySelector('.prompt-preview pre')`, 3_000);
+  const preview = await read(win, `document.querySelector('.prompt-preview pre').textContent`) as string;
+  expect(preview.includes('a short test plan') && preview.includes('Request a review from gidyb — Gidy') && !/\$\{\w+\}/.test(preview), 'preview');
+  await shot('editor');
+  await read(win, `${button('.prompt-actions', 'Save prompt')}.click()`);
+  await pause(300);
+  const stored = await read(win, `window.kovan.settings().then(s => ({ text: s['prompt.template.implement'], base: (s['prompt.templateBase'] || {}).implement }))`) as { text?: string; base?: string };
+  expect(stored.text?.includes('a short test plan') && stored.base, `stored ${JSON.stringify(stored).slice(0, 120)}`);
+  const tabMark = await read(win, `document.querySelector('.prompt-tab[aria-selected="true"]')?.textContent ?? ''`);
+
+  // Shared values: one more reviewer.
+  await type('.prompt-shared textarea', `(v) => v + '\\noctocat — Mona'`);
+  await read(win, `${button('.prompt-shared', 'Save shared values')}.click()`);
+  await pause(300);
+  const shared = await read(win, `window.kovan.settings().then(s => s['prompt.conventions'].pullRequestReviewers)`) as string[];
+  expect(shared.includes('octocat — Mona'), `shared ${JSON.stringify(shared)}`);
+
+  // Closed: the sheet's prompt was rebuilt from both.
+  await read(win, `document.querySelector('.sheet.settings [aria-label="Close"]').click()`);
+  await until(win, `!document.querySelector('.sheet.settings')`, 3_000);
+  await until(win, `document.getElementById('run-prompt')?.value.includes('a short test plan')`, 5_000);
+  const rebuilt = await runPrompt();
+  expect(rebuilt.includes('a short test plan') && rebuilt.includes('ledanni — Danni and octocat — Mona'), 'run sheet rebuilt');
+
+  // Reset, after a confirm, back to the built-in text.
+  await read(win, `${button('.run-sheet, .sheet', 'Change it for every run')}.click()`);
+  await until(win, `document.querySelector('.prompt-settings')`, 5_000);
+  await read(win, `${button('.prompt-actions', 'Reset to built-in…')}.click()`);
+  await read(win, `${button('.prompt-confirm', 'Reset')}.click()`);
+  await pause(300);
+  const afterReset = await read(win, `window.kovan.settings().then(s => s['prompt.template.implement'])`);
+  expect(afterReset === '', `after reset ${JSON.stringify(afterReset)}`);
+  await read(win, `document.querySelector('.sheet.settings [aria-label="Close"]').click()`);
+  await until(win, `document.getElementById('run-prompt')?.value.includes('no test plan')`, 5_000);
+  const back = await runPrompt();
+  expect(back.includes('no test plan'), 'run sheet back to built-in');
+
+  if (failures.length) throw new Error(`item 181: ${failures.join('; ')}`);
+  return { opened, typo, tabMark, shared, storedBase: stored.base, rebuiltHasEdit: rebuilt.includes('a short test plan') };
+}
+
+/**
+ * Item 180: Discuss's width is dragged from its left edge, with real mouse
+ * events through the handle's pointer capture: wider to the left, never so
+ * wide the report loses its 320px, arrow keys, remembered, and double-click
+ * back to the default.
+ */
+async function driveItem180(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const failures: string[] = [];
+  const expect = (ok: unknown, what: string) => { if (!ok) failures.push(what); };
+  await mixpanelFixtureTab(win);
+  await read(win, `document.querySelector('.rail-item[data-view="mixpanel"]').click()`);
+  await until(win, `Array.from(document.querySelectorAll('.rows .row-title')).some(e => e.textContent === 'Weekly signups')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.rows .row-title')).find(e => e.textContent === 'Weekly signups').closest('button').click()`);
+  await until(win, `document.querySelector('.mp-chart')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.mp-actions button')).find(b => b.textContent.includes('Discuss')).click()`);
+  await until(win, `document.querySelector('.mp-dock') && document.querySelector('[aria-label="Resize Discuss"]')`, 5_000);
+  await pause(300);
+
+  const measure = () => read(win, `(() => {
+    const dock = document.querySelector('.mp-dock').getBoundingClientRect();
+    const pane = document.querySelector('.mp-pane').getBoundingClientRect();
+    const bar = document.querySelector('[aria-label="Resize Discuss"]').getBoundingClientRect();
+    let saved = null; try { saved = localStorage.getItem('kovan.mixpanel-discuss-width'); } catch {}
+    return { dock: Math.round(dock.width), pane: Math.round(pane.width), x: Math.round(bar.left + bar.width / 2), y: Math.round(bar.top + 200), saved };
+  })()`) as Promise<{ dock: number; pane: number; x: number; y: number; saved: string | null }>;
+  // Through the debugger protocol, as the sidebar's and terminal's resize
+  // tests do: only real input is granted pointer capture.
+  win.webContents.debugger.attach('1.3');
+  const mouse = (type: string, x: number, y: number, buttons: number) =>
+    win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+      type, x, y, button: 'left', buttons, clickCount: 1, pointerType: 'mouse'
+    });
+  const drag = async (from: { x: number; y: number }, dx: number) => {
+    await mouse('mousePressed', from.x, from.y, 1);
+    for (let i = 1; i <= 10; i++) await mouse('mouseMoved', from.x + Math.round((dx * i) / 10), from.y, 1);
+    await pause(80);
+    await mouse('mouseReleased', from.x + dx, from.y, 0);
+    await pause(250);
+  };
+
+  const before = await measure();
+  await drag(before, -200);
+  const wider = await measure();
+  expect(Math.abs(wider.dock - (before.dock + 200)) <= 2, `drag left 200: ${before.dock} → ${wider.dock}`);
+  expect(wider.saved === String(wider.dock), `remembered ${wider.saved} for ${wider.dock}`);
+
+  await drag(wider, -3000);
+  const widest = await measure();
+  expect(widest.dock === widest.pane - 320, `widest ${widest.dock} in a pane of ${widest.pane}`);
+
+  await drag(widest, 3000);
+  const narrowest = await measure();
+  expect(narrowest.dock === 260, `narrowest ${narrowest.dock}`);
+
+  await read(win, `(() => {
+    const bar = document.querySelector('[aria-label="Resize Discuss"]');
+    bar.focus();
+    bar.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', shiftKey: true, bubbles: true }));
+  })()`);
+  await pause(150);
+  const keyed = await measure();
+  expect(keyed.dock === narrowest.dock + 32, `shift+left ${narrowest.dock} → ${keyed.dock}`);
+
+  // The sidebar's own handle, the shared Resizer's defaults: still sizes the
+  // list on its left, stores its own key, and leaves Discuss alone.
+  const side = () => read(win, `(() => {
+    const q = document.querySelector('.queue[aria-label="Mixpanel"]').getBoundingClientRect();
+    const bar = document.querySelector('[aria-label="Resize sidebar"]').getBoundingClientRect();
+    let saved = null; try { saved = localStorage.getItem('kovan.sidebar-width'); } catch {}
+    return { queue: Math.round(q.width), x: Math.round(bar.left + bar.width / 2), y: Math.round(bar.top + 200), saved,
+      dock: Math.round(document.querySelector('.mp-dock').getBoundingClientRect().width) };
+  })()`) as Promise<{ queue: number; x: number; y: number; saved: string | null; dock: number }>;
+  const sideBefore = await side();
+  await drag(sideBefore, 100);
+  const sideAfter = await side();
+  expect(sideAfter.queue === sideBefore.queue + 100 && sideAfter.saved === String(sideAfter.queue) && sideAfter.dock === keyed.dock,
+    `sidebar drag ${JSON.stringify(sideBefore)} → ${JSON.stringify(sideAfter)}`);
+  await read(win, `document.querySelector('[aria-label="Resize sidebar"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await pause(200);
+  const sideReset = await side();
+  expect(sideReset.queue === sideBefore.queue && sideReset.saved === null, `sidebar reset ${JSON.stringify(sideReset)}`);
+  const sidebar = { before: sideBefore.queue, after: sideAfter.queue, reset: sideReset.queue };
+
+  await drag(keyed, -150);
+  win.webContents.invalidate();
+  await pause(300);
+  await win.webContents.capturePage();
+  await pause(400);
+  await writeFile(`${prefix}-resized.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-resized.png`);
+
+  win.webContents.debugger.detach();
+  await read(win, `document.querySelector('[aria-label="Resize Discuss"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await pause(300);
+  const reset = await measure();
+  expect(reset.dock === before.dock && reset.saved === null, `double-click reset to ${reset.dock}, saved ${reset.saved}`);
+
+  if (failures.length) throw new Error(`item 180: ${failures.join('; ')}`);
+  return { before, wider, widest, narrowest, keyed, sidebar, reset };
+}
+
+/**
+ * Item 179: coming back to the Mixpanel tab asks Mixpanel for nothing and
+ * draws the report at once; Discuss runs on a model picked under its
+ * question box, here the Claude Code Kovan found for its Agents tab, never
+ * added as a reviewer. Mixpanel is `smokeClient`.
+ */
+async function driveItem179(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const shot = async (name: string) => {
+    win.webContents.invalidate();
+    await pause(300);
+    await win.webContents.capturePage();
+    await pause(400);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const failures: string[] = [];
+  const expect = (ok: unknown, what: string) => { if (!ok) failures.push(what); };
+  await mixpanelFixtureTab(win);
+
+  // First visit: the list once, the report's numbers once.
+  await read(win, `document.querySelector('.rail-item[data-view="mixpanel"]').click()`);
+  await until(win, `Array.from(document.querySelectorAll('.rows .row-title')).some(e => e.textContent === 'Weekly signups')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.rows .row-title')).find(e => e.textContent === 'Weekly signups').closest('button').click()`);
+  await until(win, `document.querySelector('.mp-chart')`, 8_000);
+  const firstVisit = { ...mixpanelAsked };
+  expect(firstVisit.list === 1 && firstVisit.numbers === 1, `first visit asked ${JSON.stringify(firstVisit)}`);
+
+  // Away and back, twice. The chart must be in the first frame painted after
+  // the click: React flushes the click in a microtask, before the next frame.
+  const returns: unknown[] = [];
+  for (let i = 0; i < 2; i++) {
+    await read(win, `document.querySelector('.rail-item[data-view="pulls"]').click()`);
+    await until(win, `!document.querySelector('.mp-pane')`, 5_000);
+    returns.push(await read(win, `(async () => {
+      document.querySelector('.rail-item[data-view="mixpanel"]').click();
+      await new Promise((r) => requestAnimationFrame(r));
+      const text = document.querySelector('.mp-pane')?.innerText ?? '';
+      const list = document.querySelector('.queue[aria-label="Mixpanel"]')?.innerText ?? '';
+      return { chart: Boolean(document.querySelector('.mp-chart')), loading: /Loading/.test(text + list) };
+    })()`));
+    await pause(1_200);
+  }
+  const afterReturns = { ...mixpanelAsked };
+  expect(returns.every((r) => (r as { chart: boolean; loading: boolean }).chart && !(r as { loading: boolean }).loading), `returns drew ${JSON.stringify(returns)}`);
+  expect(afterReturns.list === 1 && afterReturns.numbers === 1, `returns asked ${JSON.stringify(afterReturns)}`);
+
+  // Picking the other report still asks for its numbers.
+  await read(win, `Array.from(document.querySelectorAll('.rows .row-title')).find(e => e.textContent === 'Lessons started').closest('button').click()`);
+  await until(win, `document.querySelector('.mp-title')?.textContent === 'Lessons started' && document.querySelector('.mp-chart')`, 8_000);
+  const afterPick = { ...mixpanelAsked };
+  expect(afterPick.numbers === 2, `picking another report asked ${JSON.stringify(afterPick)}`);
+
+  // Discuss: the model tag opens the picker upward; pick Claude Code as found.
+  await read(win, `Array.from(document.querySelectorAll('.mp-actions button')).find(b => b.textContent.includes('Discuss')).click()`);
+  await until(win, `document.querySelector('.mp-dock .mp-model')`, 5_000);
+  const tagBefore = await read(win, `document.querySelector('.mp-dock .mp-model').innerText`);
+  await read(win, `document.querySelector('.mp-dock .mp-model').click()`);
+  await until(win, `document.querySelector('.quick-model-menu.opens-up')`, 5_000);
+  await read(win, `(() => {
+    const select = document.querySelector('.quick-model-menu select');
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, '~reviewers');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  const claudeRow = `Array.from(document.querySelectorAll('.quick-model-list button')).find(b => b.querySelector('.quick-model-id')?.textContent === 'claude')`;
+  await until(win, claudeRow, 8_000);
+  await pause(300);
+  const menu = await read(win, `(() => {
+    const m = document.querySelector('.quick-model-menu').getBoundingClientRect();
+    const t = document.querySelector('.mp-dock .mp-model').getBoundingClientRect();
+    return { above: m.bottom <= t.top, inWindow: m.top >= 0 && m.right <= window.innerWidth,
+      providers: Array.from(document.querySelectorAll('.quick-model-menu option')).map(o => o.textContent),
+      rows: Array.from(document.querySelectorAll('.quick-model-list button')).map(b => b.innerText.replace(/\\s+/g, ' ')) };
+  })()`) as { above: boolean; inWindow: boolean };
+  expect(menu.above && menu.inWindow, `picker placed ${JSON.stringify(menu)}`);
+  const rows = (menu as unknown as { rows: string[] }).rows.join(' | ');
+  expect(/claude Claude Code/i.test(rows) && /codex Codex/i.test(rows) && /claude-personal/.test(rows), `agent rows ${rows}`);
+  await shot('picker');
+  await read(win, `${claudeRow}.click()`);
+  await until(win, `document.querySelector('.mp-dock .mp-model-name')?.textContent === 'claude'`, 5_000);
+  const saved = await read(win, `window.kovan.settings().then(s => s['mixpanel.discussModel'])`);
+  expect(saved === '(claude)', `saved model ${String(saved)}`);
+  const reviewersAfter = await read(win, `window.kovan.reviewTools().then(t => t.map(x => x.id))`);
+  expect(!(reviewersAfter as string[]).includes('claude'), `picking it added a reviewer: ${JSON.stringify(reviewersAfter)}`);
+
+  // Ask; the answer comes from the reviewer (its smoke stand-in), not opencode.
+  await read(win, `(() => {
+    const box = document.querySelector('#mp-question');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(box, 'Summarize the trend');
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await until(win, `!document.querySelector('.mp-composer button.quick').disabled`, 3_000);
+  await read(win, `document.querySelector('.mp-composer button.quick').click()`);
+  await until(win, `document.querySelector('.mp-msg.model .mp-text')`, 10_000);
+  const answer = await read(win, `document.querySelector('.mp-msg.model').innerText`);
+  expect(String(answer).includes('claude answered'), `answer was ${String(answer)}`);
+  await shot('answered');
+
+  if (failures.length) throw new Error(`item 179: ${failures.join('; ')}`);
+  return { firstVisit, returns, afterReturns, afterPick, tagBefore, menu, saved, reviewersAfter, answer };
+}
+
+/**
+ * Item 173: the run sheet is sized by the window, at a laptop's size and at
+ * a wide screen's, folded and with the prompt shown in full.
+ */
+async function driveItem173(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `localStorage.removeItem('kovan.run-prompt-open')`);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).some(e => e.textContent === '205')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).find(e => e.textContent === '205')?.closest('button')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === 'Review in an agent')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Review in an agent')?.click()`);
+  await until(win, `document.getElementById('run-prompt')?.value.length > 0`, 10_000);
+  const measure = () => read(win, `(() => {
+    const sheet = document.querySelector('.run-sheet').getBoundingClientRect();
+    const ta = document.getElementById('run-prompt').getBoundingClientRect();
+    return { window: innerWidth + 'x' + innerHeight, sheet: Math.round(sheet.width) + 'x' + Math.round(sheet.height),
+      sheetBottom: Math.round(sheet.bottom), prompt: Math.round(ta.height) };
+  })()`);
+  const report: Record<string, unknown> = {};
+  for (const [w, h] of [[1440, 900], [1715, 1100], [3430, 1400]] as const) {
+    for (const open of [false, true]) {
+      const isOpen = await read(win, `document.getElementById('run-prompt').className !== 'folded'`);
+      if (isOpen !== open) {
+        await read(win, `Array.from(document.querySelectorAll('.prompt-label .link')).find(b => /Show all|Fold/.test(b.textContent))?.click()`);
+      }
+      win.setSize(w, h);
+      await pause(700);
+      const name = `${w}x${h}-${open ? 'open' : 'folded'}`;
+      report[name] = await measure();
+      win.webContents.invalidate();
+      await pause(300);
+      await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+      console.log(`shot: ${prefix}-${name}.png`);
+    }
+  }
+  return report;
+}
+
+/**
+ * Item 172: the review sheet picks every ticked pull request's clone, named
+ * in the Folder field, and the Agent list is there at once the second time.
+ * Runs with KOVAN_SMOKE_ITEM171 set too, for ACME-2500's fixture.
+ */
+async function driveItem172(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const parent = mkdtempSync(path.join(os.tmpdir(), 'kovan-172-'));
+  for (const name of ['billing', 'web', 'jobs', 'infra']) {
+    const repo = path.join(parent, name);
+    mkdirSync(repo);
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+    git('init', '-q');
+    git('remote', 'add', 'origin', `git@github.com:acme/${name}.git`);
+    writeFileSync(path.join(repo, 'a.ts'), 'export const a = 1\n');
+  }
+  win.setSize(1600, 1040);
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await read(win, `window.kovan.setSetting('repos.folders', [${JSON.stringify(parent)}])`);
+  await read(win, `window.kovan.runTargets(true)`);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).some(e => e.textContent === '205')`, 8_000);
+  await read(win, `Array.from(document.querySelectorAll('.rows .row .row-num')).find(e => e.textContent === '205')?.closest('button')?.click()`);
+  const open = async () => {
+    await until(win, `Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === 'Review in an agent')`, 8_000);
+    const t = Date.now();
+    await read(win, `Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Review in an agent')?.click()`);
+    await until(win, `document.querySelector('.run-controls select')?.options.length > 0`, 20_000);
+    return Date.now() - t;
+  };
+  const close = async () => {
+    await read(win, `document.querySelector('.sheet-head .icon-button')?.click()`);
+    await until(win, `!document.querySelector('.run-sheet')`, 3_000);
+  };
+  const report: Record<string, unknown> = { agentsFirstMs: await open() };
+  await until(win, `document.querySelector('.folder-button-text')?.textContent.includes('+')`, 10_000);
+  await pause(500);
+  const folders = () => read(win, `({ field: document.querySelector('.folder-field .run-field-label')?.textContent,
+    summary: document.querySelector('.folder-button-text')?.textContent,
+    note: document.querySelector('.folder-field .model-field-note')?.textContent ?? null })`);
+  report['folders'] = await folders();
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-folders.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-folders.png`);
+  await read(win, `Array.from(document.querySelectorAll('.together-row')).find(r => r.textContent.includes('#88'))?.querySelector('input').click()`);
+  await pause(500);
+  report['afterUntick88'] = await folders();
+  await close();
+  report['agentsSecondMs'] = await open();
+  await close();
+  report['agentsThirdMs'] = await open();
+  return report;
+}
+
+async function driveItem165(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, writeFileSync, existsSync: exists, readFileSync } = await import('node:fs');
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="workspace"]')`, 15_000);
+  const repoIn = (name: string) => {
+    const repo = mkdtempSync(path.join(os.tmpdir(), `kovan-165-${name}-`));
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+    git('init', '-q');
+    writeFileSync(path.join(repo, 'a.ts'), 'export const a = 1\n');
+    git('add', '.');
+    git('-c', 'user.email=smoke@kovan', '-c', 'user.name=smoke', 'commit', '-qm', 'init');
+    writeFileSync(path.join(repo, 'a.ts'), 'export const a = 2\n');
+    return repo;
+  };
+  const backend = repoIn('backend');
+  const frontend = repoIn('frontend');
+  await read(win, `window.kovan.setSetting('workspaces', [
+    { id: 'w-back', name: 'Backend', folders: [${JSON.stringify(backend)}] },
+    { id: 'w-front', name: 'Frontend', folders: [${JSON.stringify(frontend)}] }
+  ])`);
+  await read(win, `window.kovan.setSetting('workspace.active', 'w-back')`);
+  await pause(500);
+  // The window on Backend, as the session's window is.
+  await read(win, `document.querySelector('.rail-item[data-view="workspace"]').click()`);
+  await until(win, `[...document.querySelectorAll('a, button')].some((b) => b.innerText.trim() === 'Backend')`, 8_000);
+  await read(win, `[...document.querySelectorAll('a, button')].find((b) => b.innerText.trim() === 'Backend').click()`);
+  await until(win, `document.querySelectorAll('.tree-row, .repo-row').length > 0`, 8_000).catch(() => undefined);
+  await pause(800);
+  const dir = path.join(app.getPath('userData'), 'open');
+  writeFileSync(path.join(dir, 'r165.json'), JSON.stringify({ repo: frontend, file: path.join(frontend, 'a.ts') }));
+  const replyFile = path.join(dir, 'r165.reply');
+  for (let i = 0; i < 50 && !exists(replyFile); i++) await pause(100);
+  const reply = exists(replyFile) ? JSON.parse(readFileSync(replyFile, 'utf8')) : 'no reply';
+  await pause(1_500);
+  const tabs = await read(win, `Array.from(document.querySelectorAll('.tabs [role="tab"], .tabs .tab')).map((t) => t.innerText.replace(/\\s+/g, ' ').trim())`);
+  const diff = await read(win, `document.querySelector('.diff, .diff-view')?.innerText.slice(0, 200) ?? ''`);
+  win.webContents.invalidate();
+  await pause(300);
+  await writeFile(`${prefix}-same-window.png`, (await win.webContents.capturePage()).toPNG());
+  console.log(`shot: ${prefix}-same-window.png`);
+  return { reply, windows: BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length, tabs, diff };
+}
+
+async function driveItem148(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, writeFileSync, existsSync: exists, readFileSync } = await import('node:fs');
+  const report: Record<string, unknown> = {};
+  win.show();
+  await until(win, `document.querySelector('.rail-item[data-view="workspace"]')`, 15_000);
+
+  // A repository in a Kovan workspace, with one edited file and one new one.
+  const repo = mkdtempSync(path.join(os.tmpdir(), 'kovan-148-'));
+  const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+  git('init', '-q');
+  writeFileSync(path.join(repo, 'a.ts'), 'export const a = 1\n');
+  writeFileSync(path.join(repo, 'clean.ts'), 'export const c = 3\n');
+  git('add', '.');
+  git('-c', 'user.email=smoke@kovan', '-c', 'user.name=smoke', 'commit', '-qm', 'init');
+  writeFileSync(path.join(repo, 'a.ts'), 'export const a = 2\n');
+  writeFileSync(path.join(repo, 'b.ts'), 'export const b = 1\n');
+  await read(win, `window.kovan.setSetting('workspaces', [{ id: 'w148', name: 'Smoke', folders: [${JSON.stringify(repo)}] }])`);
+  await read(win, `window.kovan.setSetting('workspace.active', 'w148')`);
+
+  const dir = path.join(app.getPath('userData'), 'open');
+  const ask = async (name: string, body: unknown) => {
+    writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(body));
+    const reply = path.join(dir, `${name}.reply`);
+    for (let i = 0; i < 50 && !exists(reply); i++) await pause(100);
+    return exists(reply) ? JSON.parse(readFileSync(reply, 'utf8')) as { ok: boolean; message: string } : 'no reply';
+  };
+  const tabs = () => read(win, `Array.from(document.querySelectorAll('.tabs [role="tab"], .tabs .tab')).map((t) => t.innerText.replace(/\\s+/g, ' ').trim())`);
+  const snap = async (name: string) => {
+    await pause(900);
+    win.webContents.invalidate();
+    await pause(300);
+    await win.webContents.capturePage();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+
+  report['edited'] = await ask('r1', { repo, file: path.join(repo, 'a.ts') });
+  await pause(1_200);
+  report['view'] = await read(win, `document.querySelector('.rail-item.active')?.getAttribute('data-view')`);
+  report['tabsAfterEdited'] = await tabs();
+  await snap('edited');
+  report['new'] = await ask('r2', { repo, file: path.join(repo, 'b.ts') });
+  await pause(1_200);
+  report['tabsAfterNew'] = await tabs();
+  await snap('new');
+  report['clean'] = await ask('r3', { repo, file: path.join(repo, 'clean.ts') });
+  const outside = mkdtempSync(path.join(os.tmpdir(), 'kovan-148-out-'));
+  report['outside'] = await ask('r4', { repo: outside, file: path.join(outside, 'x.ts') });
+  report['climbing'] = await ask('r5', { repo, file: `${repo}/../../etc/passwd` });
+  return report;
+}
+
+async function driveItem145(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(900);
+    win.webContents.invalidate();
+    await pause(300);
+    // The first capture can return the frame before the last change.
+    await win.webContents.capturePage();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const centre = async (selector: string) => await read(win, `(() => {
+    const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null;
+    const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`) as { x: number; y: number } | null;
+  const report: Record<string, unknown> = {};
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  const first = FIXTURE;
+  // Seeded before the window reads them: one pull request in the lists, one
+  // merged out of the window, one that can't be loaded, one ticket that isn't
+  // in the list.
+  await read(win, `window.kovan.setSetting('pins', [
+    { key: 'pull:${first.repo}#${first.number}', title: ${JSON.stringify(first.title)}, at: new Date().toISOString() },
+    { key: 'pull:acme/acme-backend#861', title: 'Fix lesson progress sync', at: new Date().toISOString() },
+    { key: 'pull:acme/acme-backend#404', title: 'A pull request that was deleted', at: new Date().toISOString() },
+    { key: 'ticket:ACME-9001', title: 'ACME-9001 Reassigned ticket', at: new Date().toISOString() }
+  ])`);
+  win.webContents.reload();
+  await until(win, `document.querySelector('.rail-item[data-view="pulls"]')`, 15_000);
+  await pause(500);
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  // Pull requests is the first view; clicking its active rail icon would hide the sidebar.
+  await until(win, `document.querySelectorAll('.queue-list .row').length > 3`, 10_000);
+  await until(win, `document.querySelector('.row.pin-failed') !== null`, 8_000).catch(() => undefined);
+  report['pinnedRows'] = await read(win, `Array.from(document.querySelectorAll('li.pinnable.pinned .row-num')).map((n) => n.textContent)`);
+  report['groupNotes'] = await read(win, `Array.from(document.querySelectorAll('.group-head')).map((h) => h.innerText.replace(/\\s+/g, ' '))`);
+  report['failed'] = await read(win, `Array.from(document.querySelectorAll('.row.pin-failed')).map((r) => r.innerText.replace(/\\s+/g, ' '))`);
+  await snap('pulls-top');
+  await read(win, `(() => { const q = document.querySelector('.queue-list'); if (q) q.scrollTop = q.scrollHeight; return Boolean(q); })()`);
+  await snap('pulls-bottom');
+  await read(win, `(() => { const q = document.querySelector('.queue-list'); if (q) q.scrollTop = 0; return Boolean(q); })()`);
+
+  // Hover an unpinned row: its pin appears after the age.
+  const unpinned = await centre('li.pinnable:not(.pinned) .row');
+  if (unpinned) win.webContents.sendInputEvent({ type: 'mouseMove', x: unpinned.x, y: unpinned.y });
+  await snap('hover');
+  report['hoverPinVisible'] = await read(win, `(() => { const b = document.querySelector('li.pinnable:not(.pinned):hover > .pin-toggle'); return b ? getComputedStyle(b).opacity : null; })()`);
+
+  // Right-click it: Pin, Open on GitHub, Copy link.
+  if (unpinned) {
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: unpinned.x, y: unpinned.y, button: 'right', clickCount: 1 });
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: unpinned.x, y: unpinned.y, button: 'right', clickCount: 1 });
+  }
+  await pause(300);
+  report['menu'] = await read(win, `Array.from(document.querySelectorAll('.row-menu button')).map((b) => b.textContent)`);
+  await snap('menu');
+  await read(win, `Array.from(document.querySelectorAll('.row-menu button')).find((b) => b.textContent === 'Pin')?.click()`);
+  await pause(300);
+  report['pinnedAfterMenu'] = await read(win, `document.querySelectorAll('li.pinnable.pinned').length`);
+
+  // Pinned only.
+  win.webContents.sendInputEvent({ type: 'mouseMove', x: 5, y: 5 });
+  await read(win, `document.querySelector('.queue-head .pinned-only')?.click()`);
+  await pause(300);
+  await pause(1_500);
+  report['pinnedOnlyRows'] = await read(win, `Array.from(document.querySelectorAll('.queue-list .row .row-num')).map((n) => n.textContent)`);
+  await snap('pinned-only');
+  await read(win, `document.querySelector('.queue-head .pinned-only')?.click()`);
+
+  // Tickets: the reassigned one is kept.
+  await read(win, `document.querySelector('.rail-item[data-view="tickets"]')?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.queue-list .row-num')).some((n) => n.textContent === 'ACME-9001')`, 8_000).catch(() => undefined);
+  report['tickets'] = await read(win, `Array.from(document.querySelectorAll('.queue-list li')).map((li) => (li.classList.contains('pinned') ? '[pin] ' : '') + (li.querySelector('.row-num')?.textContent ?? ''))`);
+  await snap('tickets');
+
+  // Sessions: pin one, then close it — its pin goes with it.
+  await read(win, `document.querySelector('.rail-item[data-view="sessions"]')?.click()`);
+  const a = await read(win, `window.kovan.openTerminal(${JSON.stringify(os.tmpdir())}).then((s) => s.id)`) as string;
+  const b = await read(win, `window.kovan.openTerminal(${JSON.stringify(os.tmpdir())}).then((s) => s.id)`) as string;
+  await until(win, `document.querySelectorAll('[data-session-row]').length >= 2`, 8_000);
+  await read(win, `document.querySelector('[data-session-row="${a}"] .pin-toggle')?.click()`);
+  await pause(400);
+  report['sessionPinned'] = await read(win, `document.querySelector('[data-session-row="${a}"] .pin-toggle.on') !== null`);
+  report['otherSessionPinVisible'] = await read(win, `getComputedStyle(document.querySelector('[data-session-row="${b}"] .pin-toggle')).display`);
+  await snap('sessions');
+  await read(win, `window.kovan.sessionClose(${JSON.stringify(a)})`);
+  await pause(800);
+  report['pinsAfterClose'] = await read(win, `window.kovan.settings().then((s) => s.pins.map((p) => p.key))`);
+  await read(win, `window.kovan.sessionClose(${JSON.stringify(b)})`);
+  return report;
+}
+
+async function driveItem144(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(1_000);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  win.show();
+  win.focus();
+  await until(win, `document.querySelector('.rail-item[data-view="activity"]')`, 15_000);
+  // Count what would leave for the browser: nothing should.
+  await read(win, `(() => { window.__external = []; const open = window.kovan.openExternal; window.kovan.openExternal = (url) => { window.__external.push(url); }; return true; })()`).catch(() => undefined);
+  const now = Date.now();
+  const merged = {
+    id: 'approved:acme/acme-backend#861:1', kind: 'approved', at: now, subject: 'acme/acme-backend#861', label: 'acme-backend #861',
+    title: 'bug/ACME-2453 QA | Parent performance page', who: 'alice-dev', url: 'https://github.com/acme/acme-backend/pull/861', read: false
+  };
+  const ticket = {
+    id: 'mentioned:ACME-2453:1', kind: 'mentioned', at: now - 60_000, subject: 'ACME-2453', label: 'ACME-2453',
+    title: 'QA | Parent performance page for v3', who: 'Natalija P', excerpt: '@Idris Ay is this ready for QA?',
+    url: 'https://example.invalid/browse/ACME-2453', read: false
+  };
+  win.webContents.send('kovan:activity', [merged, ticket]);
+  await read(win, `document.querySelector('.rail-item[data-view="activity"]')?.click()`);
+  await until(win, `document.querySelectorAll('.activity-row').length >= 2`, 5_000);
+  const report: Record<string, unknown> = {};
+
+  await read(win, `Array.from(document.querySelectorAll('.activity-row')).find((r) => r.innerText.includes('#861')).click()`);
+  await until(win, `document.querySelector('.detail-head h2, .detail h2')?.textContent?.includes('Fixture pull request')`, 8_000).catch(() => undefined);
+  report['pullOpened'] = await read(win, `document.querySelector('.detail-head h2')?.textContent ?? document.querySelector('.activity-event-pane h2')?.textContent ?? null`);
+  report['pullRowRead'] = await read(win, `Array.from(document.querySelectorAll('.activity-row')).find((r) => r.innerText.includes('#861'))?.classList.contains('read') ?? 'row gone (inbox reloaded from main)'`);
+  // Marking read reloads the inbox from main, which never had these: send them again.
+  win.webContents.send('kovan:activity', [{ ...merged, read: true }, ticket]);
+  await pause(400);
+  report['view'] = await read(win, `document.querySelector('.rail-item.active')?.getAttribute('data-view')`);
+  await snap('pull');
+
+  await read(win, `Array.from(document.querySelectorAll('.activity-row')).find((r) => r.querySelector('.row-num')?.textContent === 'ACME-2453').click()`);
+  await pause(1_500);
+  report['ticketOpened'] = await read(win, `document.querySelector('.detail-head h2')?.textContent ?? null`);
+  await snap('ticket');
+  report['openedInBrowser'] = await read(win, `window.__external ?? 'not patched'`);
+  return report;
+}
+
+async function driveItem143(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const snap = async (name: string) => {
+    await pause(1_200);
+    win.webContents.invalidate();
+    await pause(300);
+    await writeFile(`${prefix}-${name}.png`, (await win.webContents.capturePage()).toPNG());
+    console.log(`shot: ${prefix}-${name}.png`);
+  };
+  const type = (selector: string, value: string) => read(win, `(() => {
+    const input = document.querySelector(${JSON.stringify(selector)});
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    set.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('blur', { bubbles: true })); input.focus(); input.blur(); return true; })()`);
+  const button = (text: string) => `Array.from(document.querySelectorAll('.settings-row.open button')).find((b) => b.textContent.trim().startsWith(${JSON.stringify(text)}))`;
+  win.show();
+  win.focus();
+  await read(win, `window.kovan.setSetting('buttons.review', true)`);
+  await read(win, `window.kovan.setSetting('review.tools', [])`);
+  await read(win, `window.kovan.setSetting('review.runner', 'nv-review')`);
+  win.webContents.reload();
+  await pause(2_500);
+  win.webContents.send('kovan:snapshot', fixtureSnapshot(10));
+  await until(win, `document.querySelector('.rows .row')`, 15_000);
+  const report: Record<string, unknown> = {};
+
+  // Settings › Agents: nv-review is already a row.
+  await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);
+  await until(win, `document.querySelector('.settings-list')`, 5_000);
+  await read(win, `document.querySelector('.settings-row[data-section="agents"] .settings-row-head')?.click()`);
+  await until(win, `document.querySelector('.reviewer-row')`, 5_000);
+  await read(win, `document.querySelector('.reviewer-list').scrollIntoView({ block: 'start' })`);
+  report['rowsAtFirst'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-row')).map((r) => r.innerText.replace(/\\s+/g, ' '))`);
+  await snap('list');
+
+  // Add an agent: Claude Code, sonnet; test; save.
+  await read(win, `${button('+ Add reviewer')}?.click()`);
+  await until(win, `document.querySelector('.reviewer-found input[type=radio]')`, 5_000);
+  report['agentsFound'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-found .checkbox-row')).map((r) => r.innerText.trim())`);
+  await read(win, `Array.from(document.querySelectorAll('.reviewer-found .checkbox-row')).find((r) => r.innerText.startsWith('claude '))?.querySelector('input').click()`);
+  await type('.reviewer-form input[list="reviewer-models"]', 'sonnet');
+  await pause(300);
+  report['cmdline'] = await read(win, `document.querySelector('.reviewer-cmdline')?.textContent`);
+  await read(win, `Array.from(document.querySelectorAll('.reviewer-form button')).find((b) => b.textContent.trim() === 'Test')?.click()`);
+  await until(win, `document.querySelector('.reviewer-form .reviewer-checks')`, 10_000);
+  report['agentTest'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-form .reviewer-checks li')).map((l) => l.innerText.replace(/\\s+/g, ' '))`);
+  await read(win, `document.querySelector('.reviewer-form').scrollIntoView({ block: 'start' })`);
+  await snap('add-agent');
+  await read(win, `${button('Save reviewer')}?.click()`);
+  await until(win, `document.querySelectorAll('.reviewer-row').length === 2`, 5_000);
+
+  // Add a command the way you would: pick cf-review from what was found; its
+  // --help fills the form in and names the key file it still needs.
+  await read(win, `${button('+ Add reviewer')}?.click()`);
+  await until(win, `document.querySelector('.reviewer-kind')`, 5_000);
+  await read(win, `Array.from(document.querySelectorAll('.reviewer-kind')).find((b) => b.textContent.startsWith('Command'))?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.reviewer-found .checkbox-row')).some((r) => r.innerText.startsWith('cf-review'))`, 5_000);
+  report['commandsFound'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-found .checkbox-row')).map((r) => r.innerText.trim())`);
+  await read(win, `Array.from(document.querySelectorAll('.reviewer-found .checkbox-row')).find((r) => r.innerText.startsWith('cf-review'))?.querySelector('input').click()`);
+  await until(win, `document.querySelector('.reviewer-setup')`, 8_000);
+  report['setupNote'] = await read(win, `document.querySelector('.reviewer-setup .settings-note')?.textContent`);
+  report['choices'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-segmented button.on')).map((b) => b.textContent)`);
+  report['keyAsked'] = await read(win, `document.querySelector('.reviewer-key .settings-note')?.textContent`);
+  await read(win, `document.querySelector('.reviewer-form input[list="reviewer-models"]')?.focus()`);
+  report['modelSuggestions'] = await read(win, `Array.from(document.querySelectorAll('#reviewer-models option')).map((o) => o.value)`);
+  report['commandLine'] = await read(win, `document.querySelector('.reviewer-cmdline')?.textContent`);
+  await read(win, `document.querySelector('.reviewer-form').scrollIntoView({ block: 'start' })`);
+  await snap('add-command');
+  await type('.reviewer-key input[type="password"]', 'test-key-not-real');
+  await read(win, `document.querySelector('.reviewer-key button[type="submit"]').click()`);
+  await until(win, `Array.from(document.querySelectorAll('.reviewer-setup .settings-note')).some((p) => p.textContent.includes('Saved to'))`, 5_000);
+  report['keySaved'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-setup .settings-note')).map((p) => p.textContent).pop()`);
+  await snap('key-saved');
+  await read(win, `${button('Save reviewer')}?.click()`);
+  await until(win, `document.querySelectorAll('.reviewer-row').length === 3`, 5_000);
+  report['rowsAfter'] = await read(win, `Array.from(document.querySelectorAll('.reviewer-row')).map((r) => r.innerText.replace(/\\s+/g, ' '))`);
+  report['saved'] = await read(win, `window.kovan.settings().then((s) => s['review.tools'].map((t) => [t.id, t.kind, t.model ?? '', t.test?.ok ?? 'untested'].join(' ')))`);
+  await read(win, `document.querySelector('.reviewer-list').scrollIntoView({ block: 'start' })`);
+  await snap('list-after');
+
+  // The Review button's picker: the reviewers group, then pick Claude Code.
+  await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+  await pause(500);
+  await read(win, `document.querySelector('.rail-item[data-view="pulls"]')?.click()`);
+  await pause(400);
+  await read(win, `document.querySelectorAll('.rows .row')[0]?.click()`);
+  await until(win, `Array.from(document.querySelectorAll('.quick-split')).some((s) => s.textContent.includes('Review'))`, 8_000);
+  const reviewTag = `Array.from(document.querySelectorAll('.quick-split')).find((s) => s.querySelector('.quick-run').textContent.includes('Review')).querySelector('.quick-model')`;
+  report['tagBefore'] = await read(win, `${reviewTag}.textContent`);
+  await read(win, `${reviewTag}.click()`);
+  await until(win, `document.querySelector('.quick-model-menu select')`, 5_000);
+  await read(win, `(() => { const s = document.querySelector('.quick-model-menu select'); s.value = '~reviewers'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await pause(500);
+  report['pickerRows'] = await read(win, `Array.from(document.querySelectorAll('.quick-model-list button')).map((b) => b.innerText.replace(/\\s+/g, ' '))`);
+  report['addRow'] = await read(win, `Boolean(document.querySelector('.quick-model-add'))`);
+  await snap('picker');
+  await read(win, `Array.from(document.querySelectorAll('.quick-model-list button')).find((b) => b.innerText.includes('claude'))?.click()`);
+  await pause(600);
+  report['tagAfter'] = await read(win, `${reviewTag}.textContent`);
+  report['runner'] = await read(win, `window.kovan.settings().then((s) => s['review.runner'])`);
+  report['model'] = await read(win, `window.kovan.quickModel('pull-review')`);
+  await snap('picked');
+
+  // "Add a reviewer…" opens Settings at Agents.
+  await read(win, `${reviewTag}.click()`);
+  await until(win, `document.querySelector('.quick-model-add')`, 5_000);
+  await read(win, `document.querySelector('.quick-model-add').click()`);
+  await until(win, `document.querySelector('.settings-row.open[data-section="agents"]')`, 5_000).catch(() => undefined);
+  report['addOpensAgents'] = await read(win, `Boolean(document.querySelector('.settings-row.open[data-section="agents"]'))`);
+  await read(win, `document.querySelector('.sheet-head button[aria-label="Close"], .sheet-head .ghost')?.click()`);
+  // Back to how the user had it.
+  await read(win, `window.kovan.setSetting('review.runner', 'nv-review')`);
+  return report;
+}
+
 async function driveItem118(win: BrowserWindow, prefix: string): Promise<Record<string, unknown>> {
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const snap = async (name: string) => {
@@ -4136,7 +6173,7 @@ async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: stri
   await until(win, `document.querySelectorAll('.row.one-line').length >= 4`, 8_000);
   await pause(3_000);
   report['states'] = sessions.list().map((s) => ({ title: s.title, status: s.status, hosted: s.hosted }));
-  report['badges'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-state')?.textContent ?? '—'))`);
+  report['badges'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-icon')?.getAttribute('aria-label') ?? '—'))`);
   await snap('badges');
 
   // Hover the ticket's session for the card.
@@ -4167,7 +6204,7 @@ async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: stri
   // Opening the Done session clears its badge.
   await read(win, `[...document.querySelectorAll('.row.one-line')].find((r) => r.textContent.includes(${JSON.stringify(snapshot.ticket ?? 'ACME-1')}))?.click()`);
   await pause(1_500);
-  report['afterOpen'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-state')?.textContent ?? '—'))`);
+  report['afterOpen'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-icon')?.getAttribute('aria-label') ?? '—'))`);
   await snap('after-open');
 
   // Finishing while another session is on screen: Done stays until it's looked at.
@@ -4175,18 +6212,32 @@ async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: stri
   win.webContents.sendInputEvent({ type: 'mouseDown', x: box2.x, y: box2.y, button: 'left', clickCount: 1 });
   win.webContents.sendInputEvent({ type: 'mouseUp', x: box2.x, y: box2.y, button: 'left', clickCount: 1 });
   await pause(800);
+  // Item 182: what alerts hear — the change, with the state it came from.
+  const heard: string[] = [];
+  const listening = sessions.onStatusChange(({ info, from, to }) => heard.push(`${info.title}: ${from ?? '∅'} → ${to}`));
   sessions.setStatus(done.id, 'working');
   await pause(300);
   sessions.setStatus(done.id, 'done');
   await pause(1_000);
-  report['doneUnseen'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-state')?.textContent ?? '—'))`);
+  listening.dispose();
+  report['statusEvents'] = heard;
+  // The Sessions rail pip says waiting while any agent is on Input.
+  report['railPip'] = await read(win, `(() => { const p = document.querySelector('.rail-item[aria-label="Sessions"] .rail-pip'); return p ? p.className + ' · ' + p.title : null; })()`);
+  // A notification's click, or the menu bar: from another view, lands on that session.
+  await read(win, `document.querySelector('.rail-item[aria-label="Pull requests"]')?.click()`);
+  await pause(500);
+  win.webContents.send('kovan:session-open', input.id);
+  await pause(1_000);
+  report['openedFromMain'] = await read(win, `document.querySelector('.rail-item.active')?.getAttribute('aria-label') ?? null`);
+  await snap('opened-from-main');
+  report['doneUnseen'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-icon')?.getAttribute('aria-label') ?? '—'))`);
   await snap('done-unseen');
 
   // Item 114: what a restarted Kovan gets back from the terminal host.
   const again = new Sessions(undefined, { hosts: new PtyHosts(userData) });
   report['restored'] = await again.restore();
   report['restoredSessions'] = again.list().map((s) => ({ title: s.title, running: s.running, hosted: s.hosted, status: s.status, subject: s.subject }));
-  report['restoredBuffer'] = again.buffer(input.id).length;
+  report['restoredBuffer'] = again.buffer(input.id).data.length;
   again.detachAll();
   return report;
 }
@@ -4644,7 +6695,7 @@ async function driveItem91(win: BrowserWindow, prefix: string): Promise<Record<s
   let output = '';
   for (let i = 0; i < 30 && !output.includes('opti2mized'); i++) {
     await pause(300);
-    output = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(optimize.id)})`) as string) ?? '';
+    output = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(optimize.id)}).then((r) => r.data)`) as string) ?? '';
   }
   const ranOptimize = { ran: output.includes('opti2mized'), cwd: optimize.cwd, tagged: Boolean(optimize.commandId),
     menuClosed: !(await read(win, `Boolean(document.querySelector('.qc-menu'))`)) };
@@ -4657,7 +6708,7 @@ async function driveItem91(win: BrowserWindow, prefix: string): Promise<Record<s
   let rerunOut = '';
   for (let i = 0; i < 30 && (rerunOut.match(/opti2mized/g) ?? []).length < 2; i++) {
     await pause(300);
-    rerunOut = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(optimize.id)})`) as string) ?? '';
+    rerunOut = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(optimize.id)}).then((r) => r.data)`) as string) ?? '';
   }
   const rerun = { sessionsBefore: beforeRerun, sessionsAfter: await titles(), outputs: (rerunOut.match(/opti2mized/g) ?? []).length };
 
@@ -4676,7 +6727,7 @@ async function driveItem91(win: BrowserWindow, prefix: string): Promise<Record<s
   let devOut = '';
   for (let i = 0; i < 20 && !devOut.includes('serving-42'); i++) {
     await pause(300);
-    devOut = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(dev.id)})`) as string) ?? '';
+    devOut = (await read(win, `window.kovan.sessionBuffer(${JSON.stringify(dev.id)}).then((r) => r.data)`) as string) ?? '';
   }
   const reuse = { before, after, servingOutput: devOut.includes('serving-42'),
     activeIsDev: await read(win, `document.querySelector('.term')?.getAttribute('data-session-id') === ${JSON.stringify(dev.id)}`),
@@ -4975,7 +7026,7 @@ async function driveItem88(win: BrowserWindow, prefix: string): Promise<Record<s
   await doubleTap();
   await until(win, `document.querySelector('.dictation-pill.done')`, 5_000);
   await pause(600);
-  const buffer = await read(win, `window.kovan.sessionBuffer(${JSON.stringify(session)})`) as string;
+  const buffer = await read(win, `window.kovan.sessionBuffer(${JSON.stringify(session)}).then((r) => r.data)`) as string;
   const plain = buffer.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
   const terminal = {
     pill: await read(win, `document.querySelector('.dictation-state')?.textContent`),
@@ -4989,12 +7040,12 @@ async function driveItem88(win: BrowserWindow, prefix: string): Promise<Record<s
   // 5. Nothing focused: the clipboard.
   await until(win, `!document.querySelector('.dictation-pill')`, 3_000);
   await read(win, `document.activeElement?.blur()`);
-  clipboard.writeText('');
+  await clipboard.writeText('');
   await doubleTap();
   await until(win, `document.querySelector('.dictation-pill .dictation-text')?.textContent?.includes('retry test')`, 5_000);
   await doubleTap();
   await until(win, `document.querySelector('.dictation-pill.done')`, 5_000);
-  const toClipboard = { pill: await read(win, `document.querySelector('.dictation-state')?.textContent`), clipboard: clipboard.readText() };
+  const toClipboard = { pill: await read(win, `document.querySelector('.dictation-state')?.textContent`), clipboard: await clipboard.readText() };
 
   // 6. Settings: switch, languages from the real helper, permissions.
   await read(win, `document.querySelector('.rail-item[aria-label="Settings"]')?.click()`);

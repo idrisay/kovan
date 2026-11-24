@@ -45,7 +45,16 @@ export interface PullSummary {
   /** Who wrote the most recent of those, and when — so your own comment isn't news to you. */
   lastCommenter?: string;
   lastCommentAt?: string;
+  /**
+   * When the most recent of those is a review, what kind: an approval is
+   * counted with the comments but isn't one (item 130). Unset when it is a
+   * conversation comment.
+   */
+  lastReviewState?: ApiReviewState;
 }
+
+/** A review's `state` as GitHub's GraphQL API spells it. */
+export type ApiReviewState = 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING';
 
 export type PullFlagId =
   | 'merged'
@@ -361,16 +370,101 @@ export function checksFromRollup(value: string | null | undefined): CheckRollup 
   }
 }
 
+/**
+ * One entry of `statusCheckRollup.contexts`: a GitHub Actions (or app) check
+ * run, or a commit status posted through the statuses API.
+ */
+export interface ApiCheckContext {
+  name?: string;
+  status?: string | null;
+  conclusion?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  detailsUrl?: string | null;
+  checkSuite?: { workflowRun?: { workflow?: { name?: string | null } | null } | null } | null;
+  context?: string;
+  state?: string | null;
+  targetUrl?: string | null;
+}
+
+/** A check context's own state, from GraphQL's upper-case enums. */
+export function checkContextStatus(node: ApiCheckContext): 'pending' | 'success' | 'failure' | 'neutral' {
+  if (typeof node.name === 'string' && node.status !== 'COMPLETED') return 'pending';
+  switch (String(node.conclusion ?? node.state ?? '').toUpperCase()) {
+    case 'SUCCESS':
+      return 'success';
+    case 'FAILURE':
+    case 'ERROR':
+    case 'TIMED_OUT':
+    case 'CANCELLED':
+    case 'STARTUP_FAILURE':
+    case 'ACTION_REQUIRED':
+      return 'failure';
+    case 'PENDING':
+    case 'EXPECTED':
+    case 'IN_PROGRESS':
+    case 'QUEUED':
+    case 'WAITING':
+    case 'REQUESTED':
+      return 'pending';
+    default:
+      return 'neutral';
+  }
+}
+
+/**
+ * The checks that still count: the newest run of each check (item 170).
+ *
+ * A workflow that runs on more than one event (a migration gate that runs on
+ * `pull_request` and again on `pull_request_review`) leaves a run per event on
+ * the same commit. GitHub's own `statusCheckRollup.state` counts all of them,
+ * so a gate that failed before the approvals and passed after them still
+ * reads FAILURE, and the pull request sat in "Blocked on you" though nothing
+ * was left to do. GitHub's merge box, like a required check, goes by the
+ * newest run; so does this. Runs are told apart by workflow and job name, so
+ * two workflows that happen to name a job alike stay two checks. A commit
+ * status is already only its newest state per context.
+ */
+export function currentCheckContexts<T extends ApiCheckContext>(nodes: readonly (T | null | undefined)[]): T[] {
+  const newest = new Map<string, T>();
+  const order: string[] = [];
+  for (const node of nodes) {
+    if (!node) continue;
+    let key: string;
+    if (typeof node.name === 'string') {
+      key = `run\u0000${node.checkSuite?.workflowRun?.workflow?.name ?? ''}\u0000${node.name}`;
+    } else if (typeof node.context === 'string') {
+      key = `status\u0000${node.context}`;
+    } else {
+      continue;
+    }
+    const held = newest.get(key);
+    if (!held) {
+      order.push(key);
+      newest.set(key, node);
+    } else if (startOf(node) >= startOf(held)) {
+      newest.set(key, node);
+    }
+  }
+  return order.map((key) => newest.get(key)!);
+}
+
+/** When a run started; a queued run has no start yet and is the newest. */
+function startOf(node: ApiCheckContext): string {
+  if (typeof node.name !== 'string') return '';
+  return node.startedAt ?? node.completedAt ?? '\uffff';
+}
+
 /** `comments(last: 1) { totalCount nodes { author createdAt } }` */
 export interface ApiCommentPage {
   totalCount?: number;
   nodes?: ({ author?: { login?: string } | null; createdAt?: string } | null)[] | null;
 }
 
-/** `reviews(last: 1) { totalCount nodes { author submittedAt } }` */
+/** `reviews(last: 1) { totalCount nodes { author submittedAt state } }` */
 export interface ApiReviewPage {
   totalCount?: number;
-  nodes?: ({ author?: { login?: string } | null; submittedAt?: string } | null)[] | null;
+  nodes?: ({ author?: { login?: string } | null; submittedAt?: string; state?: ApiReviewState } | null)[] | null;
 }
 
 /**
@@ -379,18 +473,22 @@ export interface ApiReviewPage {
  * review). Undefined when the query didn't ask — only your own pull requests'
  * search does, because asking costs points (item 92).
  */
-function commentsOf(node: ApiPullNode): Pick<PullSummary, 'commentCount' | 'lastCommenter' | 'lastCommentAt'> {
+function commentsOf(node: ApiPullNode): Pick<PullSummary, 'commentCount' | 'lastCommenter' | 'lastCommentAt' | 'lastReviewState'> {
   if (!node.comments && !node.reviews) return {};
   const newestComment = node.comments?.nodes?.[node.comments.nodes.length - 1];
   const newestReview = node.reviews?.nodes?.[node.reviews.nodes.length - 1];
+  type Said = { author: string; at: string; review?: ApiReviewState };
   const candidates = [
     newestComment?.createdAt ? { author: newestComment.author?.login ?? '', at: newestComment.createdAt } : undefined,
-    newestReview?.submittedAt ? { author: newestReview.author?.login ?? '', at: newestReview.submittedAt } : undefined
-  ].filter((c): c is { author: string; at: string } => Boolean(c));
+    newestReview?.submittedAt
+      ? { author: newestReview.author?.login ?? '', at: newestReview.submittedAt, review: newestReview.state ?? 'COMMENTED' }
+      : undefined
+  ].filter((c): c is Said => Boolean(c));
   const last = candidates.sort((a, b) => a.at.localeCompare(b.at)).pop();
   return {
     commentCount: (node.comments?.totalCount ?? 0) + (node.reviews?.totalCount ?? 0),
-    ...(last ? { lastCommenter: last.author, lastCommentAt: last.at } : {})
+    ...(last ? { lastCommenter: last.author, lastCommentAt: last.at } : {}),
+    ...(last?.review ? { lastReviewState: last.review } : {})
   };
 }
 
@@ -421,13 +519,38 @@ export interface ApiPullNode {
   comments?: ApiCommentPage | null;
   reviews?: ApiReviewPage | null;
   commits?: {
-    nodes?: ({ commit?: { statusCheckRollup?: { state?: string } | null } } | null)[] | null;
+    nodes?: ({
+      commit?: {
+        statusCheckRollup?: {
+          state?: string;
+          contexts?: {
+            pageInfo?: { hasNextPage?: boolean } | null;
+            nodes?: (ApiCheckContext | null)[] | null;
+          } | null;
+        } | null;
+      };
+    } | null)[] | null;
   } | null;
+}
+
+type ApiRollup = NonNullable<NonNullable<NonNullable<NonNullable<ApiPullNode['commits']>['nodes']>[number]>['commit']>['statusCheckRollup'];
+
+/**
+ * The pull request's checks from the newest run of each (item 170). Falls back
+ * to GitHub's own state when the runs weren't asked for, or there were more
+ * than one page of them: judging from part of the list could call a failing
+ * pull request green.
+ */
+function checksOf(rollup: ApiRollup | undefined): CheckRollup {
+  const contexts = rollup?.contexts;
+  const nodes = contexts?.nodes;
+  if (!nodes || nodes.length === 0 || contexts?.pageInfo?.hasNextPage) return checksFromRollup(rollup?.state);
+  return rollUpChecks(currentCheckContexts(nodes).map(checkContextStatus));
 }
 
 export function summaryFromApi(node: ApiPullNode): PullSummary {
   const threads = node.reviewThreads?.nodes ?? [];
-  const rollup = node.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state;
+  const rollup = node.commits?.nodes?.[0]?.commit?.statusCheckRollup;
 
   return {
     number: node.number,
@@ -440,7 +563,7 @@ export function summaryFromApi(node: ApiPullNode): PullSummary {
     updatedAt: node.updatedAt,
     mergeable: mergeableFromApi(node.mergeable),
     reviewDecision: decisionFromNode(node),
-    checks: checksFromRollup(rollup),
+    checks: checksOf(rollup),
     unresolvedThreads: threads.filter((t) => t && t.isResolved === false).length,
     additions: node.additions ?? 0,
     deletions: node.deletions ?? 0,
@@ -498,26 +621,42 @@ function standingVerdicts(
  * is back in the reviewer's court, though, so a row that still says "Changes
  * requested" is reporting work that has already been done.
  *
- * Only that one relaxation is applied. Every other decision is GitHub's own,
- * because it is the only side that knows the branch's protection rules — how
- * many approvals are required, and whose count.
+ * An approval whose reviewer has been asked again is set aside the same way
+ * (item 175), unless another approval still stands.
+ *
+ * Otherwise GitHub's decision stands, because it is the only side that knows
+ * the branch's protection rules — how many approvals are required, and whose
+ * count. Except when it has none: a repository without a "require a review"
+ * rule always answers null (item 134), even with an approval in and reviewers
+ * asked. Then the reviews themselves decide, the way GitHub's own page reads
+ * them, so such a pull request says "Approved" or "Awaiting review" like one
+ * from a protected repository instead of a bare "Open".
  */
 function decisionFromNode(node: ApiPullNode): ReviewDecision {
   const decision = reviewDecisionFromApi(node.reviewDecision);
-  if (decision !== 'changes_requested') {
-    return decision;
-  }
   const verdicts = (node.latestOpinionatedReviews?.nodes ?? [])
     .filter((review): review is { state?: string; author?: { login?: string } | null } =>
       Boolean(review)
     )
     .map((review) => ({ author: review.author?.login ?? '', state: review.state ?? '' }));
+  if (decision === 'none' && node.reviewDecision == null) {
+    return decisionFromVerdicts(verdicts, pendingReviewersOf(node));
+  }
+  if (decision !== 'changes_requested' && decision !== 'approved') {
+    return decision;
+  }
   if (verdicts.length === 0) {
     // Either the query didn't ask for them or GitHub didn't say; with nothing
     // to reason from, its own decision stands.
     return decision;
   }
   const standing = standingVerdicts(verdicts, pendingReviewersOf(node));
+  if (decision === 'approved') {
+    // Same for an approval (item 175): GitHub keeps APPROVED when the approver
+    // is asked again, but asking again means the author wants a fresh look,
+    // so with no other approval standing the pull request awaits review.
+    return standing.includes('APPROVED') ? 'approved' : 'review_required';
+  }
   return standing.includes('CHANGES_REQUESTED') ? 'changes_requested' : 'review_required';
 }
 
@@ -541,10 +680,15 @@ export function reviewDecisionFrom(
       latestByUser.set(sameLogin(review.user?.login), review.state);
     }
   }
-  const standing = standingVerdicts(
-    [...latestByUser].map(([author, state]) => ({ author, state })),
-    pendingReviewers
-  );
+  return decisionFromVerdicts([...latestByUser].map(([author, state]) => ({ author, state })), pendingReviewers);
+}
+
+/** Each reviewer's latest verdict, plus who is still asked, as one decision. */
+function decisionFromVerdicts(
+  verdicts: readonly { author: string; state: string }[],
+  pendingReviewers: readonly string[]
+): ReviewDecision {
+  const standing = standingVerdicts(verdicts, pendingReviewers);
   if (standing.includes('CHANGES_REQUESTED')) {
     return 'changes_requested';
   }
@@ -557,7 +701,7 @@ export function reviewDecisionFrom(
   // Nothing stands: either someone has been asked and not answered yet, or
   // every verdict on record has been superseded by a fresh request. Both are
   // the pull request waiting on a reviewer.
-  return latestByUser.size > 0 || pendingReviewers.length > 0 ? 'review_required' : 'none';
+  return verdicts.length > 0 || pendingReviewers.length > 0 ? 'review_required' : 'none';
 }
 
 export interface CheckRunLike {

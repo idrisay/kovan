@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { keyLabel } from './platform';
 import { MinusIcon, PlusIcon } from './icons';
 
 /**
@@ -75,7 +76,7 @@ export function stepTerminalFont(step: number) {
 
 export function FontSizeControl({ size, onBump }: { size: number; onBump: (step: number) => void }) {
   return (
-    <div className="font-size-control" role="group" aria-label="Terminal font size" title="Terminal font size (⌘+ / ⌘−)">
+    <div className="font-size-control" role="group" aria-label="Terminal font size" title={`Terminal font size (${keyLabel('+')} / ${keyLabel('−')})`}>
       <button
         type="button" className="icon-button" aria-label="Smaller text"
         disabled={size <= MIN} onClick={() => onBump(-1)}

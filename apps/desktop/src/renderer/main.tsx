@@ -15,6 +15,9 @@ restoreReadingSize();
 installZoomRouting();
 installErrorReporting();
 
+// The title bar and shortcut labels differ on Linux; see platform.ts.
+document.documentElement.dataset['platform'] = window.kovan.platform;
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {/* The last resort: a pane's own boundary should catch first. */}

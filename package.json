@@ -1,6 +1,6 @@
 {
   "name": "kovan",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Tells you what is blocked on you, and hands it to a coding agent.",
   "workspaces": [
@@ -16,6 +16,7 @@
     "dev": "npm run dev --workspace @kovan/desktop",
     "build": "npm run build --workspace @kovan/desktop",
     "clean": "tsc --build --clean",
+    "demo": "npm run demo --workspace @kovan/desktop --",
     "smoke": "npm run smoke --workspace @kovan/desktop",
     "import": "node scripts/import-from-devhub.mjs",
     "release": "node scripts/package-release.mjs"

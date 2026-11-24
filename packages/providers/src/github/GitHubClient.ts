@@ -3,6 +3,7 @@ import {
   buildPullSearch,
   checkRunStatus,
   graphqlEndpoint,
+  pullMentionsTicket,
   reviewDecisionFrom,
   summaryFromApi,
   withinScope,
@@ -70,6 +71,19 @@ interface RawPull {
   updated_at: string;
 }
 
+/**
+ * The head commit's checks: GitHub's rolled-up state, and each run with its
+ * workflow and start, so the newest run of a check can outvote an older one
+ * (item 170, see currentCheckContexts).
+ */
+const CHECKS_FIELD = `  commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 50) {
+    pageInfo { hasNextPage }
+    nodes {
+      ... on CheckRun { name status conclusion startedAt completedAt checkSuite { workflowRun { workflow { name } } } }
+      ... on StatusContext { context state }
+    }
+  } } } } }`;
+
 const PULL_FIELDS = `
   number
   title
@@ -89,13 +103,14 @@ const PULL_FIELDS = `
   latestOpinionatedReviews(first: 20) { nodes { state author { login } } }
   reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
   reviewThreads(first: 100) { nodes { isResolved } }
-  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+${CHECKS_FIELD}
 `;
 
 /**
  * What Activity (item 86) needs to notice a new comment on your own pull
  * requests: the latest conversation comment and the latest review, with
- * their counts. A reply in a code review thread is posted as a review, so it
+ * their counts. The review's `state` tells an approval from a comment
+ * (item 130). A reply in a code review thread is posted as a review, so it
  * counts too.
  *
  * Deliberately not each review thread's latest comment: GitHub charges a
@@ -106,11 +121,43 @@ const PULL_FIELDS = `
  */
 const ACTIVITY_FIELDS = `
   comments(last: 1) { totalCount nodes { author { login } createdAt } }
-  reviews(last: 1) { totalCount nodes { author { login } submittedAt } }
+  reviews(last: 1) { totalCount nodes { author { login } submittedAt state } }
 `;
 
 /** A merged row shows neither review threads nor activity. */
-const MERGED_FIELDS = PULL_FIELDS.replace('  reviewThreads(first: 100) { nodes { isResolved } }\n', '');
+/** Nor checks: a merged pull request's flag is "Merged", whatever ran on it. */
+const MERGED_FIELDS = PULL_FIELDS
+  .replace('  reviewThreads(first: 100) { nodes { isResolved } }\n', '')
+  .replace(CHECKS_FIELD, '  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }');
+
+/** One ticket's pull requests (item 171). */
+export interface TicketPull {
+  pull: PullSummary;
+  /** Your latest review on it, as GitHub names it: APPROVED, CHANGES_REQUESTED, COMMENTED. */
+  yourReview?: string;
+  /** Commits pushed after your latest review. */
+  changedSinceYourReview: boolean;
+}
+
+type TicketPullNode = ApiPullNode & {
+  closed?: boolean;
+  headRefOid?: string;
+  viewerLatestReview?: { state?: string; commit?: { oid?: string } | null } | null;
+};
+
+const TICKET_PULLS_QUERY = `
+query KovanTicketPulls($q: String!) {
+  search(query: $q, type: ISSUE, first: 20) {
+    nodes {
+      ... on PullRequest {
+${MERGED_FIELDS}
+        closed
+        headRefOid
+        viewerLatestReview { state commit { oid } }
+      }
+    }
+  }
+}`;
 
 const QUEUES_QUERY = `
 query KovanPullQueues($mine: String!, $review: String!, $merged: String!,
@@ -145,8 +192,61 @@ query KovanMerged($merged: String!, $first: Int!) {
   }
 }`;
 
+const ONE_PULL_QUERY = `
+query KovanOnePull($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) { ${PULL_FIELDS} }
+  }
+}`;
+
+/**
+ * One pull request as the lists show it, by number: for a notification about
+ * one that is in none of them any more (merged and aged out of the merged
+ * list) — item 144. The same fields and mapping as the queues, so it opens in
+ * the same pane.
+ */
+export async function fetchPullSummary(
+  http: HttpClient, baseUrl: string, token: string, repo: string, number: number, signal?: CancelSignal
+): Promise<PullSummary> {
+  const [owner, name] = repo.split('/');
+  if (!owner || !name || !Number.isInteger(number)) throw new Error(`Not a pull request: ${repo}#${number}`);
+  const response = await http.json<{ data?: { repository?: { pullRequest?: ApiPullNode | null } | null }; errors?: { message: string }[] }>(
+    graphqlEndpoint(baseUrl),
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+      body: { query: ONE_PULL_QUERY, variables: { owner, name, number } },
+      signal
+    }
+  );
+  if (response.errors?.length) throw new Error(response.errors.map((e) => e.message).join('; '));
+  const node = response.data?.repository?.pullRequest;
+  if (!node?.number) throw new Error(`GitHub has no pull request ${repo}#${number}, or your token can't see it.`);
+  return summaryFromApi(node);
+}
+
 /** `sort:` is part of the query because GitHub search has no order argument. */
-const MERGED_SEARCH = 'is:pr is:merged author:@me sort:updated-desc';
+const mergedSearchFor = (who: string) => `is:pr is:merged author:${who} sort:updated-desc`;
+
+/**
+ * Who has pull requests where you work, for the person picker (item 164):
+ * the open ones, to count, and the latest of all, so someone with nothing
+ * open is still listed. Only the author, so it costs a point or two.
+ */
+const TEAMMATES_QUERY = `
+query KovanTeammates($open: String!, $recent: String!) {
+  open: search(query: $open, type: ISSUE, first: 100) {
+    nodes { ... on PullRequest { repository { nameWithOwner } author { __typename login ... on User { name } } } }
+  }
+  recent: search(query: $recent, type: ISSUE, first: 100) {
+    nodes { ... on PullRequest { repository { nameWithOwner } author { __typename login ... on User { name } } } }
+  }
+}`;
+
+interface TeammateNode {
+  repository?: { nameWithOwner?: string } | null;
+  author?: { __typename?: string; login?: string; name?: string | null } | null;
+}
 
 /** What the merged list holds before anybody asks for more. */
 export const MERGED_PAGE = 10;
@@ -161,6 +261,8 @@ interface GraphResponse {
     viewer?: { login?: string };
     rateLimit?: { cost?: number; remaining?: number; limit?: number; resetAt?: string } | null;
     mine?: { nodes?: (ApiPullNode | null)[] | null };
+    open?: { nodes?: (TeammateNode | null)[] | null };
+    recent?: { nodes?: (TeammateNode | null)[] | null };
     review?: { nodes?: (ApiPullNode | null)[] | null };
     merged?: MergedSearch | null;
   };
@@ -281,11 +383,13 @@ export class GitHubClient {
     repos: readonly RepoRef[] | undefined,
     limit: number,
     signal?: CancelSignal,
-    merged: number = MERGED_PAGE
+    merged: number = MERGED_PAGE,
+    /** Whose queues: `@me`, or a teammate's login (item 164). */
+    who = '@me'
   ): Promise<PullQueues> {
-    const mineSearch = buildPullSearch('is:pr is:open author:@me', repos);
-    const reviewSearch = buildPullSearch('is:pr is:open review-requested:@me', repos);
-    const mergedSearch = buildPullSearch(MERGED_SEARCH, repos);
+    const mineSearch = buildPullSearch(`is:pr is:open author:${who}`, repos);
+    const reviewSearch = buildPullSearch(`is:pr is:open review-requested:${who}`, repos);
+    const mergedSearch = buildPullSearch(mergedSearchFor(who), repos);
 
     const response = await this.http.json<GraphResponse>(graphqlEndpoint(this.baseUrl), {
       method: 'POST',
@@ -343,9 +447,10 @@ export class GitHubClient {
   async mergedPulls(
     repos: readonly RepoRef[] | undefined,
     limit: number,
-    signal?: CancelSignal
+    signal?: CancelSignal,
+    who = '@me'
   ): Promise<{ pulls: PullSummary[]; total: number }> {
-    const search = buildPullSearch(MERGED_SEARCH, repos);
+    const search = buildPullSearch(mergedSearchFor(who), repos);
     const response = await this.http.json<GraphResponse>(graphqlEndpoint(this.baseUrl), {
       method: 'POST',
       headers: {
@@ -368,6 +473,87 @@ export class GitHubClient {
       pulls: withinScope(nodes, search.allow),
       total: response.data?.merged?.issueCount ?? 0
     };
+  }
+
+  /**
+   * Everyone with a pull request in these repositories, or under these
+   * owners when there are too many repositories to name in one search.
+   * Bots are left out: they have no queue worth opening.
+   */
+  async teammates(
+    repos: readonly RepoRef[] | undefined,
+    owners: readonly string[],
+    signal?: CancelSignal
+  ): Promise<{ login: string; name: string; open: boolean }[]> {
+    const scope = (base: string): { query: string; allow: Set<string> | undefined } => {
+      if (repos?.length) {
+        const search = buildPullSearch(base, repos);
+        if (!search.filteredClientSide) return search;
+        return { query: [base, ...new Set(repos.map((r) => `user:${r.owner}`))].join(' '), allow: search.allow };
+      }
+      return { query: [base, ...owners.map((o) => `user:${o}`)].join(' '), allow: undefined };
+    };
+    if (!repos?.length && owners.length === 0) return [];
+    const open = scope('is:pr is:open');
+    const recent = scope('is:pr sort:updated-desc');
+    const response = await this.http.json<GraphResponse>(graphqlEndpoint(this.baseUrl), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/vnd.github+json' },
+      body: { query: TEAMMATES_QUERY, variables: { open: open.query, recent: recent.query } },
+      signal
+    });
+    if (response.errors?.length) {
+      throw new Error(response.errors.map((e) => e.message).join('; '));
+    }
+    const read = (nodes: (TeammateNode | null)[] | null | undefined, allow: Set<string> | undefined, isOpen: boolean) =>
+      (nodes ?? [])
+        .filter((n): n is TeammateNode => n?.author?.__typename === 'User' && Boolean(n.author.login))
+        .filter((n) => !allow || allow.has((n.repository?.nameWithOwner ?? '').toLowerCase()))
+        .map((n) => ({ login: n.author!.login!, name: n.author!.name ?? '', open: isOpen }));
+    return [
+      ...read(response.data?.open?.nodes, open.allow, true),
+      // Seen, not counted: open ones are already counted above.
+      ...read(response.data?.recent?.nodes, recent.allow, false)
+    ];
+  }
+
+  /**
+   * Every pull request carrying a ticket's key in its title, under these
+   * owners (item 171): what "Review together" offers beside the one you
+   * opened. By owner rather than by your listed repositories, so a ticket's
+   * PR in a repository you never cloned (acme-console) still shows. Open and
+   * merged ones; a PR closed without merging is dropped. Says, for each, how
+   * you last reviewed it and whether it has commits since.
+   */
+  async ticketPulls(key: string, owners: readonly string[], signal?: CancelSignal): Promise<TicketPull[]> {
+    if (!/^[A-Za-z][A-Za-z0-9]*-\d+$/.test(key)) return [];
+    const query = [`is:pr "${key}" in:title`, ...owners.map((o) => `user:${o}`), 'sort:updated-desc'].join(' ');
+    const response = await this.http.json<{
+      data?: { search?: { nodes?: (TicketPullNode | null)[] | null } };
+      errors?: { message: string }[];
+    }>(graphqlEndpoint(this.baseUrl), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/vnd.github+json' },
+      body: { query: TICKET_PULLS_QUERY, variables: { q: query } },
+      signal
+    });
+    if (response.errors?.length) {
+      throw new Error(response.errors.map((e) => e.message).join('; '));
+    }
+    return (response.data?.search?.nodes ?? [])
+      .filter((n): n is TicketPullNode => Boolean(n?.number))
+      .filter((n) => !n.closed || Boolean(n.mergedAt))
+      .map((n) => {
+        const pull = summaryFromApi(n);
+        const review = n.viewerLatestReview;
+        return {
+          pull,
+          ...(review?.state ? { yourReview: review.state } : {}),
+          changedSinceYourReview: Boolean(review?.commit?.oid && n.headRefOid && review.commit.oid !== n.headRefOid)
+        };
+      })
+      // GitHub matches words, so ACME-24 can find ACME-240: the key must be whole.
+      .filter((t) => pullMentionsTicket(t.pull, key));
   }
 
   async verify(signal?: CancelSignal): Promise<string> {

@@ -82,6 +82,19 @@ export class JiraClient {
     return this.withInlineAttachments(this.normalise(raw), raw, signal);
   }
 
+  /**
+   * Just an issue's status, for the ticket chip in a pull request's header
+   * (item 142) when the ticket isn't one of the loaded ones: one small
+   * request, none of `getIssue()`'s image fetches.
+   */
+  async getIssueStatus(key: string, signal?: CancelSignal): Promise<{ status: string; statusCategory: string }> {
+    const raw = await this.http.json<RawIssue>(this.api(`/issue/${encodeURIComponent(key)}?fields=status`), {
+      headers: this.headers,
+      signal
+    });
+    return { status: raw.fields.status?.name ?? '', statusCategory: raw.fields.status?.statusCategory?.key ?? 'undefined' };
+  }
+
   async search(jql: string, limit = 30, signal?: CancelSignal): Promise<JiraIssue[]> {
     const response = await this.http.json<{ issues: RawIssue[] }>(this.api('/search/jql'), {
       method: 'POST',
@@ -90,6 +103,31 @@ export class JiraClient {
       signal
     });
     return (response.issues ?? []).map((raw) => this.normalise(raw));
+  }
+
+  /**
+   * Who these tickets are assigned to, one entry per ticket, for the person
+   * picker (item 164). Only the assignee and status come back, so a hundred
+   * tickets stay one small request.
+   */
+  async assignees(
+    jql: string, limit = 100, signal?: CancelSignal
+  ): Promise<{ accountId: string; name: string; open: boolean }[]> {
+    const response = await this.http.json<{
+      issues?: { fields?: { assignee?: { accountId?: string; displayName?: string } | null; status?: { statusCategory?: { key?: string } } } }[];
+    }>(this.api('/search/jql'), {
+      method: 'POST',
+      headers: this.headers,
+      body: { jql, maxResults: limit, fields: ['assignee', 'status'] },
+      signal
+    });
+    return (response.issues ?? [])
+      .filter((issue) => issue.fields?.assignee?.accountId)
+      .map((issue) => ({
+        accountId: issue.fields!.assignee!.accountId!,
+        name: issue.fields!.assignee!.displayName ?? '',
+        open: issue.fields?.status?.statusCategory?.key !== 'done'
+      }));
   }
 
   /**

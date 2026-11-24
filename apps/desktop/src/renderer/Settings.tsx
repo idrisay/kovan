@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import { isMac, keyLabel } from './platform';
 import { ACTIVITY_SETTINGS, ActivitySettings } from './Activity';
 import { DictationSettings } from './Dictation';
 import {
-  DEFAULT_IDLE_MINUTES, DEFAULT_PRICES, NV_REVIEW_DEFAULT_MODEL, PRICE_CHECK_RUNNERS, QUICK_DEFAULT_MODEL,
-  QUICK_DEFAULT_TIMEOUT_SECONDS, applyPriceProposals,
+  DEFAULT_IDLE_MINUTES, DEFAULT_PRICES, PRICE_CHECK_RUNNERS, QUICK_DEFAULT_MODEL,
+  PROMPT_TEMPLATES, QUICK_DEFAULT_TIMEOUT_SECONDS, applyPriceProposals,
   type Price, type PriceCheckRunner, type PriceProposal, type PriceRule, type ProviderId
 } from '@kovan/core';
 import { savePrices, useUsage } from './Usage';
@@ -12,8 +13,14 @@ import { FontSizeControl, useTerminalFontSize } from './terminalFontSize';
 import { TestEnvironmentSettings } from './TestEnvironments';
 import { ChromeSizeControl, ReadingSizeControl, SidebarSizeControl, useChromeSize, useReadingSize, useSidebarSize } from './readingSize';
 import { useAppearance } from './appearance';
+import { QUICK_BUTTONS, setQuickButton, useQuickButtons } from './quickButtons';
+import { setShell, useShellChoice } from './shellChoice';
 import { ACCENTS, THEMES, speechProvider } from '@kovan/core';
 import { ChevronIcon, CloseIcon, SearchIcon } from './icons';
+import { ReviewersSettings } from './Reviewers';
+import { MixpanelHelp, MixpanelRailSetting } from './Mixpanel';
+import { KovanCommandSetting } from './KovanCommand';
+import { PromptSettings } from './PromptSettings';
 
 interface Field {
   key: string;
@@ -27,7 +34,8 @@ const PROVIDER_LABEL: Record<string, string> = {
   jira: 'Jira',
   sentry: 'Sentry',
   grafana: 'Grafana',
-  figma: 'Figma'
+  figma: 'Figma',
+  mixpanel: 'Mixpanel'
 };
 
 /**
@@ -71,13 +79,53 @@ const EXTRA_FIELDS: Partial<Record<string, Field[]>> = {
  * prompts already know how to use.
  */
 /**
+ * Which quick-model buttons the pull request and ticket headers show (item
+ * 124). Summarize and Review start off; ticking one shows it at once, behind
+ * this sheet, and unticking hides its button and card but keeps its setup.
+ */
+/** The shell new terminals open in (item 126) — the same choice as the switch in Sessions' + menu. */
+function ShellSetting() {
+  const { shells, chosen } = useShellChoice();
+  if (shells.length < 2 || !chosen) return null;
+  const login = shells.find((s) => s.login);
+  return (
+    <>
+      <label>
+        <span>Shell for new terminals</span>
+        <select value={chosen.path} onChange={(e) => setShell(e.target.value)}>
+          {shells.map((s) => <option key={s.path} value={s.path}>{s.login ? `${s.name} (login shell)` : s.name} · {s.path}</option>)}
+        </select>
+      </label>
+      <p className="settings-note">Also switchable in the + menu in Sessions. Agents always start in your login shell{login ? ` (${login.name})` : ''}.</p>
+    </>
+  );
+}
+
+function QuickButtonSettings() {
+  const shown = useQuickButtons();
+  return (
+    <>
+      <h3>Buttons on pull requests and tickets</h3>
+      {QUICK_BUTTONS.map((button) => (
+        <Fragment key={button.id}>
+          <label className="checkbox-row">
+            <input type="checkbox" checked={shown[button.id]} onChange={(e) => setQuickButton(button.id, e.target.checked)} />
+            <span>{button.label}</span>
+          </label>
+          <p className="settings-note">{button.note}</p>
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+/**
  * The model behind "Summarize" and "Condense". Saved on blur, like a native
  * preferences pane, since there is no provider to re-check on Save.
  */
 function QuickModelSettings() {
   const [model, setModel] = useState('');
   const [timeout, setTimeoutSeconds] = useState(String(QUICK_DEFAULT_TIMEOUT_SECONDS));
-  const [nvModel, setNvModel] = useState('');
   const [test, setTest] = useState<{ running?: boolean; ok?: boolean; text?: string }>({});
 
   useEffect(() => {
@@ -85,7 +133,6 @@ function QuickModelSettings() {
       setModel(typeof settings['quick.model'] === 'string' ? settings['quick.model'] : '');
       const seconds = settings['quick.timeoutSeconds'];
       if (typeof seconds === 'number') setTimeoutSeconds(String(seconds));
-      setNvModel(typeof settings['review.nvModel'] === 'string' ? settings['review.nvModel'] : '');
     });
   }, []);
 
@@ -107,10 +154,8 @@ function QuickModelSettings() {
         returns text, with every tool call refused. Agent runs never use it.
       </p>
       <p className="settings-note">
-        "Review with nv-review" on a pull request is separate: it sends the diff through your
-        <code> nv-review </code> shell function (NVIDIA's free API, key in ~/.config/nvidia/key), gives up after
-        20 minutes, and saves the review as kimi-k3-review.md in the PR's History. The review recommends approve or
-        request changes; nothing reaches GitHub until you pick one and confirm.
+        Review on a pull request can use this too, or one of the reviewers below. Whichever writes it, the review
+        recommends approve or request changes, and nothing reaches GitHub until you pick one and confirm.
       </p>
       <label>
         <span>Model (opencode)</span>
@@ -136,20 +181,6 @@ function QuickModelSettings() {
           }}
         />
       </label>
-      <label>
-        <span>nv-review model (NVIDIA)</span>
-        <input
-          type="text"
-          placeholder={NV_REVIEW_DEFAULT_MODEL}
-          value={nvModel}
-          onChange={(e) => setNvModel(e.target.value)}
-          onBlur={() => void window.kovan.setSetting('review.nvModel', nvModel.trim())}
-        />
-      </label>
-      <p className="settings-note">
-        Passed to nv-review as <code>NV_MODEL</code>. Try <code>nvidia/nemotron-3-super-120b-a12b</code> while Kimi K3 is
-        overloaded.
-      </p>
       <div className="quick-test-row">
         <button type="button" className="ghost" disabled={test.running} onClick={() => void runTest()}>
           {test.running ? 'Testing…' : 'Test'}
@@ -447,7 +478,7 @@ function PriceCheckPanel({ rules, fields }: { rules: PriceRule[]; fields: { key:
   );
 }
 
-type SectionId = 'appearance' | 'text' | 'notifications' | 'dictation' | 'agents' | 'connections' | 'environments';
+type SectionId = 'appearance' | 'text' | 'notifications' | 'dictation' | 'agents' | 'prompts' | 'connections' | 'environments';
 
 /**
  * Settings as one list (item 99, option B): each section is a single row that
@@ -456,16 +487,19 @@ type SectionId = 'appearance' | 'text' | 'notifications' | 'dictation' | 'agents
  * mounts when it opens, so nothing a section loads (models, prices, speech
  * setup) runs just because Settings was opened.
  */
-const SECTIONS: { id: SectionId; title: string; icon: string; ownHeading?: boolean }[] = [
+type Section = { id: SectionId; title: string; icon: string; ownHeading?: boolean };
+const SECTIONS: Section[] = ([
   { id: 'appearance', title: 'Appearance', icon: '◐' },
   { id: 'text', title: 'Text & terminal', icon: 'Aa' },
   { id: 'notifications', title: 'Notifications', icon: '◔' },
   // These two bodies open with their own heading, which the row already says.
   { id: 'dictation', title: 'Dictation', icon: '◉', ownHeading: true },
   { id: 'agents', title: 'Agents', icon: '▸' },
+  { id: 'prompts', title: 'Prompts', icon: '¶' },
   { id: 'connections', title: 'Connections', icon: '⎇' },
   { id: 'environments', title: 'Environments', icon: '⌂', ownHeading: true }
-];
+  // Dictation listens through a Swift helper and Apple's recogniser: macOS only.
+] as Section[]).filter((s) => isMac || s.id !== 'dictation');
 
 /** The names search looks through — each setting's label as it appears in
  *  the section, plus words people use for it. */
@@ -473,22 +507,28 @@ const SEARCH_INDEX: Record<SectionId, string[]> = {
   appearance: ['Theme', 'Dark', 'Light', 'OLED Black', 'Cool Graphite', 'Ember Low Light', 'High Contrast', 'Paper Soft',
     'Match macOS', 'Schedule', 'Accent', 'Colour-safe status colours', 'Show a shape with every status', 'List density',
     'Compact', 'Terminal colours', 'Boosted', 'Color', 'Night'],
-  text: ['Terminal font size', 'Ticket and pull request text size', 'Sidebar text size',
+  text: ['The kovan command', 'kovan command', 'Install', 'PATH', 'code command', 'Open from terminal', 'Shell for new terminals', 'Default shell', 'zsh', 'bash', 'Terminal font size', 'Ticket and pull request text size', 'Sidebar text size',
     'Tabs, session header and status bar text size', 'Status bar', 'Tabs', 'Font', 'Zoom'],
-  notifications: ['macOS notifications', 'Launch Kovan at login', 'Activity', ...ACTIVITY_SETTINGS.map((a) => a.label)],
+  notifications: ['macOS notifications', 'Agent waiting for you', 'Agent finished', 'Launch Kovan at login', 'Activity', ...ACTIVITY_SETTINGS.map((a) => a.label)],
   dictation: ['Dictate with double-tap ⌘', 'Speech model', 'Apple Speech', 'whisper.cpp', 'OpenAI Whisper', 'Groq Whisper',
     'Deepgram', 'AssemblyAI', 'API key', 'Model file', 'Language', 'Microphone', 'Voice'],
-  agents: ['Quick model', 'Model (opencode)', 'Give up after (seconds)', 'Running agents', 'Idle after (minutes)',
+  agents: ['Buttons on pull requests and tickets', 'Summarize', 'Review', 'Condense earlier comments', 'Quick model', 'Model (opencode)', 'Give up after (seconds)', 'Running agents', 'Idle after (minutes)',
     'Remind me when an agent goes idle', 'Token prices', 'Usage', 'Cost', 'Review model'],
-  connections: ['Token', 'API key'],
+  prompts: ['Prompts', 'Prompt templates', ...PROMPT_TEMPLATES.map((t) => t.title), 'Work on in an agent', 'Base branch',
+    'Pull request reviewers', 'Checks that must pass', 'Files agents must not edit', 'Placeholders', 'Pull request title',
+    'Pull request body', 'Test plan', 'Reset to built-in'],
+  connections: ['Token', 'API key', 'Mixpanel', 'Show Mixpanel in the rail', 'Service account', 'Analytics'],
   environments: ['Environments', 'Test accounts', 'Site URL', 'Basic auth', 'Check it shipped', 'Password']
 };
 
 export function Settings({
   onClose,
-  connected
+  connected,
+  section
 }: {
   onClose: () => void;
+  /** A section to open with, e.g. 'agents' from the Review picker's "Add a reviewer…". */
+  section?: string;
   connected: ProviderId[];
 }) {
   const [fields, setFields] = useState<Record<string, Field[]>>({});
@@ -497,17 +537,21 @@ export function Settings({
   const [notify, setNotify] = useState(true);
   const [saving, setSaving] = useState('');
   /** Which section is open; one at a time, none at first. */
-  const [open, setOpen] = useState<SectionId>();
+  // A section may come as 'connections:Mixpanel': open Connections and bring
+  // the Mixpanel card into view (item 177's "Open Settings › Mixpanel").
+  const [open, setOpen] = useState<SectionId | undefined>(section?.split(':')[0] as SectionId | undefined);
   const [query, setQuery] = useState('');
   /** Every setting as saved, for the one-line summaries. Re-read when a
    *  section closes, so a summary shows what was just changed. */
   const [raw, setRaw] = useState<Record<string, unknown>>({});
   const appearance = useAppearance();
+  const buttons = useQuickButtons();
   const [reading] = useReadingSize();
   const [sidebar] = useSidebarSize();
   const [chrome] = useChromeSize();
   const [saveResult, setSaveResult] = useState<Record<string, { ok: boolean; text: string }>>({});
   const [fontSize, bumpFontSize] = useTerminalFontSize();
+  const shellChoice = useShellChoice();
 
   useEffect(() => {
     void window.kovan.credentialFields().then(setFields);
@@ -602,9 +646,10 @@ export function Settings({
       appearance.statusShapes ? 'shapes on' : 'shapes off',
       appearance.density === 'compact' ? 'compact' : ''
     ].filter(Boolean).join(' · '),
-    text: `Terminal ${fontSize} · Reading ${reading}% · Sidebar ${sidebar}% · Tabs and status bar ${chrome}%`,
+    text: `${shellChoice.chosen && shellChoice.shells.length > 1 ? `${shellChoice.chosen.name} · ` : ''}Terminal ${fontSize} · Reading ${reading}% · Sidebar ${sidebar}% · Tabs and status bar ${chrome}%`,
     notifications: [
       notify ? 'macOS notifications on' : 'macOS notifications off',
+      notify && on('notify.agents') ? 'agents' : '',
       `${ACTIVITY_SETTINGS.filter((a) => on(a.setting)).length} of ${ACTIVITY_SETTINGS.length} activity kinds`,
       launchAtLogin ? 'launch at login' : ''
     ].filter(Boolean).join(' · '),
@@ -616,10 +661,23 @@ export function Settings({
         ].join(' · ')
       : 'Off',
     agents: [
-      `Quick model ${typeof raw['quick.model'] === 'string' && raw['quick.model'] ? raw['quick.model'] : 'default'}`,
+      QUICK_BUTTONS.filter((b) => buttons[b.id]).map((b) => b.label.split(' ')[0]).join(', ') || 'No quick buttons',
+      buttons.summarize || buttons.review || buttons.condense
+        ? `Quick model ${typeof raw['quick.model'] === 'string' && raw['quick.model'] ? raw['quick.model'] : 'default'}`
+        : '',
       `idle after ${Number(raw['agents.idleMinutes']) || DEFAULT_IDLE_MINUTES} min`,
       on('agents.remind') ? 'reminders on' : 'reminders off'
-    ].join(' · '),
+    ].filter(Boolean).join(' · '),
+    prompts: (() => {
+      const edited = PROMPT_TEMPLATES.filter((t) => typeof raw[t.settingKey] === 'string' && (raw[t.settingKey] as string).trim()).length;
+      const shared = raw['prompt.conventions'] as { baseBranch?: string; pullRequestReviewers?: string[] } | undefined;
+      const reviewers = shared?.pullRequestReviewers?.length ?? 0;
+      return [
+        edited ? `${edited} of ${PROMPT_TEMPLATES.length} customised` : 'All built-in',
+        `base ${shared?.baseBranch || 'main'}`,
+        reviewers ? `${reviewers} pull request reviewer${reviewers === 1 ? '' : 's'}` : ''
+      ].filter(Boolean).join(' · ');
+    })(),
     connections: providers.length === 0 ? '' : [
       ...providers.filter((id) => connected.includes(id as ProviderId)).map((id) => `✓ ${label(id)}`),
       (() => {
@@ -667,6 +725,14 @@ export function Settings({
     }
   };
 
+  // Opened at 'connections:Mixpanel': scroll to that card once it's drawn.
+  useEffect(() => {
+    const [id, find] = section?.split(':') ?? [];
+    // 'prompts:review' names the prompt to open, not text to find.
+    if (id && find && id !== 'prompts') toggleOpen(id as SectionId, find);
+    // Only on open: later changes to `section` come with a new sheet.
+  }, []);
+
   const sectionBody = (id: SectionId) => {
     switch (id) {
       case 'appearance':
@@ -674,6 +740,7 @@ export function Settings({
       case 'text':
         return (
           <>
+            <ShellSetting />
             <label>
               <span>Terminal font size</span>
               <FontSizeControl size={fontSize} onBump={bumpFontSize} />
@@ -690,7 +757,8 @@ export function Settings({
               <span>Tabs, session header and status bar text size</span>
               <ChromeSizeControl />
             </label>
-            <p className="settings-note">⌘+ and ⌘− resize whichever of these you last clicked in: the sidebar, the ticket or pull request, a terminal, or its tabs, header and the status bar. Terminal colours are under Appearance.</p>
+            <p className="settings-note">{keyLabel('+')} and {keyLabel('−')} resize whichever of these you last clicked in: the sidebar, the ticket or pull request, a terminal, or its tabs, header and the status bar. Terminal colours are under Appearance.</p>
+            <KovanCommandSetting />
           </>
         );
       case 'notifications':
@@ -699,6 +767,15 @@ export function Settings({
             <label className="checkbox-row">
               <input type="checkbox" checked={notify} onChange={(e) => void toggle('notify.enabled', e.target.checked, setNotify)} />
               <span>macOS notifications: blocked pull requests, and Activity while Kovan isn't in front</span>
+            </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={on('notify.agents')}
+                disabled={!notify}
+                onChange={(e) => void toggle('notify.agents', e.target.checked, (v) => setRaw((r) => ({ ...r, 'notify.agents': v })))}
+              />
+              <span>When an agent Kovan started is waiting for you or has finished, while Kovan isn't in front</span>
             </label>
             <label className="checkbox-row">
               <input type="checkbox" checked={launchAtLogin} onChange={(e) => void toggle('launchAtLogin', e.target.checked, setLaunchAtLogin)} />
@@ -712,11 +789,16 @@ export function Settings({
       case 'agents':
         return (
           <>
-            <QuickModelSettings />
+            <QuickButtonSettings />
+            {/* Its setup only matters while one of them is on. */}
+            {(buttons.summarize || buttons.review || buttons.condense) && <QuickModelSettings />}
+            {buttons.review && <ReviewersSettings />}
             <RunningAgentSettings />
             <TokenPriceSettings />
           </>
         );
+      case 'prompts':
+        return <PromptSettings initial={section?.startsWith('prompts:') ? section.slice('prompts:'.length) : undefined} />;
       case 'connections':
         return providers.map((provider) => (
           <div key={provider} className="settings-connection">
@@ -724,8 +806,10 @@ export function Settings({
               {label(provider)}
               {connected.includes(provider as ProviderId) && <span className="badge">connected</span>}
             </h3>
+            {provider === 'mixpanel' && <MixpanelHelp />}
             {(fields[provider] ?? []).map(field)}
             {(EXTRA_FIELDS[provider] ?? []).map(field)}
+            {provider === 'mixpanel' && <MixpanelRailSetting connected={connected.includes('mixpanel')} />}
             <button
               className="primary"
               disabled={saving === provider}

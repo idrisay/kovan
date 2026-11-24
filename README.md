@@ -46,6 +46,21 @@ npm run --workspace @kovan/desktop dev
 `--dry-run` to see what it would do. Expect a Keychain dialog per provider —
 that is macOS deciding whether this process may read the secret.
 
+## Demo mode
+
+```sh
+npm run --workspace @kovan/desktop demo             # build into release-demo/, then launch
+npm run --workspace @kovan/desktop demo -- --no-build
+npm run --workspace @kovan/desktop demo -- --fresh  # reset the demo profile and repos
+```
+
+Kovan with fixture data (`acme/*` pull requests, `ACME-*` tickets) for
+recording videos and screenshots. It uses its own profile
+(`~/Library/Application Support/Kovan Demo`) and throwaway repos in
+`~/kovan-demo`, never your tokens or queues. Press Refresh once and #118's
+checks fail, which fires the real "Blocked on you" notification.
+`KOVAN_SHOT=<file.png>` writes the window before and after that Refresh.
+
 ## Layout
 
 ```
@@ -257,6 +272,14 @@ README has the install steps.
 Only one Kovan runs at a time — a single-instance lock means a `dev` build
 exits immediately while the installed one is running. Quit it from the menu bar
 first.
+
+### Linux
+
+`scripts/linux/run.sh pack` builds the AppImage and .deb in Docker (Debian
+bookworm) into `apps/desktop/release-linux/`; `KOVAN_ARCH=x64` builds for
+x64, emulated on an Apple silicon Mac. `scripts/linux/run.sh smoke seeded
+KOVAN_SMOKE_LINUX` runs the app under Xvfb. The arm64 AppImage's launcher
+needs `libz.so` (zlib's development package), so arm64 ships as .deb.
 
 ### Open at login
 

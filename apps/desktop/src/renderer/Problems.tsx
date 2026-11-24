@@ -132,7 +132,7 @@ export function ProblemToast({ started, onDetails }: { started: Problem[]; onDet
       <strong>{shown.title}</strong>
       <span>{shown.detail}. Kovan tries again at the next refresh; what's on screen is from the last one that worked.</span>
       <span className="problem-toast-actions">
-        <button type="button" className="link" onClick={() => { setShown(undefined); onDetails(); }}>Details</button>
+        <button type="button" className="link" onClick={(e) => { e.stopPropagation(); setShown(undefined); onDetails(); }}>Details</button>
         <button type="button" className="link" onClick={() => setShown(undefined)}>Dismiss</button>
       </span>
     </div>,

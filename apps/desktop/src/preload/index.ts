@@ -13,10 +13,15 @@ const api = {
   snapshot: () => ipcRenderer.invoke('kovan:snapshot'),
   refresh: () => ipcRenderer.invoke('kovan:refresh'),
   refreshProvider: (id: string) => ipcRenderer.invoke('kovan:refresh-provider', id),
+  /** 'darwin' or 'linux': shortcuts, labels and the title bar follow it. */
+  platform: process.platform,
   openExternal: (url: string) => ipcRenderer.invoke('kovan:open-external', url),
   credentialFields: () => ipcRenderer.invoke('kovan:credential-fields'),
   missingFields: (id: string) => ipcRenderer.invoke('kovan:missing-fields', id),
   loadMoreMerged: (limit: number) => ipcRenderer.invoke('kovan:merged-more', limit),
+  teammates: (service: 'github' | 'jira') => ipcRenderer.invoke('kovan:teammates', service),
+  personPulls: (login: string, merged: number) => ipcRenderer.invoke('kovan:person-pulls', login, merged),
+  personTickets: (accountId: string) => ipcRenderer.invoke('kovan:person-tickets', accountId),
   settings: () => ipcRenderer.invoke('kovan:settings'),
   setSetting: (key: string, value: unknown) => ipcRenderer.invoke('kovan:set-setting', key, value),
   /** Native chrome's side of the painted theme — see `renderer/appearance.tsx`. */
@@ -37,6 +42,8 @@ const api = {
   requestReviewers: (repo: string, number: number, people: string[], teams: string[]) =>
     ipcRenderer.invoke('kovan:reviewers-request', repo, number, people, teams),
   ticketDetail: (key: string) => ipcRenderer.invoke('kovan:ticket-detail', key),
+  pullSummary: (repo: string, number: number) => ipcRenderer.invoke('kovan:pull-summary', repo, number),
+  ticketStatus: (key: string) => ipcRenderer.invoke('kovan:ticket-status', key),
 
   // Quick model
   quickState: (kind: string, subject: string) => ipcRenderer.invoke('kovan:quick-state', kind, subject),
@@ -49,6 +56,26 @@ const api = {
   quickModel: (kind: string) => ipcRenderer.invoke('kovan:quick-model', kind),
   quickModelSet: (kind: string, model: string) => ipcRenderer.invoke('kovan:quick-model-set', kind, model),
   quickModelsAvailable: () => ipcRenderer.invoke('kovan:quick-models-available'),
+  cliStatus: () => ipcRenderer.invoke('kovan:cli-status'),
+  cliInstall: () => ipcRenderer.invoke('kovan:cli-install'),
+  cliRemove: () => ipcRenderer.invoke('kovan:cli-remove'),
+  mixpanelStatus: () => ipcRenderer.invoke('kovan:mixpanel-status'),
+  mixpanelReports: (force?: boolean) => ipcRenderer.invoke('kovan:mixpanel-reports', force),
+  mixpanelCached: () => ipcRenderer.invoke('kovan:mixpanel-cached'),
+  mixpanelResult: (id: number, type: string, force?: boolean) => ipcRenderer.invoke('kovan:mixpanel-result', id, type, force),
+  mixpanelAdd: (ref: string, name?: string) => ipcRenderer.invoke('kovan:mixpanel-add', ref, name),
+  mixpanelRemoveAdded: (id: number) => ipcRenderer.invoke('kovan:mixpanel-remove-added', id),
+  mixpanelThread: (id: number) => ipcRenderer.invoke('kovan:mixpanel-thread', id),
+  mixpanelThreadClear: (id: number) => ipcRenderer.invoke('kovan:mixpanel-thread-clear', id),
+  mixpanelModelSet: (model: string) => ipcRenderer.invoke('kovan:mixpanel-model-set', model),
+  mixpanelAsk: (report: unknown, question: string) => ipcRenderer.invoke('kovan:mixpanel-ask', report, question),
+  mixpanelNoteAdd: (id: number, text: string) => ipcRenderer.invoke('kovan:mixpanel-note-add', id, text),
+  mixpanelNoteRemove: (id: number, index: number) => ipcRenderer.invoke('kovan:mixpanel-note-remove', id, index),
+  onMixpanelProgress: (listener: (progress: unknown) => void) => {
+    const handler = (_e: unknown, progress: unknown) => listener(progress);
+    ipcRenderer.on('kovan:mixpanel-progress', handler);
+    return () => ipcRenderer.removeListener('kovan:mixpanel-progress', handler);
+  },
   priceCheck: (runner: string, model: string, rules: unknown[]) =>
     ipcRenderer.invoke('kovan:price-check', runner, model, rules),
   priceCheckCancel: () => ipcRenderer.invoke('kovan:price-check-cancel'),
@@ -67,6 +94,26 @@ const api = {
     const handler = (_event: unknown, report: unknown) => listener(report);
     ipcRenderer.on('kovan:running-agents', handler);
     return () => ipcRenderer.removeListener('kovan:running-agents', handler);
+  },
+  /** The Dock menu picked a workspace, or a folder in one (item 135). */
+  onOpenWorkspace: (listener: (id: string, folder?: string, file?: { path: string; line?: number }) => void) => {
+    const handler = (_event: unknown, id: string, folder?: string, file?: { path: string; line?: number }) => listener(id, folder, file);
+    ipcRenderer.on('kovan:open-workspace', handler);
+    // One picked while no window was open waits in main until now.
+    void ipcRenderer.invoke('kovan:open-workspace-pending').then((p?: { id: string; folder?: string; file?: { path: string; line?: number } }) => {
+      if (p) listener(p.id, p.folder, p.file);
+    });
+    return () => ipcRenderer.removeListener('kovan:open-workspace', handler);
+  },
+  /** The pane beside Claude asked to open a file's diff (item 148). */
+  onOpenDiff: (listener: (target: { repo: string; file: string; side: 'staged' | 'unstaged' | 'untracked' }) => void) => {
+    const handler = (_event: unknown, target: { repo: string; file: string; side: 'staged' | 'unstaged' | 'untracked' }) => listener(target);
+    ipcRenderer.on('kovan:open-diff', handler);
+    // One asked for while no window was open waits in main until now.
+    void ipcRenderer.invoke('kovan:open-diff-pending').then((p?: { repo: string; file: string; side: 'staged' | 'unstaged' | 'untracked' }) => {
+      if (p) listener(p);
+    });
+    return () => ipcRenderer.removeListener('kovan:open-diff', handler);
   },
   onShowAgents: (listener: () => void) => {
     const handler = () => listener();
@@ -89,6 +136,14 @@ const api = {
   knownModels: () => ipcRenderer.invoke('kovan:known-models'),
   modelsSearch: (command: string) => ipcRenderer.invoke('kovan:models-search', command),
   ticketStatuses: () => ipcRenderer.invoke('kovan:ticket-statuses'),
+  reviewTools: () => ipcRenderer.invoke('kovan:review-tools'),
+  reviewToolSave: (tool: unknown) => ipcRenderer.invoke('kovan:review-tool-save', tool),
+  reviewToolRemove: (id: string) => ipcRenderer.invoke('kovan:review-tool-remove', id),
+  reviewToolCandidates: () => ipcRenderer.invoke('kovan:review-tool-candidates'),
+  reviewToolCheck: (command: string) => ipcRenderer.invoke('kovan:review-tool-check', command),
+  reviewToolSetup: (command: string) => ipcRenderer.invoke('kovan:review-tool-setup', command),
+  reviewToolSaveKey: (file: string, value: string) => ipcRenderer.invoke('kovan:review-tool-save-key', file, value),
+  reviewToolTest: (tool: unknown) => ipcRenderer.invoke('kovan:review-tool-test', tool),
   clipboardImagePath: () => ipcRenderer.invoke('kovan:clipboard-image'),
   copyText: (text: string) => ipcRenderer.invoke('kovan:clipboard-write', text),
   // Electron 32 took `File.path` away; this is its replacement, and it has
@@ -100,6 +155,7 @@ const api = {
     ipcRenderer.invoke('kovan:build-prompt', kind, subject, test),
   testEnvironments: () => ipcRenderer.invoke('kovan:test-environments'),
   testEnvironmentsSave: (next: unknown) => ipcRenderer.invoke('kovan:test-environments-save', next),
+  ticketPulls: (key: string) => ipcRenderer.invoke('kovan:ticket-pulls', key),
   defaultCwd: (repo?: string) => ipcRenderer.invoke('kovan:default-cwd', repo),
   startAgent: (request: unknown, subject: unknown) =>
     ipcRenderer.invoke('kovan:start-agent', request, subject),
@@ -164,6 +220,14 @@ const api = {
     return () => ipcRenderer.removeListener('kovan:activity-open', handler);
   },
 
+  // Agent alerts (item 182): a notification or the menu bar opening a session
+  sessionOpenPending: () => ipcRenderer.invoke('kovan:session-open-pending'),
+  onSessionOpen: (listener: (id: string) => void) => {
+    const handler = (_event: unknown, id: string) => listener(id);
+    ipcRenderer.on('kovan:session-open', handler);
+    return () => ipcRenderer.removeListener('kovan:session-open', handler);
+  },
+
   // Connection problems (item 120)
   problems: () => ipcRenderer.invoke('kovan:problems'),
   onProblems: (listener: (update: unknown) => void) => {
@@ -180,6 +244,7 @@ const api = {
   workspaces: () => ipcRenderer.invoke('kovan:workspaces'),
   workspaceCreate: () => ipcRenderer.invoke('kovan:workspace-create'),
   workspaceActivate: (id: string) => ipcRenderer.invoke('kovan:workspace-activate', id),
+  newWindow: () => ipcRenderer.invoke('kovan:window-new'),
   workspaceAddFolder: (id: string) => ipcRenderer.invoke('kovan:workspace-add-folder', id),
   workspaceRemoveFolder: (id: string, folder: string) =>
     ipcRenderer.invoke('kovan:workspace-remove-folder', id, folder),
@@ -199,6 +264,7 @@ const api = {
     ipcRenderer.invoke('kovan:workspace-revert', repo, changes),
   workspaceTree: (dir: string) => ipcRenderer.invoke('kovan:workspace-tree', dir),
   workspaceRead: (file: string) => ipcRenderer.invoke('kovan:workspace-read', file),
+  workspaceImage: (file: string) => ipcRenderer.invoke('kovan:workspace-image', file),
   workspaceWrite: (file: string, text: string, expected?: unknown) =>
     ipcRenderer.invoke('kovan:workspace-write', file, text, expected),
 
@@ -210,6 +276,7 @@ const api = {
     ipcRenderer.invoke('kovan:session-resize', id, cols, rows),
   sessionClose: (id: string) => ipcRenderer.invoke('kovan:session-close', id),
   sessionRename: (id: string, title: string) => ipcRenderer.invoke('kovan:session-rename', id, title),
+  shells: () => ipcRenderer.invoke('kovan:shells'),
   openTerminal: (cwd?: string, subject?: string, title?: string) =>
     ipcRenderer.invoke('kovan:open-terminal', cwd, subject, title),
   onSessionOutput: (listener: (id: string, data: string) => void) => {

@@ -40,8 +40,12 @@ export async function revertTracked(repo: string, paths: readonly string[], side
   if (paths.length === 0) {
     return;
   }
+  // Literal: a path is a file name, never a pattern. Without this, a file
+  // called `:!notes.md` — a legal name a cloned repository can carry — reads
+  // as "everything except notes.md", and reverting that one row discards
+  // every other uncommitted edit in the repository.
   const args = [
-    '-C', repo, 'restore',
+    '--literal-pathspecs', '-C', repo, 'restore',
     ...(side === 'staged' ? ['--staged', '--worktree'] : ['--worktree']),
     '--', ...paths
   ];

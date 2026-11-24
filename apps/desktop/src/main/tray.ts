@@ -4,12 +4,20 @@
  * The title is the product in one glance: how many of your pull requests need
  * work before they can merge. Zero shows the icon alone rather than "0", so a
  * clear queue is quiet.
+ *
+ * Agents waiting on you (item 182) are listed in the menu and the tooltip,
+ * each one click from its session. They stay out of the title: one number
+ * there has always meant pull requests, and a sum of two kinds of thing
+ * would say neither.
  */
 
 import { app, Menu, Tray, nativeImage, type NativeImage } from 'electron';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EMPTY, type Snapshot } from './poller';
+
+/** A session whose agent is waiting on you: a question or a permission prompt. */
+export interface WaitingAgent { id: string; title: string; runnerName: string }
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,16 +35,21 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
  * automatically, which is what every Retina Mac actually displays.
  */
 function icon(): NativeImage {
+  // macOS tints a template image to the menu bar; Linux panels don't, and are
+  // mostly dark, so they get the same glyph drawn light.
+  const name = process.platform === 'darwin' ? 'trayTemplate.png' : 'trayLinux.png';
   const file = app.isPackaged
-    ? path.join(process.resourcesPath, 'trayTemplate.png')
-    : path.join(dirname, '../../resources/trayTemplate.png');
+    ? path.join(process.resourcesPath, name)
+    : path.join(dirname, '../../resources', name);
   const image = nativeImage.createFromPath(file);
   if (image.isEmpty()) {
     // Never leave the menu bar with no hit target: an invisible tray icon is
     // an app the user cannot reach at all.
-    return nativeImage.createFromNamedImage('NSApplicationIcon', [0, 0, 0]).resize({ width: 16 });
+    return process.platform === 'darwin'
+      ? nativeImage.createFromNamedImage('NSApplicationIcon', [0, 0, 0]).resize({ width: 16 })
+      : image;
   }
-  image.setTemplateImage(true);
+  if (process.platform === 'darwin') image.setTemplateImage(true);
   if (process.env['KOVAN_SMOKE']) {
     const { width, height } = image.getSize();
     console.log(`tray glyph loaded from ${file} (${width}x${height}, template=${image.isTemplateImage()})`);
@@ -49,11 +62,14 @@ export interface TrayActions {
   refresh(): void;
   launchAtLogin(): boolean;
   toggleLaunchAtLogin(): void;
+  openSession(id: string): void;
   quit(): void;
 }
 
 export class KovanTray {
   private readonly tray: Tray;
+  private snapshot: Snapshot = EMPTY;
+  private waiting: WaitingAgent[] = [];
 
   constructor(private readonly actions: TrayActions) {
     this.tray = new Tray(icon());
@@ -65,12 +81,29 @@ export class KovanTray {
   }
 
   update(snapshot: Snapshot): void {
+    this.snapshot = snapshot;
+    this.render();
+  }
+
+  /** Redraws only when the list actually changed: sessions publish often. */
+  setWaiting(waiting: WaitingAgent[]): void {
+    const key = (list: WaitingAgent[]) => list.map((a) => `${a.id}\u0000${a.title}`).join('\u0001');
+    if (key(waiting) === key(this.waiting)) return;
+    this.waiting = waiting;
+    this.render();
+  }
+
+  private render(): void {
+    const snapshot = this.snapshot;
     const blocked = snapshot.blocked?.length ?? 0;
     const reviews = snapshot.reviewRequested?.length ?? 0;
+    const agents = this.waiting.length;
+    const agentLine = `${agents} agent${agents === 1 ? '' : 's'} waiting for you`;
 
     this.tray.setTitle(blocked > 0 ? ` ${blocked}` : '');
     this.tray.setToolTip(
-      blocked > 0 ? `Kovan — ${blocked} blocked on you` : 'Kovan — nothing blocked on you'
+      [blocked > 0 ? `Kovan — ${blocked} blocked on you` : 'Kovan — nothing blocked on you', agents > 0 ? agentLine : '']
+        .filter(Boolean).join(' · ')
     );
 
     this.tray.setContextMenu(
@@ -80,6 +113,17 @@ export class KovanTray {
           enabled: false
         },
         { label: `${reviews} awaiting your review`, enabled: false },
+        ...(agents > 0
+          ? [
+              { type: 'separator' as const },
+              { label: agentLine, enabled: false },
+              ...this.waiting.map((agent) => ({
+                label: agent.title,
+                sublabel: agent.runnerName,
+                click: () => this.actions.openSession(agent.id)
+              }))
+            ]
+          : []),
         { type: 'separator' },
         { label: 'Open Kovan', click: () => this.actions.open() },
         {

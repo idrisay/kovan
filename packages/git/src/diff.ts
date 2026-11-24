@@ -160,7 +160,8 @@ export async function readDiff(
     }
   }
 
-  const args = ['-C', repo, 'diff', ...common, '--find-renames'];
+  // Literal for the same reason as `revertTracked`: a file name, not a pattern.
+  const args = ['--literal-pathspecs', '-C', repo, 'diff', ...common, '--find-renames'];
   if (side === 'staged') args.push('--cached');
   args.push('--', file);
   if (from && from !== file) args.push(from);

@@ -56,6 +56,19 @@ export interface Settings {
   'sentry.environment': string;
   'sentry.pathMappings': PathMapping[];
 
+  /** Item 177: Mixpanel is read only. Region is 'us', 'eu' or 'in'. */
+  'mixpanel.region': string;
+  'mixpanel.projectId': string;
+  'mixpanel.username': string;
+  /** The rail tab is off until turned on in Settings › Connections. */
+  'mixpanel.rail': boolean;
+  /** Report ids pinned to the top of the list, in pin order. */
+  'mixpanel.pins': number[];
+  /** Reports added by link, for when the App API can't list them. */
+  'mixpanel.added': { id: number; type: string; name?: string }[];
+  /** The Discuss panel's model; blank means the quick model. */
+  'mixpanel.discussModel': string;
+
   'grafana.enabled': boolean;
   'grafana.baseUrl': string;
   'grafana.services': Record<string, string>;
@@ -148,6 +161,13 @@ export const DEFAULT_SETTINGS: Settings = {
   'sentry.projects': [],
   'sentry.environment': '',
   'sentry.pathMappings': [{ from: 'app:///', to: '' }],
+  'mixpanel.region': '',
+  'mixpanel.projectId': '',
+  'mixpanel.username': '',
+  'mixpanel.rail': false,
+  'mixpanel.pins': [],
+  'mixpanel.added': [],
+  'mixpanel.discussModel': '',
 
   'grafana.enabled': true,
   'grafana.baseUrl': '',

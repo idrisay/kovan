@@ -4,4 +4,5 @@ export * from './github/GitHubClient';
 export * from './jira/JiraClient';
 export * from './github/detail';
 export * from './sentry/SentryClient';
+export * from './mixpanel/MixpanelClient';
 export * from './github/reviewers';

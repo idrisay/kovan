@@ -1,9 +1,9 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   formatAge, isMerged, olderCommentCount, primaryFlag, pullBasis, pullFlags, reviewBasis, ticketBasis, ticketKeyInTitle,
-  KIMI_REVIEW_FILE,
-  isNvReviewModel,
-  reviewModelName,
+  reviewFileName,
+  reviewToolLabel,
+  reviewToolVia,
   TICKET_RECENT_COMMENTS
 } from '@kovan/core';
 import { repoName, States, TONE } from './rows';
@@ -25,6 +25,8 @@ import type {
   AgentRun, JiraIssue, PullDetail, PullSummary, ReviewComment, ReviewThread, Reviewer, RunKind, SentryFrame,
   SentryIssue, SessionInfo, Snapshot
 } from './types';
+import { useQuickButtons } from './quickButtons';
+import { useTerminalToggle } from './terminalToggle';
 
 /** A stand-in for a real photo: initials on a colour picked from the name
  *  itself, so the same person is always the same colour without anyone
@@ -78,7 +80,7 @@ interface HeadParts {
   /** The details line, one span each. */
   meta: React.ReactNode;
   /** Related tickets or pull requests: chips that open them in Kovan. */
-  links: { label: string; onClick: () => void }[];
+  links: LinkChip[];
   service: { label: string; icon: JSX.Element; url: string };
   onTerminal: () => void;
   actions: React.ReactNode;
@@ -102,17 +104,77 @@ function PlaceIcons({ service, onTerminal }: Pick<HeadParts, 'service' | 'onTerm
   );
 }
 
+interface LinkChip {
+  label: string;
+  onClick: () => void;
+  /** A ticket's Jira status (item 142): `null` while it is being looked up. */
+  status?: TicketStatus | null;
+}
+
+interface TicketStatus {
+  status: string;
+  statusCategory: string;
+}
+
 function LinkChips({ links }: Pick<HeadParts, 'links'>) {
   return (
     <>
       {links.map((link, i) => (
-        <button key={i} type="button" className="detail-related-link" title={`Open ${link.label}`} onClick={link.onClick}>
+        <button
+          key={i} type="button" className="detail-related-link"
+          title={link.status ? `Open ${link.label} · ${link.status.status}` : `Open ${link.label}`} onClick={link.onClick}
+        >
           <OpenLinkIcon size={11} />
           {link.label}
+          {link.status !== undefined && (
+            <>
+              <span className="detail-related-sep-inline" aria-hidden="true" />
+              <span className={`detail-related-status ${link.status?.statusCategory ?? 'loading'}`}>
+                <span className="detail-related-dot" />
+                <span className="detail-related-status-text">{link.status?.status ?? '…'}</span>
+              </span>
+            </>
+          )}
         </button>
       ))}
     </>
   );
+}
+
+/**
+ * Statuses looked up for tickets that aren't among the loaded ones, kept for a
+ * few minutes so flicking between pull requests doesn't ask Jira each time.
+ */
+const statusCache = new Map<string, { at: number; value: TicketStatus }>();
+const STATUS_TTL = 5 * 60_000;
+
+/**
+ * A ticket's status for the header chip: the loaded ticket's own when there is
+ * one, else one small lookup. `undefined` when there is no key or the lookup
+ * failed (the chip then shows just the key, as before); `null` while loading.
+ */
+function useTicketStatus(key: string, loaded?: JiraIssue): TicketStatus | null | undefined {
+  const cached = statusCache.get(key);
+  const fresh = cached && Date.now() - cached.at < STATUS_TTL ? cached.value : undefined;
+  const [fetched, setFetched] = useState<{ key: string; value?: TicketStatus }>();
+  useEffect(() => {
+    if (!key || loaded || fresh) return;
+    let live = true;
+    window.kovan.ticketStatus(key).then(
+      (value) => {
+        statusCache.set(key, { at: Date.now(), value });
+        if (live) setFetched({ key, value });
+      },
+      () => live && setFetched({ key })
+    );
+    return () => {
+      live = false;
+    };
+  }, [key, Boolean(loaded), Boolean(fresh)]);
+  if (!key) return undefined;
+  if (loaded) return { status: loaded.status, statusCategory: loaded.statusCategory };
+  if (fresh) return fresh;
+  return fetched?.key === key ? fetched.value : null;
 }
 
 /**
@@ -768,7 +830,7 @@ const DOCK_OPTIONS: { id: DockPosition; label: string; Icon: (p: { size?: number
  * borders the reading area, the same pointer-capture technique as `Resizer`
  * but generalised to whichever axis the current dock position resizes along.
  */
-function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () => void }) {
+export function InlineTerminal({ session, onHide }: { session: SessionInfo; onHide: () => void }) {
   const [fontSize] = useTerminalFontSize();
   const [dock, setDock] = useState<DockPosition>(storedDock);
   const [height, setHeight] = useState(() => storedSize(HEIGHT_KEY, DEFAULT_HEIGHT));
@@ -902,10 +964,14 @@ function useQuickTerminal(
   subject: string,
   onOpenSession: (id: string) => void
 ): () => void {
+  // A second press while the shell is still starting would start another.
+  const opening = useRef(false);
   return useCallback(() => {
+    if (opening.current) return;
+    opening.current = true;
     void window.kovan.defaultCwd(cwdHint).then((cwd) =>
       window.kovan.openTerminal(cwd, subject, `Terminal — ${subject}`)
-    ).then((session) => onOpenSession(session.id));
+    ).then((session) => onOpenSession(session.id)).finally(() => { opening.current = false; });
   }, [cwdHint, subject, onOpenSession]);
 }
 
@@ -961,10 +1027,12 @@ export function PullPane({
   const chipKey = ticketKey || ticketKeyInTitle((pull.headRef ?? detail?.headRef ?? '').toUpperCase());
   const chipTicket = chipKey ? findSubject(chipKey, snapshot)?.issue : undefined;
   const jiraBase = snapshot.tickets[0]?.url.replace(/[A-Z][A-Z0-9]+-\d+$/, '');
-  const ticketChip = chipTicket
-    ? { label: chipTicket.key, onClick: () => onOpenSubject({ issue: chipTicket }) }
+  // Its Jira status rides along inside the chip (item 142).
+  const chipStatus = useTicketStatus(chipKey && (chipTicket || jiraBase) ? chipKey : '', chipTicket);
+  const ticketChip: LinkChip | undefined = chipTicket
+    ? { label: chipTicket.key, onClick: () => onOpenSubject({ issue: chipTicket }), status: chipStatus }
     : chipKey && jiraBase
-      ? { label: chipKey, onClick: () => void window.kovan.openExternal(`${jiraBase}${chipKey}`) }
+      ? { label: chipKey, onClick: () => void window.kovan.openExternal(`${jiraBase}${chipKey}`), status: chipStatus }
       : undefined;
 
   // Only the session App.tsx currently has in mind, and only when it is
@@ -977,6 +1045,12 @@ export function PullPane({
   }, [inlineSession?.id]);
 
   const openQuickTerminal = useQuickTerminal(pull.repo, subject, onOpenSession);
+  // ⌘J (item 158): this pane's terminal, hidden or shown, or one opened here.
+  useTerminalToggle(() => {
+    if (inlineSession) { setShowTerminal((v) => !v); return; }
+    const own = sessions.find((s) => s.running && s.subject === subject);
+    if (own) onOpenSession(own.id); else openQuickTerminal();
+  });
 
   // The same priority order the queue row's own state chips already use —
   // `pullFlags` puts the one thing that matters most first, so the header
@@ -989,7 +1063,10 @@ export function PullPane({
   // PR's own reviews and checks, even when its title names a ticket.
   const summary = useQuick('pull-summary', `${pull.repo}#${pull.number}`);
   const review = useQuick('pull-review', `${pull.repo}#${pull.number}`);
-  const showSummary = [summary.state, review.state].some((q) => Boolean(q.result || q.running || q.error));
+  // Off until turned on in Settings › Agents (item 124); off hides the card too.
+  const buttons = useQuickButtons();
+  const showSummary = [buttons.summarize && summary.state, buttons.review && review.state]
+    .some((q) => q && Boolean(q.result || q.running || q.error));
 
   const unresolved = detail?.threads.filter((t) => !t.isResolved) ?? [];
   // Whether the left column has anything in it. A PR with no description and
@@ -1026,16 +1103,20 @@ export function PullPane({
     actions: (
       <>
         <RunButtons kinds={kinds} onRun={(kind) => onRun(kind, pull)} />
-        <span className="action-divider" />
-        <QuickButton kind="pull-summary" label="Summarize" runningLabel="Summarizing" state={summary.state} onRun={summary.run} />
-        <QuickButton
-          kind="pull-review"
-          label="Review"
-          runningLabel="Reviewing"
-          state={review.state}
-          onRun={review.run}
-          tooltip="Sends the diff to the model on the button's tag (NVIDIA through nv-review, or any opencode model). It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Can take several minutes."
-        />
+        {(buttons.summarize || buttons.review) && <span className="action-divider" />}
+        {buttons.summarize && (
+          <QuickButton kind="pull-summary" label="Summarize" runningLabel="Summarizing" state={summary.state} onRun={summary.run} />
+        )}
+        {buttons.review && (
+          <QuickButton
+            kind="pull-review"
+            label="Review"
+            runningLabel="Reviewing"
+            state={review.state}
+            onRun={review.run}
+            tooltip="Sends the pull request to the reviewer on the button's tag: nv-review, one you added in Settings › Agents › Reviewers, or any opencode model. It recommends approve or request changes, and you decide what goes to GitHub. Reads only; never changes code. Can take several minutes."
+          />
+        )}
       </>
     ),
     // The pill already says the headline state; this lists the rest, and
@@ -1066,39 +1147,45 @@ export function PullPane({
             subject={subject} pull={`${pull.repo}#${pull.number}`}
             refreshOn={sessionSignature(sessions, subject)}
           />
-          <QuickCard
-            kind="pull-summary"
-            title={isMerged(pull) ? 'Summary' : "Why it's blocked"}
-            state={summary.state}
-            basisNow={detail ? pullBasis(detail) : undefined}
-            footer="Written by a free quick model from this PR's reviews, threads and checks. It read nothing else and changed nothing."
-            onRun={summary.run}
-            onCancel={summary.cancel}
-            onDismiss={summary.dismiss}
-          />
+          {buttons.summarize && (
+            <QuickCard
+              kind="pull-summary"
+              title={isMerged(pull) ? 'Summary' : "Why it's blocked"}
+              state={summary.state}
+              basisNow={detail ? pullBasis(detail) : undefined}
+              footer="Written by a free quick model from this PR's reviews, threads and checks. It read nothing else and changed nothing."
+              onRun={summary.run}
+              onCancel={summary.cancel}
+              onDismiss={summary.dismiss}
+            />
+          )}
 
-          <QuickCard
-            kind="pull-review"
-            title="Code review"
-            runningNote="A review reads the whole diff: expect a few minutes, more on NVIDIA's free API. You can leave this pane."
-            tag={review.state.result ? reviewModelName(review.state.result.model) : 'review'}
-            badge={<VerdictBadge verdict={review.state.result?.verdict} />}
-            state={review.state}
-            basisNow={detail ? reviewBasis(detail) : undefined}
-            footer={`Read the diff, description and open threads through ${review.state.result && !isNvReviewModel(review.state.result.model) ? 'opencode' : 'nv-review'}, and changed nothing. Saved as ${KIMI_REVIEW_FILE} in this PR's History below.`}
-            onRun={review.run}
-            onCancel={review.cancel}
-            onDismiss={review.dismiss}
-          >
-            {(stale) => review.state.result && (
-              <ReviewDecision
-                subject={`${pull.repo}#${pull.number}`}
-                result={review.state.result}
-                stale={stale}
-                onRefresh={review.run}
-              />
-            )}
-          </QuickCard>
+          {buttons.review && (
+            <QuickCard
+              kind="pull-review"
+              title="Code review"
+              runningNote="A review reads the whole diff: expect a few minutes, more on NVIDIA's free API. You can leave this pane."
+              tag={review.state.result ? reviewToolLabel(review.state.result.model) : 'review'}
+              badge={<VerdictBadge verdict={review.state.result?.verdict} />}
+              state={review.state}
+              basisNow={detail ? reviewBasis(detail) : undefined}
+              footer={review.state.result
+                ? `Read the diff, description and open threads through ${reviewToolVia(review.state.result.model)}, and changed nothing. Saved as ${reviewFileName(review.state.result.model)} in this PR's History below.`
+                : 'Read the diff, description and open threads, and changed nothing.'}
+              onRun={review.run}
+              onCancel={review.cancel}
+              onDismiss={review.dismiss}
+            >
+              {(stale) => review.state.result && (
+                <ReviewDecision
+                  subject={`${pull.repo}#${pull.number}`}
+                  result={review.state.result}
+                  stale={stale}
+                  onRefresh={review.run}
+                />
+              )}
+            </QuickCard>
+          )}
 
           {error && <div className="error boxed">{error}</div>}
           {!detail && !error && <p className="quiet">Loading…</p>}
@@ -1250,11 +1337,14 @@ export function TicketPane({
   // "Condense": the comments before the latest few that ticket.md keeps in full.
   const condense = useQuick('ticket-condense', issue.key);
   const older = olderCommentCount(comments.length);
-  const condensed = condense.state.result;
+  // Turned off in Settings › Agents (item 124): no button, no card, and every
+  // comment shown in full, as if nothing had been condensed.
+  const condenseOn = useQuickButtons().condense;
+  const condensed = condenseOn ? condense.state.result : undefined;
   const covered = Math.min(condensed?.basis['condensed'] ?? 0, older);
   const [showOriginals, setShowOriginals] = useState(false);
   useEffect(() => setShowOriginals(false), [issue.key]);
-  const showCondenseCard = Boolean(condensed || condense.state.running || condense.state.error);
+  const showCondenseCard = condenseOn && Boolean(condensed || condense.state.running || condense.state.error);
 
   const inlineSession = sessions.find((s) => s.id === activeSession && s.subject === issue.key);
   const [showTerminal, setShowTerminal] = useState(true);
@@ -1263,6 +1353,12 @@ export function TicketPane({
   }, [inlineSession?.id]);
 
   const openQuickTerminal = useQuickTerminal(undefined, issue.key, onOpenSession);
+  // ⌘J (item 158): this pane's terminal, hidden or shown, or one opened here.
+  useTerminalToggle(() => {
+    if (inlineSession) { setShowTerminal((v) => !v); return; }
+    const own = sessions.find((s) => s.running && s.subject === issue.key);
+    if (own) onOpenSession(own.id); else openQuickTerminal();
+  });
   // The pull requests that belong to this ticket — the other direction of the
   // link a pull request's own header follows back to its ticket.
   const relatedPulls = findRelatedPulls(issue.key, snapshot);
@@ -1287,7 +1383,7 @@ export function TicketPane({
     actions: (
       <>
         <RunButtons kinds={['implement']} onRun={(kind) => onRun(kind, issue)} />
-        {older > 0 && (
+        {older > 0 && condenseOn && (
           <>
             <span className="action-divider" />
             <QuickButton
@@ -1458,6 +1554,12 @@ export function SentryPane({
   }, [inlineSession?.id]);
 
   const openQuickTerminal = useQuickTerminal(undefined, issue.shortId, onOpenSession);
+  // ⌘J (item 158): this pane's terminal, hidden or shown, or one opened here.
+  useTerminalToggle(() => {
+    if (inlineSession) { setShowTerminal((v) => !v); return; }
+    const own = sessions.find((s) => s.running && s.subject === issue.shortId);
+    if (own) onOpenSession(own.id); else openQuickTerminal();
+  });
 
   const compact = useAppearance().density === 'compact';
   const head: HeadParts = {

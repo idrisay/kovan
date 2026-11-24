@@ -191,6 +191,45 @@ export async function writePrompt(prompt: string): Promise<string> {
   return file;
 }
 
+/**
+ * Claude's `--settings` (status line and hook commands, item 112) as a file.
+ * Inline it was ~1,500 characters of JSON, which pushed the typed launch line
+ * past what macOS accepts while a shell is still starting (item 141).
+ * `--settings` takes a path as readily as JSON.
+ */
+export async function writeSettingsFile(settings: object): Promise<string> {
+  const dir = path.join(tmpdir(), 'kovan-prompts');
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const file = path.join(dir, `settings-${randomUUID()}.json`);
+  await writeFile(file, JSON.stringify(settings), { mode: 0o600 });
+  return file;
+}
+
+/**
+ * The longest launch line typed into a terminal as it is.
+ *
+ * Kovan types the line once the shell goes quiet, which can be before the
+ * shell is reading — a themed prompt still working out git status in a large
+ * repository. Until then the terminal's own line editing holds what's typed,
+ * and macOS keeps only 1,024 characters of it: a longer line loses its end,
+ * Enter included, and the agent never starts (item 141). 900 leaves room.
+ */
+export const MAX_TYPED_LINE = 900;
+
+/**
+ * A launch line short enough to type. A longer one is written to a private
+ * script and typed as `. <script>`: the same command, run by the same
+ * interactive shell (so functions and aliases still resolve).
+ */
+export async function typeableLine(line: string): Promise<string> {
+  if (line.length <= MAX_TYPED_LINE) return line;
+  const dir = path.join(tmpdir(), 'kovan-prompts');
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const file = path.join(dir, `launch-${randomUUID()}.sh`);
+  await writeFile(file, `${line}\n`, { mode: 0o600 });
+  return `. ${quote(file)}`;
+}
+
 export function modelArgs(runner: Runner): string[] {
   if (!runner.model || !runner.modelFlag) {
     return [];

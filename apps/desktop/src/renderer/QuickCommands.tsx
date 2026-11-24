@@ -12,6 +12,7 @@
  * sends main a command line to execute.
  */
 
+import { keyLabel } from './platform';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { filterQuickCommands, type QuickCommand } from '@kovan/core';
 import { useMenuDismiss } from './menuDismiss';
@@ -182,7 +183,7 @@ export function QuickCommands({ sessions, onRan }: {
                 <button type="submit" className="ghost" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
                 <button type="button" className="link" onClick={() => { setDraft(undefined); setError(undefined); }}>Cancel</button>
                 <span className="spacer" />
-                <span className="qc-hint">⌘↩ saves</span>
+                <span className="qc-hint">{keyLabel('↩')} saves</span>
               </div>
             </form>
           ) : (

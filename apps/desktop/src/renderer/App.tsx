@@ -1,25 +1,31 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { isAppShortcut, keyLabel } from './platform';
+import { toggleTerminal } from './terminalToggle';
 import { createPortal } from 'react-dom';
 import { useMenuDismiss } from './menuDismiss';
-import { DEFAULT_PULL_SORT, describeGitHubBudget, formatAge, isBlocked, moveBy, moveItem, PULL_SORTS, sortPulls, withSelected, type PullSort } from '@kovan/core';
+import {
+  DEFAULT_PULL_SORT, describeGitHubBudget, formatAge, isBlocked, moveBy, moveItem, pinKind, PULL_SORTS, pullPinKey, sessionPinKey,
+  sortPulls, ticketPinKey, withSelected, type PullSort
+} from '@kovan/core';
 import type {
   JiraIssue, PolledProvider, PullSummary, RunKind, RunTarget, SentryFrame, SentryIssue,
   SessionInfo, Snapshot
 } from './types';
 import { Settings } from './Settings';
+import { OPEN_SETTINGS } from './Reviewers';
 import { levelTone, PullPane, SentryPane, TicketPane } from './Detail';
 import { RunSheet } from './RunSheet';
-import { GroupHead, PullRow } from './rows';
-import { WorkspaceView } from './Workspace';
+import { GroupHead, PullRow, repoName } from './rows';
+import { WorkspaceView, WORKSPACE_SWITCHED } from './Workspace';
 import { QuickJobRow, QuickJobView, useQuickJobs } from './QuickJobs';
-import { SessionUsageChip, UsageOverview, UsageRow } from './Usage';
+import { UsageOverview, UsageRow } from './Usage';
 import { RunningAgentsPane, RunningAgentsRow, idleAgents, useRunningAgents } from './RunningAgents';
 import { Resizer } from './Resizer';
 import { useTerminalFontSize } from './terminalFontSize';
 import { findSubject, type Selection, SessionName } from './sessionSubject';
-import { AgentStateBadge, SessionHoverCard, sessionDot, useHoverCard, useSeenStatus } from './sessionCard';
+import { SessionHoverCard, SessionStateIcon, sessionDot, useHoverCard, useSeenStatus } from './sessionCard';
 import { ErrorBoundary } from './ErrorBoundary';
-import { ActivityList, ActivityToasts, useActivity } from './Activity';
+import { ActivityEventPane, ActivityList, ActivityToasts, useActivity } from './Activity';
 import { DictationLayer } from './Dictation';
 import { useRailOrder } from './railOrder';
 import { QuickCommands } from './QuickCommands';
@@ -28,7 +34,29 @@ import { startAppearance } from './appearance';
 import { QuickOpen } from './QuickOpen';
 import { ProblemsPopover, ProblemToast, useProblems } from './Problems';
 import { useNavHistory } from './navHistory';
-import type { ActivityEvent } from './types';
+import type { ActivityEvent, ShellOption } from './types';
+import { setShell, useShellChoice } from './shellChoice';
+import { Search, type SearchAction } from './Search';
+import type { OpenRequest } from './Workspace';
+import {
+  FailedPinRow, forgetClosedSessions, NothingPinned, PinnedOnlyButton, PinToggle, usePinnedKeys, usePinnedOnly, usePins,
+  useKeptPins, useRowMenu, type RowMenuItem
+} from './pins';
+import { PinSlot } from './rows';
+import { firstName, PersonPicker, usePersonData } from './people';
+import type { Teammate } from '@kovan/core';
+
+/** A teammate's list before it has arrived (item 164): loading, or why not. */
+function PersonListState({ person, what, error, onRetry }: { person: Teammate; what: string; error?: string; onRetry: () => void }) {
+  return error ? (
+    <p className="person-state">
+      Couldn't load {firstName(person)}'s {what}: {error}{' '}
+      <button type="button" className="link" onClick={onRetry}>Retry</button>
+    </p>
+  ) : (
+    <p className="person-state">Loading {firstName(person)}'s {what}…</p>
+  );
+}
 
 /** What the detail pane is showing, in words — for its error card and the log (item 83). */
 function paneWhere(selected: Selection): string {
@@ -44,15 +72,21 @@ import {
 import { PaneView, type DragHandlers, type DragState } from './PaneView';
 import {
   PullRequestIcon, TicketIcon, TerminalIcon, WorkspaceIcon, SentryIcon, AgentsIcon, BellIcon,
-  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon, CloseIcon, BackIcon, ForwardIcon
+  RefreshIcon, SettingsIcon, SearchIcon, SortIcon, FilterIcon, PlusIcon, CloseIcon, BackIcon, ForwardIcon, ChartIcon
 } from './icons';
+import { MixpanelView, useMixpanelRail } from './Mixpanel';
 
-type ViewId = 'pulls' | 'tickets' | 'sentry' | 'activity' | 'workspace' | 'sessions' | 'agents';
+type ViewId = 'pulls' | 'tickets' | 'sentry' | 'mixpanel' | 'activity' | 'workspace' | 'sessions' | 'agents';
+
+/** Where each window was, per workspace (item 163). */
+const PLACE_KEY = 'kovan.place';
 
 const VIEWS: { id: ViewId; label: string; icon: (props: { size?: number }) => JSX.Element }[] = [
   { id: 'pulls', label: 'Pull requests', icon: PullRequestIcon },
   { id: 'tickets', label: 'Tickets', icon: TicketIcon },
   { id: 'sentry', label: 'Sentry errors', icon: SentryIcon },
+  // Item 177: only in the rail once turned on in Settings › Connections › Mixpanel.
+  { id: 'mixpanel', label: 'Mixpanel', icon: ChartIcon },
   // Item 86: what happened to you — review requests, approvals, new tickets.
   { id: 'activity', label: 'Activity', icon: BellIcon },
   { id: 'workspace', label: 'Workspace', icon: WorkspaceIcon },
@@ -147,6 +181,8 @@ interface Group {
   pulls: PullSummary[];
   tint: boolean;
   note?: string;
+  /** A note that is only information (a kept pin), in grey rather than red. */
+  noteQuiet?: boolean;
 }
 
 const countBlocked = (pulls: readonly PullSummary[]) => pulls.filter(isBlocked).length;
@@ -574,7 +610,7 @@ function RefreshMenu({
  *  from Settings.tsx, which owns the fuller provider chrome (badges, fields).
  *  A five-entry map duplicated once here is cheaper than coupling the two. */
 const STATUSBAR_PROVIDER: Record<string, string> = {
-  github: 'GitHub', jira: 'Jira', sentry: 'Sentry', grafana: 'Grafana', figma: 'Figma'
+  github: 'GitHub', jira: 'Jira', sentry: 'Sentry', grafana: 'Grafana', figma: 'Figma', mixpanel: 'Mixpanel'
 };
 
 /**
@@ -622,7 +658,9 @@ function StatusBar({
                 id === 'github' && snapshot.githubBudget ? describeGitHubBudget(snapshot.githubBudget) : undefined,
                 'Connection problems, now and earlier'
               ].filter(Boolean).join('\n\n')}
-              onClick={(e) => { const el = e.currentTarget; setProblemsAnchor((a) => (a ? undefined : el)); }}
+              // Stopped, like every menu button: otherwise the popover's own
+              // click-outside listener sees this click and shuts it (item 133).
+              onClick={(e) => { e.stopPropagation(); const el = e.currentTarget; setProblemsAnchor((a) => (a ? undefined : el)); }}
             >
               <span className={`dot ${failed.has(id) ? 'fail' : 'pass'}`} />
               {STATUSBAR_PROVIDER[id] ?? id}
@@ -687,7 +725,7 @@ export function App() {
   // with no filter.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (!isAppShortcut(event)) return;
       if (event.key.toLowerCase() !== 'f') return;
       if (event.target instanceof Element && event.target.closest('.cm-editor')) return;
       if (!document.getElementById('q')) return;
@@ -708,10 +746,10 @@ export function App() {
   // ⌘P, go to file (item 100). Anywhere in the app, as in VS Code: the file
   // opens in the Workspace view, which is switched to.
   const [quickOpen, setQuickOpen] = useState(false);
-  const [openRequest, setOpenRequest] = useState<{ path: string; line?: number; nonce: number }>();
+  const [openRequest, setOpenRequest] = useState<OpenRequest>();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (!isAppShortcut(event)) return;
       if (event.key.toLowerCase() !== 'p') return;
       // While it's open, ⌘P is the picker's own "next row".
       if (document.querySelector('.quick-open')) return;
@@ -729,6 +767,17 @@ export function App() {
   }, []);
 
   const [connecting, setConnecting] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<string>();
+  // Settings opened at a section from elsewhere: the Review picker's "Add a
+  // reviewer…" opens Agents (item 143).
+  useEffect(() => {
+    const open = (event: Event) => {
+      setSettingsSection((event as CustomEvent<string | undefined>).detail);
+      setConnecting(true);
+    };
+    window.addEventListener(OPEN_SETTINGS, open);
+    return () => window.removeEventListener(OPEN_SETTINGS, open);
+  }, []);
   const [selected, setSelected] = useState<Selection>({});
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   // Until main has answered once, an empty list means "not asked yet", not
@@ -758,6 +807,21 @@ export function App() {
   const [fontSize] = useTerminalFontSize();
   const idleCount = idleAgents(useRunningAgents()).length;
   const [agentsPane, setAgentsPane] = useState<AgentsPaneId>('agents');
+  // The Dock menu (item 135): main has already made it the active workspace.
+  const [showWorkspace, setShowWorkspace] = useState<{ id: string; folder?: string; nonce: number }>();
+  useEffect(() => window.kovan.onOpenWorkspace((id, folder, file) => {
+    setView('workspace');
+    // A new, empty window (item 159): its start page, nothing to switch to.
+    if (!id) return;
+    setShowWorkspace({ id, ...(folder ? { folder } : {}), nonce: Date.now() });
+    // `kovan <file>` from a terminal (item 178): the file in the editor, at its line.
+    if (file) setOpenRequest({ path: file.path, ...(file.line ? { line: file.line } : {}), nonce: Date.now() + 1 });
+  }), []);
+  // "Open in Kovan" from the pane beside Claude (item 148).
+  useEffect(() => window.kovan.onOpenDiff((target) => {
+    setView('workspace');
+    setOpenRequest({ path: `${target.repo}/${target.file}`, diff: target, nonce: Date.now() });
+  }), []);
   useEffect(() => window.kovan.onShowAgents(() => {
     setView('agents');
     setAgentsPane('agents');
@@ -782,14 +846,55 @@ export function App() {
   const goTo = useCallback((p: Place) => {
     setView(p.view);
     if (p.session) setActiveSession(p.session);
-    if (p.view !== 'sessions' && p.view !== 'workspace' && p.view !== 'agents') {
+    if (p.view !== 'sessions' && p.view !== 'workspace' && p.view !== 'agents' && p.view !== 'mixpanel') {
       setSelected((p.subject ? findSubject(p.subject, latest.current) : undefined) ?? {});
     }
   }, []);
   const nav = useNavHistory(place, placeKey, goTo, placeRefines);
+
+  // Where you were (item 163): the view, the pull request, ticket or Sentry
+  // issue open in it, and the session on screen, saved per workspace (the
+  // windows reopen by workspace) and put back at launch. A subject waits for
+  // the first snapshot that has it; nothing is saved until then, so the
+  // empty first render can't overwrite it.
+  const placeStore = useRef<string>();
+  const pendingSubject = useRef<string>();
+  const [placeReady, setPlaceReady] = useState(false);
+  const readPlaceKey = useCallback(async (restore: boolean) => {
+    const { list, active } = await window.kovan.workspaces();
+    // A new, empty window (item 159) starts on its start page.
+    if (!active && list.length > 0) { placeStore.current = undefined; return; }
+    placeStore.current = `${PLACE_KEY}.${active ?? 'none'}`;
+    if (!restore) return;
+    let saved: Partial<Place> | undefined;
+    try { saved = JSON.parse(localStorage.getItem(placeStore.current) ?? 'null') ?? undefined; } catch { saved = undefined; }
+    if (!saved || !VIEWS.some((v) => v.id === saved!.view)) return;
+    setView(saved.view!);
+    if (saved.session) setActiveSession(saved.session);
+    if (saved.subject) pendingSubject.current = saved.subject;
+  }, []);
+  useEffect(() => {
+    void readPlaceKey(true).finally(() => setPlaceReady(true));
+    // A window that switches workspace keeps its place under the new one.
+    const onSwitch = () => void readPlaceKey(false);
+    window.addEventListener(WORKSPACE_SWITCHED, onSwitch);
+    return () => window.removeEventListener(WORKSPACE_SWITCHED, onSwitch);
+  }, [readPlaceKey]);
+  useEffect(() => {
+    const subject = pendingSubject.current;
+    if (!subject) return;
+    const found = findSubject(subject, snapshot);
+    if (found) setSelected(found);
+    // Found, or the first real snapshot hasn't got it any more: stop waiting.
+    if (found || snapshot.at > 0) pendingSubject.current = undefined;
+  }, [snapshot]);
+  useEffect(() => {
+    if (!placeReady || !placeStore.current || pendingSubject.current) return;
+    try { localStorage.setItem(placeStore.current, JSON.stringify(place)); } catch { /* this launch only */ }
+  }, [place, placeReady]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (!isAppShortcut(event)) return;
       if (event.key !== '[' && event.key !== ']') return;
       // The code editor's own ⌘[ / ⌘] indent and outdent.
       if (event.target instanceof Element && event.target.closest('.cm-editor')) return;
@@ -920,14 +1025,50 @@ export function App() {
   const [activityRequest, setActivityRequest] = useState<string>();
 
   /** An event, clicked in the inbox or on a toast: read it and show it beside the inbox. */
+  /**
+   * Opening a notification reads it and shows what it is about, here (item
+   * 144). One that is in none of Kovan's lists any more — merged and aged out,
+   * someone else's ticket — is fetched and shown in the same pane; while it
+   * loads, or if it can't be, a card says what happened. Never the browser by
+   * itself: that is one click away on the card.
+   */
+  const [eventPane, setEventPane] = useState<{ event: ActivityEvent; loading?: boolean; error?: string }>();
+  const openingEvent = useRef('');
   const openEvent = useCallback((event: ActivityEvent) => {
     if (!event.read) activity.markRead([event.id]);
     setView('activity');
     setActivityId(event.id);
+    openingEvent.current = event.id;
     const match = findSubject(event.subject, snapshot);
-    if (match) setSelected(match);
-    // Merged and aged out, or resolved: not in any list Kovan holds any more.
-    else void window.kovan.openExternal(event.url);
+    if (match) {
+      setEventPane(undefined);
+      setSelected(match);
+      return;
+    }
+    setSelected({});
+    const shown = { ...event, read: true };
+    const hash = event.subject.lastIndexOf('#');
+    const load: Promise<Selection> | undefined = hash > 0
+      ? window.kovan.pullSummary(event.subject.slice(0, hash), Number(event.subject.slice(hash + 1))).then((pull) => ({ pull }))
+      : /^[A-Z][A-Z0-9]+-\d+$/.test(event.subject)
+        ? window.kovan.ticketDetail(event.subject).then((issue) => ({ issue }))
+        : undefined;
+    if (!load) {
+      setEventPane({ event: shown });
+      return;
+    }
+    setEventPane({ event: shown, loading: true });
+    load.then(
+      (found) => {
+        if (openingEvent.current !== event.id) return;
+        setEventPane(undefined);
+        setSelected(found);
+      },
+      (err: unknown) => {
+        if (openingEvent.current !== event.id) return;
+        setEventPane({ event: shown, error: err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(err) });
+      }
+    );
   }, [activity, snapshot]);
 
   // A clicked macOS notification, now or from before this window existed.
@@ -935,6 +1076,14 @@ export function App() {
     if (activity.launchOpen !== undefined) setActivityRequest(activity.launchOpen);
   }, [activity.launchOpen]);
   useEffect(() => window.kovan.onActivityOpen((subject) => setActivityRequest(subject)), []);
+
+  // An agent alert or the menu bar's "waiting for you" list (item 182): the
+  // session, on the Sessions tab, whatever was on screen.
+  useEffect(() => {
+    const open = (id: string) => { setActiveSession(id); setView('sessions'); };
+    void window.kovan.sessionOpenPending().then((id) => { if (id) open(id); });
+    return window.kovan.onSessionOpen(open);
+  }, []);
   useEffect(() => {
     if (activityRequest === undefined) return;
     setView('activity');
@@ -949,15 +1098,24 @@ export function App() {
     }
   }, [activityRequest, activity.inbox, snapshot.at, openEvent]);
 
+  // Item 177: the Mixpanel tab can be turned off while it's open, or a saved
+  // place can name it after it was turned off; go somewhere that's there.
+  const mixpanelRail = useMixpanelRail();
+  useEffect(() => {
+    if (view === 'mixpanel' && !mixpanelRail) setView('pulls');
+  }, [view, mixpanelRail]);
+
   const counts = useMemo(() => ({
     pulls: snapshot.blocked.length + snapshot.reviewRequested.length,
     tickets: snapshot.tickets.length,
     sentry: snapshot.sentryIssues.length,
+    mixpanel: 0,
     activity: 0,
     workspace: 0,
     sessions: sessions.filter((s) => s.running).length,
     agents: 0
   }), [snapshot, sessions]);
+  const waitingCount = useMemo(() => sessions.filter((s) => s.running && s.status === 'input').length, [sessions]);
 
   /** Opening a terminal anywhere lands you in the session that just started. */
   const openTerminal = useCallback((cwd?: string) => {
@@ -966,6 +1124,19 @@ export function App() {
       setView('sessions');
     });
   }, []);
+
+  // ⌘J (item 158): the terminal of the view on screen, shown or hidden; a new
+  // session where nothing has one. Capture, so a focused terminal or editor
+  // can't swallow it.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!isAppShortcut(event) || event.key.toLowerCase() !== 'j') return;
+      event.preventDefault();
+      if (!toggleTerminal()) openTerminal();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [openTerminal]);
 
   /**
    * Bringing a session into view, from wherever it is found. Deliberately
@@ -985,10 +1156,12 @@ export function App() {
    * type into, which is what "it still shows it" was.
    */
   useEffect(() => {
-    if (activeSession && !sessions.some((s) => s.id === activeSession)) {
+    // Not before the list has arrived: the session put back at launch (item
+    // 163) isn't in an empty list yet.
+    if (sessionsReady && activeSession && !sessions.some((s) => s.id === activeSession)) {
       setActiveSession(undefined);
     }
-  }, [sessions, activeSession]);
+  }, [sessions, sessionsReady, activeSession]);
 
   /**
    * Opening Sessions with something already running shows the first one
@@ -1023,6 +1196,37 @@ export function App() {
 
   const current = VIEWS.find((v) => v.id === view)!;
 
+  // What the title bar's search offers under Actions (item 127): the views,
+  // Settings, a refresh, a terminal per watched folder, and handing what is
+  // open now to an agent.
+  const searchActions = useMemo<SearchAction[]>(() => [
+    ...(selected.pull ? [{ id: 'review-open', label: `Review ${repoName(selected.pull.repo)} #${selected.pull.number} in an agent`, hint: 'open now', run: () => setRunSheet({ kind: 'review', pull: selected.pull }) }] : []),
+    ...(selected.issue ? [{ id: 'implement-open', label: `Implement ${selected.issue.key} in an agent`, hint: 'open now', run: () => setRunSheet({ kind: 'implement', issue: selected.issue }) }] : []),
+    ...VIEWS.filter((v) => v.id !== 'mixpanel' || mixpanelRail).map((v) => ({ id: `view-${v.id}`, label: `Go to ${v.label}`, run: () => setView(v.id) })),
+    { id: 'settings', label: 'Open Settings', run: () => setConnecting(true) },
+    // Item 178, named as VS Code names its own.
+    { id: 'install-cli', label: "Install 'kovan' command in PATH", hint: 'kovan <file> from a terminal', run: () => { setSettingsSection('text:kovan command'); setConnecting(true); } },
+    { id: 'refresh', label: 'Refresh everything', hint: 'GitHub, Jira, Sentry', run: refresh },
+    ...targets.map((t) => ({ id: `terminal-${t.path}`, label: `New terminal in ${t.label}`, run: () => openTerminal(t.path) }))
+  ], [selected, targets, refresh, openTerminal, mixpanelRail]);
+
+  // Item 164: whose pull requests and tickets the lists show. Undefined is
+  // yours. Per list, since a GitHub login and a Jira account aren't the same
+  // person to Kovan; not remembered across launches.
+  const [pullPerson, setPullPerson] = useState<Teammate>();
+  const [ticketPerson, setTicketPerson] = useState<Teammate>();
+  const [personMerged, setPersonMerged] = useState(MERGED_STEP);
+  useEffect(() => setPersonMerged(MERGED_STEP), [pullPerson?.id]);
+  const loadPersonPulls = useCallback((login: string) => window.kovan.personPulls(login, personMerged), [personMerged]);
+  const loadPersonTickets = useCallback((id: string) => window.kovan.personTickets(id), []);
+  const personPulls = usePersonData(pullPerson?.id, loadPersonPulls, snapshot.at);
+  const personTickets = usePersonData(ticketPerson?.id, loadPersonTickets, snapshot.at);
+  const listPerson = view === 'pulls' ? pullPerson : view === 'tickets' ? ticketPerson : undefined;
+  const backToYou = useCallback(() => {
+    if (view === 'pulls') setPullPerson(undefined);
+    else if (view === 'tickets') setTicketPerson(undefined);
+  }, [view]);
+
   const match = useCallback((p: PullSummary) => {
     const q = filter.trim().toLowerCase();
     const textOk = !q ||
@@ -1055,10 +1259,54 @@ export function App() {
    *
    * Drafts sit last because a draft is not waiting on anyone.
    */
+  // Pinned rows stay where their list puts them (item 145); one the lists no
+  // longer carry is fetched and kept in the group it belongs to.
+  const pins = usePins();
+  const pinnedKeys = usePinnedKeys();
+  const kept = useKeptPins(snapshot);
+  const rowMenu = useRowMenu();
+  const [pullsPinnedOnly, setPullsPinnedOnly] = usePinnedOnly('pull');
+  const [ticketsPinnedOnly, setTicketsPinnedOnly] = usePinnedOnly('ticket');
+  const pinnedPullCount = pins.filter((pin) => pinKind(pin.key) === 'pull').length;
+  const pinnedTicketCount = pins.filter((pin) => pinKind(pin.key) === 'ticket').length;
+  const failedPulls = kept.failed.filter((f) => f.kind === 'pull');
+  const failedTickets = kept.failed.filter((f) => f.kind === 'ticket');
+  /** A row menu's items after Pin: open it on its service, copy its link. */
+  const linkMenu = useCallback((url: string, service: string): RowMenuItem[] => [
+    { label: `Open on ${service}`, run: () => void window.kovan.openExternal(url) },
+    { label: 'Copy link', run: () => void window.kovan.copyText(url) }
+  ], []);
+  const issueMenu = useCallback((issue: JiraIssue): RowMenuItem[] => (issue.url ? linkMenu(issue.url, 'Jira') : []), [linkMenu]);
+
   const groups = useMemo((): Group[] => {
+    if (pullPerson) {
+      // Theirs, in the order of yours: what waits on you first, then their
+      // open work, drafts, what waits on them, and what they shipped.
+      const theirs = personPulls.data;
+      if (!theirs) return [];
+      const yours = new Set(snapshot.reviewRequested.map((p) => `${p.repo}#${p.number}`));
+      const onYou = theirs.open.filter((p) => yours.has(`${p.repo}#${p.number}`));
+      const rest = theirs.open.filter((p) => !yours.has(`${p.repo}#${p.number}`));
+      const name = firstName(pullPerson);
+      return [
+        { id: 'person-on-you', label: 'Waiting on your review', pulls: sortPulls(onYou.filter(match), pullSort), tint: false },
+        { id: 'person-open', label: 'Open', pulls: sortPulls(rest.filter((p) => !p.isDraft).filter(match), pullSort), tint: false },
+        { id: 'person-drafts', label: 'Drafts', pulls: sortPulls(rest.filter((p) => p.isDraft).filter(match), pullSort), tint: false },
+        { id: 'person-review', label: `Awaiting ${name}'s review`, pulls: sortPulls(theirs.reviewRequested.filter(match), pullSort), tint: false },
+        { id: 'merged', label: 'Recently merged', pulls: theirs.merged.filter(match), tint: false }
+      ].map((group) => (
+        pullsPinnedOnly ? { ...group, pulls: group.pulls.filter((p) => pinnedKeys.has(pullPinKey(p.repo, p.number))) } : group
+      ));
+    }
     const blockedIds = new Set(snapshot.blocked.map((p) => `${p.repo}#${p.number}`));
     const rest = snapshot.mine.filter((p) => !blockedIds.has(`${p.repo}#${p.number}`));
     const drafts = rest.filter((p) => p.isDraft).filter(match);
+    // A kept pull request goes where its state puts it: merged ones after the
+    // merged window, newest first; anything still open into Open.
+    const keptMerged = kept.pulls.filter((p) => p.mergedAt)
+      .sort((a, b) => b.mergedAt!.localeCompare(a.mergedAt!)).filter(match);
+    const keptOpen = kept.pulls.filter((p) => !p.mergedAt).filter(match);
+    const keptNote = (n: number) => (n > 0 ? `+${n} pinned` : undefined);
     // Merged keeps its own newest-shipped order regardless of the sort menu:
     // it is a window onto a much longer list, paginated by merge date, and
     // re-sorting just the visible page by "created" or "updated" would make
@@ -1074,7 +1322,8 @@ export function App() {
       },
       {
         id: 'open', label: 'Open',
-        pulls: sortPulls(rest.filter((p) => !p.isDraft).filter(match), pullSort), tint: false
+        pulls: sortPulls([...rest.filter((p) => !p.isDraft).filter(match), ...keptOpen], pullSort), tint: false,
+        note: keptNote(keptOpen.length), noteQuiet: true
       },
       {
         id: 'drafts',
@@ -1086,9 +1335,24 @@ export function App() {
         // because folded is exactly where it would otherwise go unnoticed.
         note: countBlocked(drafts) > 0 ? `${countBlocked(drafts)} blocked` : undefined
       },
-      { id: 'merged', label: 'Recently merged', pulls: snapshot.merged.filter(match), tint: false }
-    ];
-  }, [snapshot, match, pullSort]);
+      {
+        id: 'merged', label: 'Recently merged', pulls: [...snapshot.merged.filter(match), ...keptMerged], tint: false,
+        note: keptNote(keptMerged.length), noteQuiet: true
+      }
+    ].map((group) => (
+      pullsPinnedOnly ? { ...group, pulls: group.pulls.filter((p) => pinnedKeys.has(pullPinKey(p.repo, p.number))) } : group
+    ));
+  }, [snapshot, match, pullSort, kept.pulls, pullsPinnedOnly, pinnedKeys, pullPerson, personPulls.data]);
+
+  // The merged window, yours or theirs: what "Show more" reads and widens.
+  const mergedWindow = pullPerson
+    ? {
+        shown: personPulls.data?.merged.length ?? 0,
+        total: personPulls.data?.mergedTotal ?? 0,
+        loading: personPulls.loading && personPulls.data !== undefined && personPulls.data.merged.length < personMerged,
+        more: () => setPersonMerged((personPulls.data?.merged.length ?? 0) + MERGED_STEP)
+      }
+    : { shown: snapshot.merged.length, total: snapshot.mergedTotal, loading: snapshot.loadingMerged, more: () => loadMoreMerged() };
 
   const pullFacets = useMemo(() => pullFacetValues(pullUniverse(snapshot)), [snapshot]);
   const pullFilterCount = PULL_FACETS.reduce((n, f) => n + pullFilters[f.key].size, 0);
@@ -1097,12 +1361,18 @@ export function App() {
     void window.kovan.loadMoreMerged(snapshot.merged.length + MERGED_STEP).then(accept);
   }, [snapshot.merged.length, accept]);
 
-  const ticketFacets = useMemo(() => ticketFacetValues(snapshot.tickets), [snapshot.tickets]);
+  // A teammate's tickets replace yours; your kept pins stay with your list.
+  const ticketSource = useMemo(
+    () => (ticketPerson ? personTickets.data?.tickets ?? [] : [...snapshot.tickets, ...kept.issues]),
+    [ticketPerson, personTickets.data, snapshot.tickets, kept.issues]
+  );
+  const ticketFacets = useMemo(() => ticketFacetValues(ticketSource), [ticketSource]);
   const ticketFilterCount = TICKET_FACETS.reduce((n, f) => n + ticketFilters[f.key].size, 0);
 
   const tickets = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const matching = snapshot.tickets.filter((t) => {
+    const matching = ticketSource.filter((t) => {
+      if (ticketsPinnedOnly && !pinnedKeys.has(ticketPinKey(t.key))) return false;
       if (q && !t.summary.toLowerCase().includes(q) && !t.key.toLowerCase().includes(q)) {
         return false;
       }
@@ -1120,7 +1390,7 @@ export function App() {
       sorted.sort((a, b) => b.updated.localeCompare(a.updated));
     }
     return sorted;
-  }, [snapshot.tickets, filter, ticketFilters, ticketSort]);
+  }, [ticketSource, ticketsPinnedOnly, pinnedKeys, filter, ticketFilters, ticketSort]);
 
   /** Newest-first, same as the ticket list's own default — no sort/filter
    *  menu of its own yet, just the shared search box. */
@@ -1157,13 +1427,13 @@ export function App() {
         <nav className="history-nav" aria-label="History">
           <button
             type="button" className="icon-button" disabled={!nav.canBack} onClick={nav.back}
-            aria-label="Back" title={nav.previous ? `Back to ${placeLabel(nav.previous, sessions)} (⌘[)` : 'Back (⌘[)'}
+            aria-label="Back" title={nav.previous ? `Back to ${placeLabel(nav.previous, sessions)} (${keyLabel('[')})` : `Back (${keyLabel('[')})`}
           >
             <BackIcon />
           </button>
           <button
             type="button" className="icon-button" disabled={!nav.canForward} onClick={nav.forward}
-            aria-label="Forward" title={nav.next ? `Forward to ${placeLabel(nav.next, sessions)} (⌘])` : 'Forward (⌘])'}
+            aria-label="Forward" title={nav.next ? `Forward to ${placeLabel(nav.next, sessions)} (${keyLabel(']')})` : `Forward (${keyLabel(']')})`}
           >
             <ForwardIcon />
           </button>
@@ -1171,6 +1441,16 @@ export function App() {
         <span className="wordmark">Kovan</span>
         {snapshot.viewer && <span className="viewer">{snapshot.viewer}</span>}
         <span className="spacer" />
+        {!nothingConnected && !starting && (
+          <Search
+            snapshot={snapshot} sessions={sessions} actions={searchActions}
+            onPull={(pull) => openSubject({ pull })}
+            onIssue={(issue) => openSubject({ issue })}
+            onSentry={(sentry) => openSubject({ sentry })}
+            onSession={(id) => { setActiveSession(id); setView('sessions'); }}
+            onFile={(path) => openFromQuick(path)}
+          />
+        )}
         <QuickCommands
           sessions={sessions}
           onRan={(id) => { setActiveSession(id); setView('sessions'); }}
@@ -1196,7 +1476,7 @@ export function App() {
       ) : (
         <div className={queueHidden ? 'body queue-hidden' : 'body'}>
           <nav className="rail" aria-label="Sections">
-            {railOrder.map((id) => VIEWS.find((x) => x.id === id)!).map((v) => {
+            {railOrder.filter((id) => id !== 'mixpanel' || mixpanelRail).map((id) => VIEWS.find((x) => x.id === id)!).map((v) => {
               const Icon = v.icon;
               const n = counts[v.id];
               const drop = railDrag?.target === v.id ? (railDrag.after ? ' drop-after' : ' drop-before') : '';
@@ -1225,7 +1505,10 @@ export function App() {
                 >
                   <Icon />
                   {v.id === 'pulls' && n > 0 && <span className="rail-pip" />}
-                  {v.id === 'sessions' && n > 0 && <span className="rail-pip live" />}
+                  {/* Waiting on you outranks running, as Herdr's rollup does (item 182). */}
+                  {v.id === 'sessions' && n > 0 && (waitingCount > 0
+                    ? <span className="rail-pip waiting" title={`${waitingCount} agent${waitingCount === 1 ? '' : 's'} waiting for you`} />
+                    : <span className="rail-pip live" title={`${n} running`} />)}
                   {v.id === 'activity' && activity.unread > 0 && (
                     <span className="rail-count" title={`${activity.unread} unread`}>
                       {activity.unread > 99 ? '99+' : activity.unread}
@@ -1251,7 +1534,7 @@ export function App() {
               aside and main as the body's own flex items. */}
           {workspaceSeen && (
             <div className={view === 'workspace' ? 'keep-alive' : 'keep-alive hidden'}>
-              <WorkspaceView onTerminal={openTerminal} visible={view === 'workspace'} openRequest={openRequest} />
+              <WorkspaceView sessions={sessions} visible={view === 'workspace'} openRequest={openRequest} showRequest={showWorkspace} />
             </div>
           )}
 
@@ -1262,6 +1545,8 @@ export function App() {
               snapshot={snapshot} onOpenSubject={openSubject} onRename={renameSession}
               fontSize={fontSize}
             />
+          ) : view === 'mixpanel' ? (
+            <MixpanelView />
           ) : view === 'agents' ? (
             <AgentsView
               pane={agentsPane} onPane={setAgentsPane}
@@ -1270,20 +1555,35 @@ export function App() {
             />
           ) : view === 'workspace' ? null : (
             <>
-              <aside className="queue" aria-label={current.label}>
+              <aside
+                className="queue" aria-label={current.label}
+                onKeyDown={(e) => {
+                  // Esc on someone else's list goes back to yours, unless it
+                  // is closing a menu (still in the page as the key lands).
+                  if (e.key === 'Escape' && listPerson && !document.querySelector('.queue .menu')) backToYou();
+                }}
+              >
                 <div className="queue-head">
-                  <div className="queue-title-row">
+                  <div className={view === 'pulls' || view === 'tickets' ? 'queue-title-row with-person' : 'queue-title-row'}>
                     <h1>{current.label}</h1>
+                    {view === 'pulls' && (
+                      <PersonPicker service="github" value={pullPerson} onChange={setPullPerson} me={snapshot.viewer} />
+                    )}
+                    {view === 'tickets' && (
+                      <PersonPicker service="jira" value={ticketPerson} onChange={setTicketPerson} me={snapshot.viewer} />
+                    )}
+                    {(view === 'pulls' || view === 'tickets') && <span className="person-spacer" />}
                     {view === 'tickets' ? (
                       <>
                         <TicketFilterMenu
                           values={ticketFacets}
-                          tickets={snapshot.tickets}
+                          tickets={ticketSource}
                           active={ticketFilters}
                           onToggle={toggleTicketFilter}
                           onClear={clearTicketFilters}
                         />
                         <TicketSortMenu value={ticketSort} onChange={setTicketSort} />
+                        <PinnedOnlyButton on={ticketsPinnedOnly} count={pinnedTicketCount} onChange={setTicketsPinnedOnly} />
                       </>
                     ) : view === 'pulls' ? (
                       <>
@@ -1294,6 +1594,7 @@ export function App() {
                           onClear={clearPullFilters}
                         />
                         <PullSortMenu value={pullSort} onChange={setPullSort} />
+                        <PinnedOnlyButton on={pullsPinnedOnly} count={pinnedPullCount} onChange={setPullsPinnedOnly} />
                       </>
                     ) : view === 'activity' ? (
                       activity.unread > 0 && (
@@ -1307,11 +1608,25 @@ export function App() {
                     <SearchIcon />
                     <label htmlFor="q" className="sr-only" style={{ display: 'none' }}>Filter</label>
                     <input
-                      id="q" type="text" placeholder="Filter"
+                      id="q" type="text"
+                      placeholder={listPerson ? `Filter ${firstName(listPerson)}'s ${view === 'pulls' ? 'pull requests' : 'tickets'}` : 'Filter'}
                       value={filter} onChange={(e) => setFilter(e.target.value)}
                     />
-                    {filter === '' && <kbd>⌘F</kbd>}
+                    {filter === '' && <kbd>{keyLabel('F')}</kbd>}
                   </div>
+                  {listPerson && (
+                    <p className="person-banner">
+                      <span className="person-banner-text">
+                        {listPerson.name}'s {view === 'pulls' ? 'pull requests' : 'tickets'}
+                      </span>
+                      <button
+                        type="button" className="link person-back" onClick={backToYou}
+                        title="Esc also goes back"
+                      >
+                        Back to you
+                      </button>
+                    </p>
+                  )}
                 </div>
 
                 <div className="queue-list">
@@ -1347,15 +1662,26 @@ export function App() {
                         ))}
                       </ul>
                     )
+                  ) : view === 'tickets' && ticketPerson && !personTickets.data ? (
+                    <PersonListState person={ticketPerson} what="tickets" error={personTickets.error} onRetry={personTickets.retry} />
                   ) : view === 'tickets' ? (
-                    tickets.length === 0 ? (
-                      <p className="quiet">
-                        {filter || ticketFilterCount > 0 ? 'No tickets match.' : 'No tickets.'}
-                      </p>
+                    tickets.length === 0 && (ticketPerson || failedTickets.length === 0) ? (
+                      ticketsPinnedOnly && pinnedTicketCount === 0 ? <NothingPinned /> : (
+                        <p className="quiet">
+                          {filter || ticketFilterCount > 0 || ticketsPinnedOnly ? 'No tickets match.'
+                            : ticketPerson ? `${firstName(ticketPerson)} has no open tickets.` : 'No tickets.'}
+                        </p>
+                      )
                     ) : (
                       <ul className="rows">
-                        {tickets.map((issue) => (
-                          <li key={issue.key}>
+                        {tickets.map((issue) => {
+                          const pinKey = ticketPinKey(issue.key);
+                          const pinned = pinnedKeys.has(pinKey);
+                          return (
+                          <li
+                            key={issue.key} className={`pinnable${pinned ? ' pinned' : ''}`}
+                            onContextMenu={(e) => rowMenu.open(e, pinKey, `${issue.key} ${issue.summary}`, pinned, issueMenu(issue))}
+                          >
                             <button
                               className={selected.issue?.key === issue.key ? 'row selected' : 'row'}
                               onClick={() => setSelected({ issue })}
@@ -1376,25 +1702,43 @@ export function App() {
                                 )}
                                 <span className="spacer" />
                                 <span className="row-age">{formatAge(issue.updated)}</span>
+                                <PinSlot />
                               </span>
                             </button>
+                            <PinToggle pinKey={pinKey} title={`${issue.key} ${issue.summary}`} pinned={pinned} />
                           </li>
+                          );
+                        })}
+                        {!ticketPerson && failedTickets.map((f) => (
+                          <FailedPinRow
+                            key={f.pin.key} pin={f.pin} label={f.pin.key.slice('ticket:'.length)}
+                            error={f.error} onRetry={() => kept.retry(f.pin.key)}
+                          />
                         ))}
                       </ul>
                     )
+                  ) : pullsPinnedOnly && pinnedPullCount === 0 ? (
+                    <NothingPinned />
+                  ) : pullPerson && !personPulls.data ? (
+                    <PersonListState person={pullPerson} what="pull requests" error={personPulls.error} onRetry={personPulls.retry} />
                   ) : (
-                    groups.map((group) => {
-                      const open = !collapsed.has(group.id);
+                    <>
+                    {groups.map((group) => {
+                      // Pinned only shows every pinned row, folded section or not.
+                      const open = pullsPinnedOnly || !collapsed.has(group.id);
                       const empty = group.pulls.length === 0;
+                      // Pinned only: a section with nothing pinned in it is noise.
+                      if (pullsPinnedOnly && empty) return null;
                       return (
                         <section key={group.id}>
                           <GroupHead
                             label={group.label}
                             count={group.pulls.length}
-                            total={group.id === 'merged' ? snapshot.mergedTotal : undefined}
+                            total={group.id === 'merged' && !pullsPinnedOnly ? mergedWindow.total : undefined}
                             open={open}
                             tint={group.tint && !empty}
                             note={group.note}
+                            noteQuiet={group.noteQuiet}
                             onToggle={() => toggleGroup(group.id)}
                           />
                           {open && empty && (
@@ -1415,6 +1759,11 @@ export function App() {
                                       selected.pull?.repo === pull.repo
                                     }
                                     onSelect={() => setSelected({ pull })}
+                                    pinned={pinnedKeys.has(pullPinKey(pull.repo, pull.number))}
+                                    onMenu={(e) => rowMenu.open(
+                                      e, pullPinKey(pull.repo, pull.number), `#${pull.number} ${pull.title}`,
+                                      pinnedKeys.has(pullPinKey(pull.repo, pull.number)), linkMenu(pull.url, 'GitHub')
+                                    )}
                                   />
                                 ))}
                               </ul>
@@ -1423,29 +1772,49 @@ export function App() {
                                 one, and a list that stops without saying so is
                                 a list you assume is complete.
                               */}
-                              {group.id === 'merged' &&
-                                snapshot.merged.length < snapshot.mergedTotal && (
+                              {group.id === 'merged' && !pullsPinnedOnly &&
+                                mergedWindow.shown < mergedWindow.total && (
                                 <button
                                   type="button"
                                   className="more"
-                                  disabled={snapshot.loadingMerged}
-                                  onClick={loadMoreMerged}
+                                  disabled={mergedWindow.loading}
+                                  onClick={mergedWindow.more}
                                 >
-                                  {snapshot.loadingMerged
+                                  {mergedWindow.loading
                                     ? 'Loading…'
                                     : `Show ${Math.min(
                                         MERGED_STEP,
-                                        snapshot.mergedTotal - snapshot.merged.length
-                                      )} more of ${snapshot.mergedTotal}`}
+                                        mergedWindow.total - mergedWindow.shown
+                                      )} more of ${mergedWindow.total}`}
                                 </button>
                               )}
                             </>
                           )}
                         </section>
                       );
-                    })
+                    })}
+                    {!pullPerson && failedPulls.length > 0 && (
+                      <section>
+                        <GroupHead
+                          label="Pinned, not loaded" count={failedPulls.length}
+                          open={!collapsed.has('pins-failed')} onToggle={() => toggleGroup('pins-failed')}
+                        />
+                        {!collapsed.has('pins-failed') && (
+                          <ul className="rows">
+                            {failedPulls.map((f) => (
+                              <FailedPinRow
+                                key={f.pin.key} pin={f.pin} label={f.pin.key.slice(f.pin.key.lastIndexOf('#') + 1)}
+                                error={f.error} onRetry={() => kept.retry(f.pin.key)}
+                              />
+                            ))}
+                          </ul>
+                        )}
+                      </section>
+                    )}
+                    </>
                   )}
                 </div>
+                {rowMenu.element}
               </aside>
               <Resizer />
 
@@ -1483,6 +1852,8 @@ export function App() {
                     onRun={(issue, frames) => setRunSheet({ kind: 'implement', sentry: { issue, frames } })}
                     onOpenSession={openSession}
                   />
+                ) : view === 'activity' && eventPane ? (
+                  <ActivityEventPane event={eventPane.event} loading={eventPane.loading} error={eventPane.error} />
                 ) : (
                   <p className="quiet centred">
                     Pick a row to see it, and to hand it to an agent.
@@ -1500,19 +1871,72 @@ export function App() {
       <DictationLayer />
       {quickOpen && <QuickOpen onOpen={openFromQuick} onClose={() => setQuickOpen(false)} />}
 
-      {connecting && (
-        <Settings
-          onClose={() => setConnecting(false)}
-          connected={snapshot.connected}
-        />
-      )}
       {runSheet && (
         <RunSheet
           kind={runSheet.kind} pull={runSheet.pull} issue={runSheet.issue} sentry={runSheet.sentry}
           onClose={() => setRunSheet(undefined)} onStarted={onStarted}
         />
       )}
+      {/* After the run sheet, so Settings opened from it (item 181's "Change it
+          for every run") sits on top and the sheet is there when it closes. */}
+      {connecting && (
+        <Settings
+          onClose={() => { setConnecting(false); setSettingsSection(undefined); }}
+          connected={snapshot.connected}
+          section={settingsSection}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Which shell the folder below opens in (item 126): the three common ones a
+ * click away, the rest of /etc/shells behind More…, and the choice kept for
+ * next time. Hidden when only one shell is installed.
+ */
+function ShellSwitch() {
+  const { shells, chosen } = useShellChoice();
+  const [more, setMore] = useState(false);
+  if (shells.length < 2) return null;
+  // One of each shell up front: a second zsh (macOS's beside Homebrew's) goes under More…
+  const base = (s: ShellOption) => s.path.split('/').pop();
+  const front: ShellOption[] = [];
+  for (const s of shells) {
+    if (front.length < 3 && !front.some((f) => base(f) === base(s))) front.push(s);
+  }
+  const rest = shells.filter((s) => !front.includes(s));
+  const inRest = chosen && rest.includes(chosen);
+  return (
+    <>
+      <p className="menu-head">Shell</p>
+      <div className="segmented shell-switch" role="radiogroup" aria-label="Shell">
+        {front.map((s) => (
+          <button
+            key={s.path} type="button" role="radio" aria-checked={s === chosen}
+            className={s === chosen ? 'seg on' : 'seg'} title={s.path}
+            onClick={() => { setShell(s.path); setMore(false); }}
+          >{s.name}</button>
+        ))}
+        {rest.length > 0 && (
+          <button
+            type="button" aria-expanded={more} className={inRest ? 'seg on' : 'seg'}
+            title={inRest ? chosen.path : 'Other installed shells'}
+            onClick={() => setMore((v) => !v)}
+          >{inRest ? chosen.name : 'More…'}</button>
+        )}
+      </div>
+      {more && rest.map((s) => (
+        <button
+          key={s.path} type="button" role="menuitemradio" aria-checked={s === chosen}
+          className={s === chosen ? 'active' : undefined}
+          onClick={() => { setShell(s.path); setMore(false); }}
+        >
+          {s.name}<span className="menu-note">{s.path}</span>
+        </button>
+      ))}
+      <div className="menu-rule" />
+    </>
   );
 }
 
@@ -1537,6 +1961,7 @@ function NewSessionMenu({
       </button>
       {open && (
         <div className="menu" role="menu" onClick={(e) => e.stopPropagation()}>
+          <ShellSwitch />
           <p className="menu-head">Open a terminal in</p>
           {targets.length === 0 ? (
             <p className="menu-empty">No watched folders yet.</p>
@@ -1554,9 +1979,12 @@ function NewSessionMenu({
 }
 
 function SessionRow({
-  session, selected, seen, snapshot, onSelect, onOpenSubject, onRename, drag, onMove
+  session, selected, seen, snapshot, onSelect, onOpenSubject, onRename, drag, onMove, pinned, onMenu
 }: {
   session: SessionInfo;
+  /** Pinned (item 145): the pin stays in the row's icons, and a click unpins. */
+  pinned: boolean;
+  onMenu: (event: React.MouseEvent, title: string) => void;
   selected: boolean;
   /** Whether its latest status has been on screen (item 112). */
   seen: boolean;
@@ -1592,6 +2020,7 @@ function SessionRow({
         {...drags}
         onMouseEnter={hover.handlers.onMouseEnter}
         onMouseLeave={hover.handlers.onMouseLeave}
+        onContextMenu={(e) => onMenu(e, session.title)}
         onPointerDown={(e) => { hover.handlers.onPointerDown(); drags?.onPointerDown(e); }}
         onKeyDown={(e) => {
           if (editing) return;
@@ -1616,13 +2045,16 @@ function SessionRow({
             editing={editing} onEdit={setEditing} onRename={onRename}
             className="row-title" plainName
           />
-          <AgentStateBadge session={session} seen={seen} />
-          <SessionUsageChip id={session.id} />
+          {session.shell && <span className="row-shell" title={session.shell}>{session.shell.split('/').pop()}</span>}
+          {/* Status as one small icon before the age; cost and the words are
+              in the hover card (item 146). */}
+          {!editing && <PinToggle pinKey={sessionPinKey(session.id)} title={session.title} pinned={pinned} className="inline" />}
           {!editing && <SessionCloseButton session={session} />}
+          <SessionStateIcon session={session} seen={seen} />
           <span className="row-age">{formatAge(new Date(session.startedAt).toISOString())}</span>
         </span>
       </div>
-      {!editing && <SessionHoverCard anchor={hover.anchor} session={session} snapshot={snapshot} />}
+      {!editing && <SessionHoverCard anchor={hover.anchor} session={session} snapshot={snapshot} seen={seen} />}
     </li>
   );
 }
@@ -1983,12 +2415,24 @@ function Sessions({
   // A Done is news until the session has been on screen (item 112).
   const seen = useSeenStatus(sessions, job ? [] : shownSessions(pane.tree));
 
+  // Pins (item 145). A closed session's id never comes back, so its pin goes
+  // with it — once the list is known, never from the empty list before that.
+  const pinnedKeys = usePinnedKeys();
+  const [pinnedOnly, setPinnedOnly] = usePinnedOnly('session');
+  const rowMenu = useRowMenu();
+  useEffect(() => {
+    if (sessionsReady) forgetClosedSessions(new Set(sessions.map((s) => s.id)));
+  }, [sessions, sessionsReady]);
+  const pinnedCount = sessions.filter((s) => pinnedKeys.has(sessionPinKey(s.id))).length;
+  const listed = pinnedOnly ? ordered.filter((s) => pinnedKeys.has(sessionPinKey(s.id))) : ordered;
+
   return (
     <>
       <aside className="queue" aria-label="Sessions">
         <div className="queue-head">
           <div className="queue-title-row">
             <h1>Sessions</h1>
+            <PinnedOnlyButton on={pinnedOnly} count={pinnedCount} onChange={setPinnedOnly} />
             <NewSessionMenu targets={targets} onOpen={onOpen} />
           </div>
         </div>
@@ -1999,12 +2443,16 @@ function Sessions({
                 ? 'No terminal sessions. Start an agent from a pull request or a ticket, or open a terminal.'
                 : 'Nothing running. Start an agent from a pull request or a ticket, or open a terminal.'}
             </p>
+          ) : pinnedOnly && listed.length === 0 ? (
+            <NothingPinned />
           ) : (
             <ul className="rows">
-              {ordered.map((s, i) => (
+              {listed.map((s, i) => (
                 <SessionRow
                   key={s.id}
                   session={s}
+                  pinned={pinnedKeys.has(sessionPinKey(s.id))}
+                  onMenu={(e, title) => rowMenu.open(e, sessionPinKey(s.id), title, pinnedKeys.has(sessionPinKey(s.id)))}
                   selected={s.id === active && !job}
                   seen={seen(s)}
                   snapshot={snapshot}
@@ -2013,7 +2461,7 @@ function Sessions({
                   onRename={onRename}
                   drag={drag}
                   onMove={(delta) => {
-                    const target = ordered[i + delta];
+                    const target = listed[i + delta];
                     if (target) moveInOrder(s.id, target.id, delta > 0);
                   }}
                 />
@@ -2045,6 +2493,7 @@ function Sessions({
             </>
           )}
         </div>
+        {rowMenu.element}
       </aside>
       <Resizer />
       <main className="pane term-pane">

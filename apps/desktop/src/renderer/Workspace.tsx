@@ -18,10 +18,12 @@
  * as one over an empty directory.
  */
 
+import { isMac, keyLabel } from './platform';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { changeMarks, moveBy, moveItem, type ChangeMark } from '@kovan/core';
 import { useMenuDismiss } from './menuDismiss';
 import { Editor, formatBytes, statusFor } from './Editor';
+import { MarkdownPreview } from './MarkdownPreview';
 import { rememberFile } from './QuickOpen';
 import { Diff } from './Diff';
 import { Resizer } from './Resizer';
@@ -31,8 +33,29 @@ import {
 } from './icons';
 import type {
   ChangeKind, DiffSide, Entry, FileBody, FileChange, FileDiff, Root, Workspace, WorkspaceRepo,
-  WorkspaceStatus
+  SessionInfo, WorkspaceStatus
 } from './types';
+import { InlineTerminal } from './Detail';
+import { useTerminalToggle } from './terminalToggle';
+
+/** A window's workspace changed; App files its place under the new one (item 163). */
+export const WORKSPACE_SWITCHED = 'kovan-workspace-switched';
+
+/** What a workspace looked like when you left it (item 163): open tabs, open folders. */
+const STATE_KEY = 'kovan.workspace-state';
+interface SavedState {
+  tabs: Tab[];
+  current?: string;
+  expanded: string[];
+  pane: 'files' | 'changes';
+}
+
+function loadState(id: string): SavedState | undefined {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`${STATE_KEY}.${id}`) ?? 'null') as SavedState | null;
+    return raw && Array.isArray(raw.tabs) && Array.isArray(raw.expanded) ? raw : undefined;
+  } catch { return undefined; }
+}
 
 interface Tab {
   key: string;
@@ -52,10 +75,21 @@ const KIND_MARK: Record<ChangeKind, string> = {
 
 interface Cursor { line: number; column: number; selected: number }
 
-export function WorkspaceView({ onTerminal, visible, openRequest }: {
-  onTerminal: (cwd: string) => void;
+/** A file to open in the Workspace view: in the editor, or its diff when `diff` says which. */
+export interface OpenRequest {
+  path: string;
+  line?: number;
+  diff?: { repo: string; file: string; side: DiffSide };
+  nonce: number;
+}
+
+export function WorkspaceView({ sessions, visible, openRequest, showRequest }: {
+  /** For the terminal docked under the editor (item 158). */
+  sessions: SessionInfo[];
+  /** The Dock menu (item 135): switch to this workspace, opened at `folder`. */
+  showRequest?: { id: string; folder?: string; nonce: number };
   /** ⌘P picked a file (item 100): open it, at a line if one was typed. */
-  openRequest?: { path: string; line?: number; nonce: number };
+  openRequest?: OpenRequest;
   /**
    * App keeps this view mounted once opened and only hides it, so coming back
    * finds the same Files/Changes tab, open repositories, editor tabs and
@@ -179,8 +213,10 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
       setRoots(found);
       // Every folder of the workspace starts open. That is the whole point of
       // a multi-folder workspace: you see all of them at once, without
-      // switching anything.
-      setExpanded(new Set(found.map((r) => r.folder)));
+      // switching anything. Unless you were here before: then the folders
+      // you had open (item 163).
+      const saved = loadState(active);
+      setExpanded(new Set(saved ? saved.expanded : found.map((r) => r.folder)));
       const pairs = await Promise.all(
         reposOf(found).map(
           async (r) => [r.path, await window.kovan.workspaceStatus(r.path)] as const
@@ -192,6 +228,31 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
     })();
     return () => { cancelled = true; };
   }, [active]);
+
+  /**
+   * A pick from the Dock menu. Main has already made it the active workspace,
+   * so this only follows: the list again (it may be a workspace this view has
+   * not seen yet), then, once that workspace's folders are in, the folder
+   * opened and scrolled to.
+   */
+  const shownRequest = useRef<number>();
+  useEffect(() => {
+    if (!showRequest || shownRequest.current === showRequest.nonce || showRequest.id === active) return;
+    void window.kovan.workspaces().then(({ list: all }) => { setList(all); setActive(showRequest.id); });
+  }, [showRequest, active]);
+  useEffect(() => {
+    const request = showRequest;
+    if (!request || shownRequest.current === request.nonce || request.id !== active || !roots) return;
+    const folder = request.folder;
+    // Still the previous workspace's folders, the instant after switching.
+    if (folder && !roots.some((r) => r.folder === folder)) return;
+    shownRequest.current = request.nonce;
+    if (!folder) return;
+    setExpanded((previous) => new Set(previous).add(folder));
+    requestAnimationFrame(() => document
+      .querySelector(`[data-root-row="${CSS.escape(folder)}"]`)
+      ?.scrollIntoView({ block: 'start' }));
+  }, [showRequest, active, roots]);
 
   /** Loads a directory once, into the shared cache. */
   const ensure = useCallback((dir: string) => {
@@ -228,6 +289,39 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
     setFailed(new Map());
     void loadRoots(active, true).then(() => setRevision((r) => r + 1));
   }, [active, loadRoots]);
+
+  // Main brings forward another window that already shows it (item 159);
+  // this one only switches when it didn't.
+  const switchWorkspace = useCallback((id: string) => {
+    void window.kovan.workspaceActivate(id).then((here) => { if (here) setActive(id); });
+  }, []);
+  useEffect(() => {
+    if (active) window.dispatchEvent(new Event(WORKSPACE_SWITCHED));
+  }, [active]);
+
+  // The open tabs come back once, at launch, for the workspace the window
+  // opened on (item 163). Switching later leaves the tabs as they are: one
+  // might hold unsaved edits.
+  const restoredFor = useRef<string>();
+  useEffect(() => {
+    if (!active) return;
+    const first = restoredFor.current === undefined;
+    restoredFor.current = active;
+    if (!first) return;
+    const saved = loadState(active);
+    if (!saved) return;
+    setTabs((existing) => (existing.length > 0 ? existing : saved.tabs));
+    setCurrent((existing) => existing ?? saved.current);
+    setPane(saved.pane === 'changes' ? 'changes' : 'files');
+  }, [active]);
+  useEffect(() => {
+    if (!active || restoredFor.current !== active || roots === undefined) return undefined;
+    const timer = setTimeout(() => {
+      const state: SavedState = { tabs, ...(current ? { current } : {}), expanded: [...expanded], pane };
+      try { localStorage.setItem(`${STATE_KEY}.${active}`, JSON.stringify(state)); } catch { /* this launch only */ }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [active, tabs, current, expanded, pane, roots]);
 
   const createWorkspace = useCallback(() => {
     void window.kovan.workspaceCreate().then(async (made) => {
@@ -350,13 +444,6 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
   }, [open]);
 
   const [jump, setJump] = useState<{ path: string; line: number; nonce: number }>();
-  const handled = useRef<number>();
-  useEffect(() => {
-    if (!openRequest || handled.current === openRequest.nonce) return;
-    handled.current = openRequest.nonce;
-    openFile({ name: openRequest.path.split('/').pop() || openRequest.path, path: openRequest.path, directory: false });
-    if (openRequest.line) setJump({ path: openRequest.path, line: openRequest.line, nonce: openRequest.nonce });
-  }, [openRequest, openFile]);
 
   const openDiff = useCallback((repo: string, file: string, side: DiffSide, from?: string) =>
     open({
@@ -367,6 +454,18 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
       title: file.split('/').pop() || file,
       path: file, repo, side, ...(from ? { from } : {})
     }), [open]);
+
+  const handled = useRef<number>();
+  useEffect(() => {
+    if (!openRequest || handled.current === openRequest.nonce) return;
+    handled.current = openRequest.nonce;
+    if (openRequest.diff) {
+      openDiff(openRequest.diff.repo, openRequest.diff.file, openRequest.diff.side);
+      return;
+    }
+    openFile({ name: openRequest.path.split('/').pop() || openRequest.path, path: openRequest.path, directory: false });
+    if (openRequest.line) setJump({ path: openRequest.path, line: openRequest.line, nonce: openRequest.nonce });
+  }, [openRequest, openFile, openDiff]);
 
   const close = useCallback((key: string) => {
     setTabs((existing) => {
@@ -387,6 +486,35 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
     [roots]
   );
   const repoOf = (file: string) => repoPaths.find((r) => file.startsWith(`${r}/`));
+
+  /**
+   * The terminal docked under the editor (item 158), one per workspace, as
+   * VS Code's panel: ⌘J and the folder rows' terminal buttons open it here
+   * instead of sending you to Sessions. Hiding it leaves the shell running;
+   * its close button ends it.
+   */
+  const [terminals, setTerminals] = useState<Record<string, string>>({});
+  const [terminalShown, setTerminalShown] = useState(true);
+  const terminal = active ? sessions.find((s) => s.id === terminals[active]) : undefined;
+  // A second ⌘J while a shell is still starting would start another.
+  const opening = useRef(false);
+  const openTerminalAt = useCallback((cwd: string) => {
+    const ws = active;
+    if (!ws || opening.current) return;
+    opening.current = true;
+    void window.kovan.openTerminal(cwd).then((session) => {
+      setTerminals((t) => ({ ...t, [ws]: session.id }));
+      setTerminalShown(true);
+    }).finally(() => { opening.current = false; });
+  }, [active]);
+  useTerminalToggle(() => {
+    if (terminal?.running) { setTerminalShown((v) => !v); return; }
+    // Where you are: the open file's repository, else the first folder.
+    const here = tab ? (tab.kind === 'file' ? repoOf(tab.path) : tab.repo) : undefined;
+    const first = roots?.[0];
+    const cwd = here ?? first?.repo?.path ?? first?.folder;
+    if (cwd) openTerminalAt(cwd);
+  }, visible);
 
   const markDirty = useCallback((key: string, value: boolean) => {
     setDirty((d) => {
@@ -483,7 +611,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
                 open={!shutRoot}
                 onToggle={() => setShutRoot((v) => !v)}
                 onAddFolder={addFolder}
-                onSwitch={(id) => { setActive(id); void window.kovan.workspaceActivate(id); }}
+                onSwitch={switchWorkspace}
                 onCreate={createWorkspace}
                 onRename={renameWorkspace}
                 onForget={forgetWorkspace}
@@ -506,7 +634,7 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
                       expanded={expanded}
                       onToggle={toggle}
                       onRemove={() => removeFolder(root.folder)}
-                      onTerminal={onTerminal}
+                      onTerminal={openTerminalAt}
                       drop={rootDrag.drop?.target === root.folder ? (rootDrag.drop.after ? 'after' : 'before') : undefined}
                       dragging={rootDrag.drop?.id === root.folder}
                       onDragStart={(e) => rootDrag.start(root.folder, e)}
@@ -552,7 +680,11 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
       <Resizer />
 
       <main className="pane editor-pane">
-        {tabs.length === 0 ? (
+        <div className="detail-shell">
+        <div className="ws-editor-area">
+        {!workspace && list.length > 0 ? (
+          <StartPage workspaces={list} onOpenFolder={createWorkspace} onOpen={switchWorkspace} />
+        ) : tabs.length === 0 ? (
           <p className="quiet centred">
             {workspace
               ? 'Pick a file to read or edit it, or a change to see the diff.'
@@ -612,6 +744,11 @@ export function WorkspaceView({ onTerminal, visible, openRequest }: {
             )}
           </>
         )}
+        </div>
+        {terminal?.running && terminalShown && (
+          <InlineTerminal session={terminal} onHide={() => setTerminalShown(false)} />
+        )}
+        </div>
       </main>
     </>
   );
@@ -790,6 +927,10 @@ function WorkspaceRow({
             )}
             <button role="menuitem" onClick={() => { setMenu(false); onCreate(); }}>
               New workspace…
+            </button>
+            <button role="menuitem" onClick={() => { setMenu(false); void window.kovan.newWindow(); }}>
+              New window
+              <span className="menu-note">{isMac ? '⌘⇧N' : 'Ctrl+Shift+N'}</span>
             </button>
             {/* "Close", not "Delete": this forgets a list of folders and
                 leaves every file where it is. */}
@@ -1279,6 +1420,43 @@ function Skeleton({ rows = 3, label, inline = false }: {
   );
 }
 
+/** "/Users/me/code/x" as "~/code/x". */
+const homeShort = (folder: string) => folder.replace(/^\/(Users|home)\/[^/]+/, '~');
+
+/**
+ * An empty window's editor area (item 159), after VS Code's Welcome page:
+ * open a folder as a new workspace, or pick one you have. A workspace open in
+ * another window brings that window forward instead.
+ */
+function StartPage({ workspaces, onOpenFolder, onOpen }: {
+  workspaces: Workspace[];
+  onOpenFolder: () => void;
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <div className="ws-start">
+      <h1>Kovan</h1>
+      <p className="quiet">No workspace in this window yet.</p>
+      <h2>Start</h2>
+      <button className="ws-start-link" onClick={onOpenFolder}>
+        <AddFolderIcon size={14} /> Open Folder…
+      </button>
+      <h2>Workspaces</h2>
+      <ul>
+        {workspaces.map((w) => (
+          <li key={w.id}>
+            <button className="ws-start-link" onClick={() => onOpen(w.id)}>{w.name}</button>
+            <span className="ws-start-path">
+              {w.folders[0] ? homeShort(w.folders[0]) : 'no folders'}
+              {w.folders.length > 1 ? ` +${w.folders.length - 1}` : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function NoWorkspace({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="ws-empty">
@@ -1297,6 +1475,50 @@ function NoWorkspace({ onCreate }: { onCreate: () => void }) {
 /** Enough context lines to cover any file: the diff becomes one hunk. */
 const WHOLE_FILE = 1_000_000;
 const WHOLE_KEY = 'kovan.diff-whole-file';
+
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i;
+
+/**
+ * An image file (item 162): fitted to the pane on a checkerboard, so
+ * transparency shows; a click toggles its actual size.
+ */
+function ImageView({ url, bytes, onSize }: {
+  url: string | null;
+  bytes: number;
+  onSize: (size: { width: number; height: number }) => void;
+}) {
+  const [actual, setActual] = useState(false);
+  if (!url) {
+    return (
+      <p className="quiet centred">
+        {bytes > 10 * 1024 * 1024
+          ? `${formatBytes(bytes)} is too large to show here (over 10 MB).`
+          : 'Kovan can’t show this image.'}
+      </p>
+    );
+  }
+  return (
+    <div className={actual ? 'image-view checker actual' : 'image-view checker'}>
+      <img
+        src={url} alt=""
+        title={actual ? 'Click to fit' : 'Click for actual size'}
+        onClick={() => setActual((v) => !v)}
+        onLoad={(e) => onSize({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
+      />
+    </div>
+  );
+}
+
+type MdMode = 'source' | 'split' | 'preview';
+const MD_MODE_KEY = 'kovan.markdown-mode';
+const MD_MODES: [MdMode, string][] = [['source', 'Source'], ['split', 'Split'], ['preview', 'Preview']];
+
+function loadMdMode(): MdMode {
+  try {
+    const saved = localStorage.getItem(MD_MODE_KEY);
+    return saved === 'split' || saved === 'preview' ? saved : 'source';
+  } catch { return 'source'; }
+}
 
 function loadWhole(): boolean {
   try { return localStorage.getItem(WHOLE_KEY) === '1'; } catch { return false; }
@@ -1333,6 +1555,53 @@ function TabBody({
   // Remembered across tabs and launches: someone who reads diffs in full
   // wants the next one in full too.
   const [whole, setWhole] = useState(loadWhole);
+
+  // Markdown (item 161): the source, the preview, or both side by side. The
+  // last choice is kept, so someone who reads notes rendered gets them so.
+  const markdown = tab.kind === 'file' && /\.(md|markdown|mdx)$/i.test(tab.path);
+  // An SVG is text you may edit, so it gets the same switch, its preview the picture.
+  const svg = tab.kind === 'file' && /\.svg$/i.test(tab.path);
+  // Any other image opens as the picture (item 162), read by main like a
+  // Markdown preview's: `null` when it can't be shown.
+  const picture = tab.kind === 'file' && IMAGE_EXT.test(tab.path);
+  const [image, setImage] = useState<string | null>();
+  useEffect(() => {
+    if (!picture) return undefined;
+    let cancelled = false;
+    void window.kovan.workspaceImage(tab.path)
+      .then((url) => { if (!cancelled) setImage(url ?? null); })
+      .catch(() => { if (!cancelled) setImage(null); });
+    return () => { cancelled = true; };
+  }, [picture, tab]);
+  const [size, setSize] = useState<{ width: number; height: number }>();
+  const [mdMode, setMdMode] = useState<MdMode>(loadMdMode);
+  const chooseMd = useCallback((mode: MdMode) => {
+    setMdMode(mode);
+    try { localStorage.setItem(MD_MODE_KEY, mode); } catch { /* this window only */ }
+  }, []);
+  // What the editor holds, unsaved edits included, a beat behind the typing.
+  const [text, setText] = useState<string>();
+  const pending = useRef<ReturnType<typeof setTimeout>>();
+  const onText = useCallback((next: string) => {
+    clearTimeout(pending.current);
+    pending.current = setTimeout(() => setText(next), 150);
+  }, []);
+  useEffect(() => () => clearTimeout(pending.current), []);
+  const bodyBox = useRef<HTMLDivElement>(null);
+  // ⌘⇧V, as in VS Code: preview, or back to the source. Only the tab on
+  // screen: the Workspace view stays mounted when hidden.
+  useEffect(() => {
+    if (!markdown && !svg) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      const mod = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+      if (!mod || !event.shiftKey || event.altKey || event.key.toLowerCase() !== 'v') return;
+      if (!bodyBox.current?.offsetParent) return;
+      event.preventDefault();
+      chooseMd(mdMode === 'preview' ? 'source' : 'preview');
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [markdown, svg, mdMode, chooseMd]);
 
   const toggleWhole = () => setWhole((w) => {
     try { localStorage.setItem(WHOLE_KEY, w ? '0' : '1'); } catch { /* this window only */ }
@@ -1382,18 +1651,52 @@ function TabBody({
 
   if (error) return <p className="quiet centred error">{error}</p>;
 
+  const previewable = (markdown || svg) && body?.kind === 'text';
+  const mode = previewable ? mdMode : 'source';
+
   return (
-    <div className="tab-body">
-      <div className="tab-path">
-        <bdi>{tab.kind === 'file' ? tab.path : `${tab.repo}/${tab.path}`}</bdi>
+    <div className="tab-body" ref={bodyBox}>
+      <div className="tab-bar">
+        <div className="tab-path">
+          <bdi>{tab.kind === 'file' ? tab.path : `${tab.repo}/${tab.path}`}</bdi>
+        </div>
+        {previewable && (
+          <div className="segmented md-modes" role="tablist" aria-label="Markdown view">
+            {MD_MODES.map(([id, label]) => (
+              <button
+                key={id} role="tab" aria-selected={mode === id}
+                className={mode === id ? 'seg on' : 'seg'}
+                title={id === 'preview' ? `Preview (${isMac ? '⌘⇧V' : 'Ctrl+Shift+V'})` : undefined}
+                onClick={() => chooseMd(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {tab.kind === 'file' ? (
+      {picture ? (
+        body && image !== undefined ? (
+          <>
+            <ImageView url={image} bytes={body.bytes} onSize={setSize} />
+            <div className="status-bar">
+              <span>{tab.path.split('.').pop()!.toUpperCase()} image</span>
+              {size && <span>{size.width} × {size.height}</span>}
+              <span>{formatBytes(body.bytes)}</span>
+            </div>
+          </>
+        ) : <Skeleton rows={4} label="Reading…" />
+      ) : tab.kind === 'file' ? (
         body ? (
           <>
+            <div className={`md-panes mode-${mode}`}>
+            {/* Kept mounted in Preview: it holds the unsaved edits. */}
+            <div className="md-source">
             <Editor
               path={tab.path} body={body} marks={marks} revision={revision}
               onDirtyChange={onDirty} onCursor={onCursor} registerSave={registerSave}
+              {...(previewable ? { onText } : {})}
               {...(goto ? { goto } : {})}
               onSaved={(next) => {
                 setBytes(next.bytes);
@@ -1402,6 +1705,27 @@ function TabBody({
                 onStatus();
               }}
             />
+            </div>
+            {previewable && mode !== 'source' && (
+              svg ? (
+                <div className="image-view checker">
+                  <img
+                    alt={tab.title}
+                    // As an <img>, an SVG's scripts never run.
+                    src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(text ?? (body.kind === 'text' ? body.text : ''))}`}
+                  />
+                </div>
+              ) : (
+                <div className="md-preview-scroll">
+                  <MarkdownPreview
+                    path={tab.path}
+                    text={text ?? (body.kind === 'text' ? body.text : '')}
+                    onOpenFile={onOpenFile}
+                  />
+                </div>
+              )
+            )}
+            </div>
             <div className="status-bar">
               {cursor && <span>Ln {cursor.line}, Col {cursor.column}</span>}
               {cursor && cursor.selected > 0 && <span>Sel {cursor.selected}</span>}
@@ -1414,7 +1738,7 @@ function TabBody({
               )}
               <span className="spacer" />
               {dirty ? (
-                <button className="save" onClick={onSave}>Save <kbd>⌘S</kbd></button>
+                <button className="save" onClick={onSave}>Save <kbd>{keyLabel('S')}</kbd></button>
               ) : (
                 <span className="saved">saved</span>
               )}

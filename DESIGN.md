@@ -86,18 +86,50 @@ Reuse these before writing new CSS. A new component goes in this list.
 |---|---|---|
 | `.primary` | Starts an agent that **writes** (changes code, opens a PR) | Unblock in an agent, Work on this |
 | `.primary.outline` | Starts an agent that only **reads and reports** | Check it shipped, Review |
-| `.quick` (dashed blue) | Not an agent: a quick model turning text Kovan already has into shorter text | Summarize, nv-review |
+| `.quick` (dashed blue) | Not an interactive agent: a quick model or a reviewer turning text Kovan already has into shorter text | Summarize, Review |
 | `.ghost` | Everything else: secondary actions, Settings actions | Add a row |
+| `.detail-related-link` (clay chip) | A related item that opens in Kovan. A ticket chip carries its Jira status after a divider: dot + status, coloured by category (to do neutral, in progress blue, done green), dashed while it loads | ACME-2236 │ ● In Review |
 | `.detail-place` | Where the item lives elsewhere, in a detail header's link row beside the related chips | GitHub / Jira / Sentry (with its mark), Terminal |
 | `.link` | Inline, low-weight action inside text or a table row | Remove, Reset, Cancel, Save as default |
 | `.icon-button` | Icon-only, borderless. Needs `aria-label` **and** `title` | Row actions, rename |
 | `.icon-button.boxed` | Icon-only with a box, for a header's own control | Close ✕ on sheets and terminals |
+
+Icons are Lucide's drawings (item 128), kept inline in `icons.tsx` at a
+1.6 stroke so they take `currentColor`. A new icon is copied from
+lucide-static's SVG, not drawn by hand. GitHub, Jira and Sentry keep their
+own marks, all in the same grey (`currentColor`, item 136). The terminal keeps
+Kovan's unboxed `>_` (item 132), and the stop square in Quick model jobs stays
+solid.
 
 Put at most one `.primary` in a row. Separate groups of different weights with
 the existing vertical rule, not with space alone. A detail header's action bar
 holds only what Kovan does — agent runs, then quick model reads; opening the
 item on its service, or a terminal for it, goes in the link row above
 (`RelatedLinks` `places`, item 110), which keeps the bar on one line.
+
+Quick model buttons are opt-in (item 124): Summarize and Review start hidden,
+Condense starts shown, and Settings › Agents › "Buttons on pull requests and
+tickets" turns each on or off (`renderer/quickButtons.ts`). Off hides the
+button and its card, and an agent run stops using what it made; its setup is
+kept. A new optional button joins `QUICK_BUTTONS` instead of getting its own
+setting, and the rule before it shows only when something follows it.
+
+Review sends the pull request to a **reviewer** (item 143), kept in Settings ›
+Agents › Reviewers (`renderer/Reviewers.tsx`, `main/reviewTools.ts`, pure parts
+in `@kovan/core` `reviewTools.ts`). A reviewer is a **command** (prompt on
+stdin, model in an env var it names, like nv-review) or an **agent** (Claude
+Code or Codex, headless and read-only, in a throwaway worktree at the PR's
+head), and the Review button's picker lists them under "Your reviewers". All
+of them get `pullReviewPrompt` and may end with a VERDICT line; Kovan keeps
+the timeout, saving, and posting only after you confirm. The button stores
+one string: `<model> (<reviewer id>)`, the format nv-review always used.
+Every reviewer has a Test: a made-up PR with one planted bug, which says
+which step failed. Adding a command takes a click: Kovan lists `*-review`
+commands on your PATH and in your shell, reads the picked one's `--help` to
+fill in how it takes the model (flag or variable) and the prompt (stdin or a
+file), and offers to save a key file its help names that is missing (under a
+dot-folder in your home, mode 600, never read back). nv-review is always the first row and can't be removed.
+"Review in an agent" (a full session in a terminal) is separate and stays.
 
 ### Surfaces and containers
 
@@ -107,15 +139,27 @@ item on its service, or a terminal for it, goes in the link row above
   from inside a pane is portalled to `<body>` (`createPortal`, as
   `RunViewer` does): `.pane` is a CSS container, which traps anything
   `position: fixed` inside it — the backdrop then covers only the pane and a
-  docked terminal paints over it (item 98). No z-index fixes that.
+  docked terminal paints over it (item 98). No z-index fixes that. A ticket's
+  or pull request's `.detail-scroll` is a container too (named `pane`, so the
+  layout answers to the ticket's own width beside a docked terminal, item
+  139), and traps the same way.
 - **Menu** (`.menu`): drop-down from a button. Every menu uses
   `useMenuDismiss` (`menuDismiss.ts`): it closes on an outside click, on
   Escape, and when another menu opens, so two are never open at once. Rows
   are `role="menuitem"`. Use it for sort, filter, refresh and model pickers.
-  A menu near the window's right edge opens leftward.
+  A menu with no room to its right opens leftward, room counted to the edge
+  of the pane it sits in, not the window's: a docked terminal ends the pane
+  mid-window (item 174, `menuPlace.ts`). With room on neither side it
+  narrows to the wider one.
 - **Sidebar** (`aside.queue` + `<Resizer />` + `main.pane`): every rail view has
   this shape. The width comes from `--queue-w` and the text size from
   `--sidebar-zoom`. Clicking the active rail icon hides it.
+- **Resizer** (`Resizer.tsx`): the one drag handle for a panel's width. By
+  default it sits after the sidebar and sizes `--queue-w`; `edge="before"`
+  sizes a panel docked on the right (Discuss), each with its own custom
+  property, storage key and bounds. Every one drags with pointer capture,
+  moves with ←/→ (⇧ for 32px), remembers its width across launches and
+  resets on double-click. A new resizable panel uses this, not its own.
 - **Rows** (`.row`, `.row.one-line`): list items. Actions that aren't always
   needed (rename, open, close) are **hover-revealed and take no space until
   hover** (`display: none` → `grid` on `:hover` / `:focus-within`), so names
@@ -131,9 +175,23 @@ item on its service, or a terminal for it, goes in the link row above
   The rail's order is a per-window preference too (`railOrder.ts`, Settings
   pinned below it); `reconcileOrder` in core keeps a saved order valid when a
   tab is added or removed, placing a new one beside its default neighbour.
+- **Pins** (`renderer/pins.tsx`, pure parts in core `pins.ts`, item 145): pull
+  requests, tickets and sessions can be pinned, and a pinned row keeps its
+  place (nothing moves). Its pin sits after the age in clay and unpins on a
+  click; an unpinned row shows a grey pin on hover only. On a pull request or
+  ticket row the pin is a button beside the row's button (a button can't hold
+  one), laid over `.pin-slot`, which takes room only while pinned, hovered or
+  focused. Right-click a row for Pin/Unpin (and Open on GitHub/Jira, Copy
+  link). The pin in a list's header shows only pinned rows, opens folded
+  groups, and is dimmed while nothing there is pinned. A pinned pull request
+  or ticket the lists no longer carry is fetched once per launch, after the
+  service has answered, and kept in its group (the header says "+1 pinned" in
+  grey). One that can't be loaded says so, with Retry and Unpin; a pin is
+  never dropped by itself, except a closed session's, whose id can't come
+  back. Pins are the `pins` setting, not localStorage.
 - **Settings** (`Settings.tsx`, item 99): one list, no side nav. A search
-  field, then seven rows — Appearance, Text & terminal, Notifications,
-  Dictation, Agents, Connections, Environments — each saying its current
+  field, then eight rows — Appearance, Text & terminal, Notifications,
+  Dictation, Agents, Prompts, Connections, Environments — each saying its current
   values in one line. A row opens in place and closes the one that was open;
   its body mounts only then, so opening Settings loads nothing. Search matches
   section names and `SEARCH_INDEX` (every control's label, plus words people
@@ -143,6 +201,25 @@ item on its service, or a terminal for it, goes in the link row above
   it's one people check.
 - **Settings sections**: an `h3`, a `.settings-note` explaining what it does in
   plain words, then controls. Steppers use `.font-size-control`.
+- **Prompts** (`PromptSettings.tsx`, core `promptTemplates.ts`, item 181): the
+  text each agent run starts from, one tab per kind (Implement a ticket, Fix a
+  Sentry error, Review a pull request, Review pull requests together, Unblock
+  a pull request, Check it shipped), plus the shared values filled into them
+  (`prompt.conventions`: base branch, pull request reviewers, checks, files
+  not to edit). A prompt is its built-in text in `prompts.ts` until you save
+  your own (`prompt.template.<kind>`, read by `Agents.basePrompt`); saving the
+  built-in text, or Reset (after an inline confirm), clears it. Placeholder
+  chips insert `${name}` at the cursor and say what each becomes; a name the
+  kind doesn't fill is called out (it would reach the agent as written), as is
+  a prompt without `${report}`. Preview renders it on example data with your
+  shared values. The built-in text's fingerprint is kept beside an override
+  (`prompt.templateBase`), so a later change to the built-in prompt is
+  pointed out rather than silently missed. `PROMPT_TEMPLATES` is the
+  catalogue: a new placeholder in a renderer goes into it too, and a test
+  fails until it does. The run sheet links "Change it for every run" to the
+  prompt it was built from. Settings opens above the run sheet, and saving
+  sends `PROMPTS_CHANGED`, which rebuilds the sheet's prompt, or offers
+  Rebuild if you've already edited it.
 - **Split quick button** (`.quick-split`): the label half runs the action, and
   the tag half shows the model plus FREE or `$in/$out`, and opens a provider and
   model picker. Any action that runs a model names that model on its button.
@@ -238,6 +315,56 @@ item on its service, or a terminal for it, goes in the link row above
   **Open** with a grey dot rather than leaving the line empty. Any label a
   word can't explain carries a `hint` from core, shown as its tooltip
   ("2 unresolved comments" says which comments).
+- **Person picker** (`renderer/people.tsx`, core `people.ts`, item 164): a
+  pill beside the Pull requests and Tickets titles — your initials and "You",
+  or the teammate's first name on a clay tint while their list shows. Its menu
+  has a search, You first, then the team with open counts in mono. GitHub's
+  team is everyone with a pull request in your repositories; Jira's, everyone
+  assigned a ticket in your tickets' projects in the last 90 days. The team is
+  asked on the menu's first open (kept ten minutes); a teammate's list when
+  picked, and with each poll while picked. Their pull requests keep your
+  sections' order (Waiting on your review, Open, Drafts, Awaiting their
+  review, Recently merged); their tickets use your ticket query with
+  `currentUser()` swapped for their account. A line under the filter names
+  whose list it is, with "Back to you"; Esc does the same. Each list picks
+  separately and nothing is remembered across launches.
+- **Mixpanel tab** (`Mixpanel.tsx`, `main/mixpanel.ts`, core `mixpanel.ts`,
+  `MixpanelClient` in providers, item 177): off until Settings › Connections ›
+  Mixpanel › "Show Mixpanel in the rail" (`mixpanel.rail`); the rail filters
+  the tab out while it's off and leaves the tab if it's turned off while open.
+  A service account (region, project ID, username, secret in the Keychain),
+  read only. The sidebar lists saved reports (Pinned, then one group per
+  dashboard), each with its last value, a sparkline and the change, from
+  numbers already fetched; "+" adds a report by its link when the App API
+  can't list it. A report opens with the chart (headline line in clay, an
+  unfinished period dashed, breakdown segments in grey), the numbers as a
+  table, and notes. **Discuss** is a ghost toggle, not a run: it opens a panel
+  docked on the right (on `--sidebar`, a step back), its width dragged from
+  its left edge (`<Resizer edge="before">`, `--discuss-w`, item 180): 260px at
+  least, never leaving the report under 320px, also held in CSS so a smaller
+  window squeezes the panel and not the report. Asking runs the model
+  named by the composer's tag on the report's numbers: the quick model until
+  you pick another there (`mixpanel.discussModel`). The tag opens the same
+  picker as the Review button (`QuickModelPicker`, opening upward): any
+  opencode provider (`QuickModel.askOnce`), or, under "Claude Code, Codex,
+  your commands", a reviewer added in Settings › Agents and every Claude Code
+  or Codex the Agents tab already found, offered as found with nothing to add
+  (`ReviewTools.agentAsTool`; picking one adds no reviewer). Those run through
+  `ReviewTools.ask`: in an empty temp folder, read-only, prompt on stdin, on
+  the CLI's own sign-in. Not nv-review. The
+  composer is a plain box, not a `<form>`, because the picker holds one. The
+  model may answer with one `mixpanel-query` block, which core checks
+  (`parseMixpanelQuery`: an event, a period of a year at most, one breakdown
+  property, equality filters) and main runs as a read-only segmentation query,
+  at most two per question. Kovan writes Mixpanel's expressions itself, never
+  the model. Nothing polls: the list is asked for once, the first time the tab
+  opens with none kept (or after the last try failed), then only on its
+  Reload button or new credentials; numbers when you pick a report in the
+  list, reused for 15 minutes (the Query API allows 60 an hour); the model
+  only on Ask. Coming back to the tab asks for nothing: the view keeps what
+  it had on screen for the session (`memory` in `Mixpanel.tsx`) and the open
+  report shows its kept numbers with their age, Refresh beside them. The
+  list, numbers, conversations and notes are kept in `mixpanel/state.json`.
 - **Activity inbox** (`Activity.tsx`, `main/activityFeed.ts`, `diffActivity`
   in core): a rail tab (bell) listing what happened to you — review
   requested, approved, changes requested, new ticket, new comment — grouped
@@ -331,12 +458,103 @@ output:
 Each writes one word to `userData/status/<KOVAN_SESSION_ID>`, and Kovan
 watches that folder. The badge is `.session-state` (not `.agent-state`, which
 is Agents › Running's). Done hides once the session has been on screen
-(`useSeenStatus`); Input stays until answered.
+(`useSeenStatus`); Input stays until answered. In the sidebar row it is not
+a badge but one small icon in a fixed slot before the age (item 146,
+`SessionStateIcon`): ✓ Done, ! Input, a spinner while working, an empty slot
+otherwise, so they line up as a column. The row has no cost chip; the hover
+card has Cost, and its Now line says "Done, 3h ago, not opened yet". The
+terminal header and pane tabs keep the worded badge.
+
+**Agent alerts (item 182).** `main/agentAlerts.ts` listens to
+`Sessions.onStatusChange`; `agentAlertKind` in core decides what is news:
+→ Input, and Working → Done. Never the first state heard (alerts start only
+after the launch read of the status folder). A change settles 1.5 s and is
+checked again before it is announced. Only while Kovan isn't in front, as a
+macOS notification that opens the session (`kovan:session-open`, or
+`kovan:session-open-pending` for a window that is still opening). In front,
+the Sessions rail pip says it instead: waiting blue outranks running green.
+The menu bar lists the agents on Input; its title stays the blocked pull
+request count. Off with `notify.agents`.
+
+**Kovan's pane in Claude (item 147).** Claude sessions Kovan starts load a
+Claude Code mod from `resources/claude-mod/kovan` (`--plugin-dir`, through
+`modArgs` in core and `main/claudeMod.ts`; other agents get nothing). It is a
+pane beside Claude, from top to bottom:
+- Goal (`KOVAN_GOAL` / `KOVAN_GOAL_KEY`, from `modGoal`: the ticket over the PR).
+- Links (item 154): what the chat links to, newest first, at most 8, the goal's own always first (item 166; it used to be left out, which hid the link the prompt named): pull requests (`repo#number`, state, and title from `gh pr view`, asked once each in the background), Figma designs (by the name in the URL), Jira tickets, and local pages (localhost, 127.0.0.1, `*.test`, `*.local`). Prompts and Claude's answers give all four; a command's output only pull requests (`gh pr create`), since the rest of it is API noise. At start the pane reads the session's earlier messages, so a session older than the pane lists its links too. Drawn as chips (item 156, design C): names side by side, ` · ` between, wrapping onto more rows; a pull request's name in its state's color (open green, merged purple, else dim) and without `acme-` when every pull request shares that start; no titles, no addresses. Each is an OSC 8 link; sessions get `FORCE_HYPERLINK=1` so Claude sends them (it doesn't know Kovan's terminal and printed the address instead), and Kovan's terminal opens a clicked one with `openExternal` (web links only). The section shows only when there is one.
+- Claude's own plan, from TodoWrite or TaskCreate/TaskUpdate: ✓ done, the step in progress as Now with its minutes, the one after it as Next. Kovan sessions get one line in the system prompt (`prompt.compose`, item 165) asking Claude to keep a task list, since without one the section has nothing to show.
+- Changes: each file the session edited, +/- against HEAD. A click opens its diff under it, cut at a hunk past 400 lines. Files a shell command changed count too (item 165): after each Bash call, `git status` in the session's repositories, against what was already changed when the session started.
+  A session over several folders (item 152) lists them under one heading each, main first, with "no changes" for a folder untouched so far: Kovan hands the folders in `KOVAN_FOLDERS`. Each file is counted, diffed and opened in Kovan against its own repository (`git rev-parse` in its folder, asked once per folder). A file in no repository goes under a dim "Other files", `~` for home, without counts or Open in Kovan; a click shows the file as it is. Long paths are cut from the front so the name shows.
+- Reviewers (item 167): the external reviewers the session's prompt asks for (Kovan's `runner.reviewers` that the prompt names, handed over in `KOVAN_REVIEWERS`), each a dot plus a word: ○ not run yet, ● running with its minutes (amber), ● done (green) or ● failed with `exit N` (red), ○ stopped; a VERDICT line one printed shows beside it. A reviewer counts as run when a shell step's program is it, by name or path, inside `zsh -c "…"` too, never when a command only mentions it. One run in the background is settled by Claude Code's task notification, reading its output file. The status lines agents echo win over the command's own exit code, since that last echo always succeeds: `nv-review exit 1`, `cc-token retry rc=1`, `cc-orca attempt 3 failed`, `cc-review: cc-token FAILED …`, `… ok`, each belonging to the reviewer named nearest before it on its line, the last one winning. A failed reviewer says why in a few words (`no credit (403)`, `rate-limited (429)`, `model retired (410)`, `timed out`), from its own lines or else from the tail of the logs its command wrote: its step's `>`, `2>` and `-o` files and any named after it, the command's own `R=…` variables filled in. The section shows only when the prompt asks for reviewers; the head says `2 of 7 done · 1 failed`. Under each reviewer, dim, the models it tries in order (`deepseek-v4.1-flash → minimax-m3.1-flash → glm-5.3-flash`), read at session start from its own source: a shell function's or script's `${…_MODEL:-…}` default and `${…_FALLBACK-…}` list, a script's `DEFAULT_MODELS`, OpenCode's `opencode.json` (the plan agent's model) or Codex's `config.toml`; one with none of its own that runs others says theirs (cc-review: `cc-token … · cc-orca …`). A command that names its own model (`NV_MODEL=…`, `--model …`) shows that one for the run.
+- Checks: the tests, typechecks and lints the agent ran, from its own Bash calls, known by the program each step runs (`npm run type-check`, `npx eslint`, `pytest`, `cargo test`), never by a word in its arguments. The detail is the output's line that counts passes or failures, else just passed or failed; it is cut before the check's name is. Run checks runs the project's `typecheck`, `test` and `lint` scripts, only when pressed.
+- A second pane, **Changes** (item 165), beside Claude Code's own Diff tab: every changed file's diff at once, in every folder of the session, grouped by repository, each with Open in Kovan. Claude Code's Diff tab only knows the folder the session started in, and a mod can't feed it. Its diffs are read when it opens and after each change. Open in Kovan opens the diff in the window in front (the one the session was clicked in), whatever workspace the repository is on.
+- One small line on the pane's last row when docked: `Opus 5.5 · ctx 97k/1M 10% · 5h 19% → 17:00 · wk 40% → Mon · $1.03` (item 153: short labels, since a terminal has one font size; the session's cost last, in Claude's orange `claude`). Labels dim, values in Claude's status-line colors (item 151): model `suggestion`, context `success`, session `warning`, weekly `merged`.
+
+Under an open diff, **Open in Kovan** (item 148) shows that diff in the
+Workspace view and brings the window forward. The pane can't reach the
+window, so it writes `<id>.json` (`{ repo, file }`, absolute) into
+`userData/open` (`KOVAN_OPEN_DIR`). `main/openRequests.ts` reads it, deletes
+it, and answers in `<id>.reply` with one line the pane shows as a toast.
+`parseOpenRequest` refuses anything outside its repository, and main opens
+only a repository inside a workspace, the rule every workspace read follows.
+Requests older than a minute, or left from before Kovan started, are
+dropped, not acted on.
+It opens on the session's first prompt (item 149): Claude counts a
+`prompt.submit` as the person asking, so it is placed at any width, and later
+prompts don't reopen a pane closed by hand; `/kovan` does. Kovan never types
+`/kovan` into the terminal: sent mid-turn with "send now", it stopped
+Claude's turn. Nothing runs a process while the pane draws (a draw cut off
+by the next one failed with "process.run aborted"): what drawing needs is
+worked out before, into state. The mod has its own tests (`claude plugin test <dir>`) and must pass
+`claude plugin validate <dir>`.
 
 **Hover card (item 115).** A session or Quick model row shows `HoverCard`
 (`sessionCard.tsx`) after 500 ms: the subject from the loaded snapshot, never
 fetched, then the session. It is portalled like every popover over the
 sidebar, and it replaces the row's `title`.
+
+**Shell for new terminals (item 126).** Sessions' + menu opens with a shell
+switch (`ShellSwitch` in `App.tsx`). The first three shells are a click away,
+and the rest of `/etc/shells` sits behind More…. The choice is the
+`terminal.shell` setting (`renderer/shellChoice.ts`), which Settings › Text &
+terminal also edits. Main lists only installed shells (`main/shells.ts`), with
+the login shell first and named plainly. It spawns only a listed path, and
+anything else falls back to the login shell. Only `kovan:open-terminal` uses
+the choice. Agents and quick commands keep the login shell. A session in
+another shell records it in `SessionInfo.shell`, so its row shows a small tag
+and its hover card shows the path.
+
+**The `kovan` command (item 178).** `kovan <file>`, `kovan <file>:42` and
+`kovan .` from any terminal open in Kovan, as `code` does for VS Code. It is
+a shell script Kovan writes (Settings › Text & terminal, or the search
+action "Install 'kovan' command in PATH"), built by `kovanCommandScript` in
+core, into the first of `/usr/local/bin`, `~/.local/bin`, `~/bin` that is on
+the login shell's PATH and writable; never with an admin password, and never
+over a `kovan` it didn't write (`KOVAN_COMMAND_MARKER`). The script checks
+each path exists, so a typo is reported in the terminal, then starts the app
+with `--kovan-open --cwd "$PWD" -- <paths>` (`open -n -a` on macOS, nohup on
+Linux). The running Kovan gets the paths as `requestSingleInstanceLock`'s
+data in `second-instance` (not its argv, which Chromium re-parses); a Kovan
+that wasn't running reads its own argv after restoring its windows. Paths are
+read by `openCandidates`: as written, then without pasted punctuation
+(`improvements.md.`), then with `:line[:column]`. A file opens in the
+workspace holding it (the active one first, then the deepest folder); a path
+in no workspace gets one named after its folder (`Workspaces.createFor`).
+The window on that workspace comes forward, or a new one opens, and the file
+opens in its editor at the line.
+
+### Search everything (item 127)
+
+The box in the middle of the title bar (`Search.tsx`) finds pull requests,
+tickets, Sentry issues, sessions, files and app actions. ⌘K or a click opens
+it in place. ⇥ / ⇧⇥ step through the scope chips, and `>` searches actions
+only. It searches only what is loaded: the snapshot, the sessions and ⌘P's
+file list, which is asked for each time it opens. It never queries a service
+as you type. Matching lives in `searchEverything.ts`. Words match in any
+order, and files match fuzzily as ⌘P does. With nothing typed it shows what
+is blocked on you or awaiting your review, running sessions, recent files and
+the "in an agent" action for what is open. ⌘P stays the file picker. Its
+classes are `tsearch-*`, because `.search` is the sidebar's filter box.
 
 ### Keyboard
 
@@ -376,12 +594,39 @@ folded, with a link saying what's hidden ("Show all 112 lines",
 "Change"). The run sheet's prompt, its test accounts and its plan limits
 (`AgentLimitsNote compact`) work this way.
 
+**The run sheet (items 171–173)** is `.sheet.run-sheet`: about three quarters of
+the window's width (1080 px at least, 1680 px at most, item 173), the prompt
+folded to a height that grows with the window (9 lines on a laptop, about 34
+on a tall screen); "Show all" opens it to fill the window. A review whose ticket has other open pull
+requests shows them in `.together`, ticked, and the Folder field follows the
+ticks, naming each folder. Its Agent list answers from the last one found
+(kept as `runner.found`) and looks again behind it, at most once a minute:
+finding agents asks a login shell and took seconds.
+
 ⌘F focuses the sidebar filter (except inside the code editor). ⌘P opens
 go-to-file (`QuickOpen.tsx`, item 100) from anywhere: recent files first
 (`rememberFile` records every file opened, however), fuzzy matching over the
 active workspace's files (`main/fileIndex.ts` — `git ls-files` inside a repo,
 listed on the first ⌘P, never before), `name:42` for a line; the file opens
-in the Workspace view. ⌘+ and ⌘−
+in the Workspace view. A Markdown file's tab has Source, Split and Preview
+(item 161, `MarkdownPreview.tsx`; ⌘⇧V toggles Preview, the last choice is
+kept). The preview follows the editor, unsaved edits included; it goes
+through its own DOMPurify instance like `Prose`; relative images are read by
+main (`workspaceImage`: inside a workspace, image types, ≤ 10 MB) and never
+fetched by the page; `#heading` links scroll, relative links open the file in
+a tab, web links open in the browser. An image file opens as the picture
+(item 162): fitted on a checkerboard, a click for actual size, its size in
+the status bar, read through `workspaceImage`; an SVG gets Source / Split /
+Preview like Markdown. Terminals draw inline images (item 160,
+`@xterm/addon-image`): iTerm2's protocol, as `imgcat` writes it, and Sixel,
+up to 32 MB of images per terminal. ⌘J (item 158, `terminalToggle.ts`), as in VS Code,
+shows or hides the terminal of the view on screen: in the Workspace view a
+terminal docked under the editor (the same `InlineTerminal` a ticket docks),
+opened in the open file's repository or the first folder, one per workspace;
+the folder rows' terminal buttons open there too instead of switching to
+Sessions. On a pull request, ticket or Sentry issue it is that item's own
+terminal. Where no view answers (Sessions, Agents, Activity, nothing
+selected) it starts a new session. Hiding leaves the shell running. ⌘+ and ⌘−
 resize as above. Every icon-only control is reachable by Tab and has a
 visible focus state.
 
@@ -414,6 +659,29 @@ visible focus state.
    the window keeps it running. Quitting leaves the sessions running in the
    terminal host (item 114); it asks first only for sessions that run inside
    Kovan because no host could start.
+   Right-clicking the Dock icon lists the workspaces, with the active one
+   ticked, then the active workspace's folders, the way VS Code lists recent
+   folders (item 135, `main/dockMenu.ts`). A pick opens the Workspace view on
+   it. The menu is rebuilt when the `workspaces` or `workspace.active`
+   settings change. A pick made while no window is open waits in main until
+   the new window asks for it.
+   **One window per workspace** (item 157, `main/windows.ts`), as in VS Code.
+   Each window has its own workspace: the Workspace view, ⌘P and its dialogs
+   work in it, and switching workspace in one window leaves the others alone.
+   The window's title is its workspace's name, so macOS's own window list at
+   the bottom of the Dock menu names them. A Dock pick of a workspace brings
+   forward the window on it, or opens a new window for it. New Window (Dock
+   menu, the workspace's ⋯ menu, ⌘⇧N) opens an empty window (item 159) on
+   the Workspace view's start page, after VS Code's Welcome: Open Folder…
+   (a new workspace) and the workspaces you have. Picking one that another
+   window shows brings that window forward and leaves this one empty; the
+   same goes for the ⋯ menu's Switch to. Closing a window's workspace leaves
+   that window empty. Everything else is shared: one poller, one list of sessions,
+   one tray, and every window gets the same messages. The window in front
+   sets `workspace.active`, so the pull request queue scopes to it at the
+   next poll. The open windows' workspaces are saved (`windows.workspaces`)
+   and a normal launch reopens them; closing a window yourself takes it off,
+   quitting doesn't.
 8. **Everything in the main process keeps working with no window open.**
    Poller, sessions, quick jobs and notifications live in `src/main`. The
    renderer only asks and listens.
@@ -428,7 +696,7 @@ visible focus state.
 |---|---|
 | Pure logic, prompts, parsing, formatting | `packages/core` (no Node imports in the barrel, since the renderer loads it) **with a test** in `packages/core/test` |
 | Running CLIs, shell, PATH, run archive | `packages/agent` |
-| GitHub, Jira and Sentry clients | `packages/providers` |
+| GitHub, Jira, Sentry and Mixpanel clients | `packages/providers` |
 | Processes, files, Keychain, IPC handlers | `apps/desktop/src/main` |
 | UI | `apps/desktop/src/renderer`, one component file per feature |
 
@@ -475,6 +743,58 @@ heavier in the per-pull-request detail query, which runs when you open one.
 Anything that compares one poll with the last must skip a poll GitHub didn't
 answer (`githubAnswered` in core): its empty lists aren't "nothing open".
 
+Activity's comment count (`commentCount`) is conversation comments plus
+reviews, so an approval raises it too. Don't treat a rise as a comment without
+checking `lastReviewState`, the newest review's state from the same
+`reviews(last: 1)` page (item 130). `reviewDecision` is no substitute: it stays
+empty in a repository that doesn't require reviews, and it doesn't move on a
+second approval. `diffActivity` reports an approving or change-requesting
+review as that, and adds a "New comment" event only for whatever else the
+count rose by.
+
+### Terminals keep their xterm
+
+`Terminal.tsx` keeps one xterm per session in a module-level map, so leaving
+a view only parks its box, coming back moves the box into the new view, and
+the xterm is disposed when the session closes (item 129). Don't go back to
+building an xterm on mount and replaying the output into it. Claude Code draws
+its input box and status line once and then rewrites only the cells that
+change, so a replay of the capped 256 KB buffer has lost that first draw, and
+the bottom of the screen comes back as stray digits. Replay is only for a new
+window:
+
+- It is drawn on the grid the pty has, which `Sessions` records
+  (`SessionReplay.cols`/`rows`).
+- The cap starts the buffer at a newline or an escape (`capBuffer`).
+- When the replay was cut short, the renderer resizes the pty by one row and
+  back, and the program redraws.
+
+### macOS and Linux
+
+Kovan is built for macOS first and also runs on Linux (x64 and arm64,
+AppImage and .deb). Where they differ, the code asks `process.platform` in
+main and `isMac` (`renderer/platform.ts`) in the window. Nothing else forks.
+
+- **Shortcuts:** ⌘ on macOS is Ctrl on Linux. Use `isAppShortcut(event)`,
+  never `event.metaKey`, and `keyLabel('K')` for any label. On Linux a
+  terminal keeps its Ctrl keys (Ctrl+K cuts the line there), so app shortcuts
+  don't fire while an `.xterm` has focus.
+- **Window:** macOS gets our own title bar with inset traffic lights; Linux
+  keeps the desktop's frame (`data-platform='linux'` drops the inset) and
+  hides Electron's menu bar until Alt.
+- **Private files go in private folders.** Linux's `/tmp` is shared between
+  users. The terminal host's socket and pasted screenshots use
+  `XDG_RUNTIME_DIR` there; anything else in temp uses `mkdtemp`.
+- **Commands:** write the form both systems accept (`base64 --decode`,
+  `ps -ww`), and don't hard-code `/usr/sbin`: lsof is on PATH on Linux.
+- **macOS only:** dictation (a Swift helper and Apple's recogniser; its
+  Settings pane is hidden on Linux) and the Dock menu. Open at login is a
+  login item on macOS and `~/.config/autostart/kovan.desktop` on Linux, which
+  starts Kovan with `--hidden`.
+- **Checking Linux from a Mac:** `scripts/linux/run.sh` builds in Docker and
+  runs the smoke tests on a virtual display; `pack` writes the packages.
+  `KOVAN_SMOKE_LINUX` covers the differences above.
+
 ### Safety
 
 - **Secrets go in and never come out.** Tokens and passwords are written through
@@ -485,14 +805,47 @@ answer (`githubAnswered` in core): its empty lists aren't "nothing open".
   only word ever interpolated into a shell line is a command name that has
   passed `isSafeCommandName`. Prompts go through a file (`"$(< file)"`) or
   stdin, never argv to a shell.
+- **Keep a typed launch line short.** A shell that hasn't started reading yet
+  keeps typed input in the terminal's own buffer, and macOS holds only 1,024
+  characters there: a longer line loses its Enter and the agent never starts
+  (item 141). Big arguments go in files (`--settings <file>`), and
+  `typeableLine` types anything over 900 characters as `. <script>`.
 - **Resolve commands through `shellEnvironment`.** It probes an *interactive*
   login shell, because that's where `.zshrc` puts PATH entries such as
   `~/.local/bin`. A GUI-launched app's own PATH is not enough.
 - Headless model runs start in an empty temp folder, with only the tools
   they need allowed (for example web search and fetch only).
+- **An agent reviewer reads and does nothing else.** Claude Code runs with
+  `--permission-mode dontAsk --allowedTools Read Grep Glob`, Codex with
+  `exec --sandbox read-only`, in a detached worktree of your clone that is
+  removed afterwards; your own checkout is never touched. A new agent family
+  gets its read-only flags in `agentReviewArgs` before it can be a reviewer.
+- **The window is sandboxed, on a supported Electron.** It shows other
+  people's text all day, so a Chromium bug there must stay there
+  (`sandbox: true`, security review 2026-10). The preload is built as
+  CommonJS (`index.cjs`) because a sandboxed preload can't be an ES module,
+  and it may only use `contextBridge`, `ipcRenderer` and `webUtils`. Keep
+  Electron within the three supported majors.
+- **The page's CSP allows WebAssembly, not eval** (`'wasm-unsafe-eval'`,
+  item 160): the terminal's image add-on decodes Sixel in wasm. Scripts still
+  load only from the app itself, and images also from `blob:`.
+- **Links open through `openLink` (`main/external.ts`), never
+  `shell.openExternal` directly.** Only `https`, `http` and `mailto` reach the
+  OS; `file:` and custom schemes can launch things. A fixed URL of our own
+  (System Settings panes) is the one exception.
+- **Paths are file names, not patterns.** Git commands that take paths from
+  a list run with `--literal-pathspecs`: a file called `:!x` would otherwise
+  mean "everything except x".
 
 ### Preferences vs settings
 
+- **Where you were** (item 163) is localStorage too, keyed by workspace,
+  since windows reopen by workspace: `kovan.place.<id>` (the view, the
+  subject open in it, the session) and `kovan.workspace-state.<id>` (open
+  tabs, the current one, open folders, Files or Changes). Put back at
+  launch; a subject waits for the first snapshot that has it, and nothing is
+  saved before that. Tabs come back only at launch, never on a workspace
+  switch, which could drop unsaved edits.
 - **localStorage**: per-window visual preferences (sizes, dock, sidebar width,
   last picker choice). Wrap every read and write in `try`. The app must work
   without it.

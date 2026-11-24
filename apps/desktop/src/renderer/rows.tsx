@@ -12,7 +12,9 @@
 import {
   formatAge, isBlocked, isMerged, primaryFlag, pullFlags, type PullFlagId, type PullSummary
 } from '@kovan/core';
+import { pullPinKey } from '@kovan/core';
 import { ChevronIcon } from './icons';
+import { PinToggle } from './pins';
 
 /** Which status colour a flag gets. The four are fixed by the design. */
 export const TONE: Record<PullFlagId, 'pass' | 'running' | 'fail' | 'waiting' | 'merged' | ''> = {
@@ -64,14 +66,24 @@ export function PullRow({
   pull,
   selected,
   onSelect,
-  tint = true
+  tint = true,
+  pinned = false,
+  onMenu
 }: {
   pull: PullSummary;
   selected: boolean;
   onSelect: () => void;
   /** Whether this row's group is the tinted one. */
   tint?: boolean;
+  /** Pinned (item 145): a pin after the age, which unpins. */
+  pinned?: boolean;
+  /** The row's right-click menu. */
+  onMenu?: (event: React.MouseEvent) => void;
 }) {
+  const pin = (
+    <PinToggle pinKey={pullPinKey(pull.repo, pull.number)} title={`#${pull.number} ${pull.title}`} pinned={pinned} />
+  );
+  const liClass = `pinnable${pinned ? ' pinned' : ''}`;
   // Tinting is a property of the *group*, not the row: a pull request that is
   // blocked still appears in "awaiting your review" as somebody else's
   // problem, and colouring it there would say the wrong thing.
@@ -86,21 +98,23 @@ export function PullRow({
   // merged pull request you are least likely to want.
   if (isMerged(pull)) {
     return (
-      <li>
+      <li className={`${liClass} one`} onContextMenu={onMenu}>
         <button className={`row shipped${selected ? ' selected' : ''}`} onClick={onSelect}>
           <span className="row-top">
             <span className="row-num">{pull.number}</span>
             <span className="row-title">{pull.title}</span>
             <RepoLabel repo={pull.repo} />
             <span className="row-age">{formatAge(pull.mergedAt!)}</span>
+            <PinSlot />
           </span>
         </button>
+        {pin}
       </li>
     );
   }
 
   return (
-    <li>
+    <li className={liClass} onContextMenu={onMenu}>
       <button
         className={`row${blocked ? ' blocked' : ''}${selected ? ' selected' : ''}`}
         onClick={onSelect}
@@ -114,10 +128,21 @@ export function PullRow({
           <span className="spacer" />
           <RepoLabel repo={pull.repo} />
           <span className="row-age">{formatAge(pull.updatedAt)}</span>
+          <PinSlot />
         </span>
       </button>
+      {pin}
     </li>
   );
+}
+
+/**
+ * Room after the age for the row's pin, which sits over it from outside the
+ * button (a button can't hold another). It takes space only while the row is
+ * pinned, hovered or focused, so an unpinned row's title isn't cut short.
+ */
+export function PinSlot() {
+  return <span className="pin-slot" aria-hidden="true" />;
 }
 
 /**
@@ -133,7 +158,7 @@ export function PullRow({
  * every header is orange says exactly as much as one where none of them is.
  */
 export function GroupHead({
-  label, count, total, open, tint = false, note, onToggle
+  label, count, total, open, tint = false, note, noteQuiet = false, onToggle
 }: {
   label: string;
   count: number;
@@ -142,6 +167,8 @@ export function GroupHead({
   open: boolean;
   tint?: boolean;
   note?: string;
+  /** The note is information, not a problem: grey. */
+  noteQuiet?: boolean;
   onToggle: () => void;
 }) {
   // "20" over a list of 34 is not a count, it is a wrong one.
@@ -155,7 +182,7 @@ export function GroupHead({
     >
       <ChevronIcon size={11} open={open} />
       <span className="group-label">{label}</span>
-      {note && <span className="group-note">{note}</span>}
+      {note && <span className={noteQuiet ? 'group-note kept' : 'group-note'}>{note}</span>}
       <span className="group-rule" />
       <span className="count">{shown}</span>
     </button>

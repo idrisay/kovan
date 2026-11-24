@@ -8,7 +8,7 @@ Dock icon is the same size as every other app's. The menu bar glyph is
 from PIL import Image, ImageDraw
 import os, shutil, subprocess
 
-OUT = '/Users/idrisay/Desktop/coding/ikatia/app/baton/apps/desktop/resources'
+OUT = '/Users/idrisay/Desktop/coding/ikatia/app/kovan/apps/desktop/resources'
 
 src = Image.open('C5-conductor-source.png').convert('RGBA')
 tile = src.crop(src.getbbox())

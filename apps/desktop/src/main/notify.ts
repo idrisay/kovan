@@ -8,7 +8,8 @@
  * entire backlog.
  */
 
-import { Notification, shell } from 'electron';
+import { Notification } from 'electron';
+import { openLink } from './external';
 import * as path from 'node:path';
 import { githubAnswered, type PullSummary } from '@kovan/core';
 import type { DesktopHost } from './host';
@@ -106,7 +107,7 @@ function showNotice(notice: BlockedNotice): void {
   });
   if (notice.url) {
     const url = notice.url;
-    notification.on('click', () => void shell.openExternal(url));
+    notification.on('click', () => void openLink(url));
   }
   notification.show();
 }

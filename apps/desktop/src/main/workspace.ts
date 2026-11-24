@@ -109,6 +109,15 @@ export type WriteResult =
  */
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
+/** A screenshot is a few MB; past this the preview says the image is missing. */
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+const IMAGE_TYPES: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp', '.ico': 'image/x-icon', '.avif': 'image/avif'
+};
+
 /** Enough to catch a NUL in any real binary's header. */
 const SNIFF_BYTES = 8192;
 
@@ -155,6 +164,43 @@ export class Workspaces {
       name: path.basename(folder),
       folders: [folder]
     };
+    await this.save([...this.list(), workspace]);
+    await this.activate(workspace.id);
+    return workspace;
+  }
+
+  /**
+   * The workspace a path belongs to (item 178): the one with a folder holding
+   * it, the active one first when several do, and among a workspace's folders
+   * the deepest. Undefined when it is in none.
+   */
+  async workspaceFor(candidate: string): Promise<{ id: string; folder: string } | undefined> {
+    let target: string;
+    try {
+      target = await realpath(candidate);
+    } catch {
+      return undefined;
+    }
+    const active = this.activeId();
+    const all = [...this.list()].sort((a, b) => Number(b.id === active) - Number(a.id === active));
+    for (const workspace of all) {
+      let best: string | undefined;
+      for (const folder of workspace.folders) {
+        const root = await realpath(folder).catch(() => undefined);
+        if (root && (target === root || target.startsWith(root + path.sep)) && (!best || root.length > best.length)) best = folder;
+      }
+      if (best) return { id: workspace.id, folder: best };
+    }
+    return undefined;
+  }
+
+  /**
+   * A workspace for a folder named on the command line (\`kovan .\`, item 178),
+   * as a folder picked in the dialog makes one: named after the folder,
+   * holding just it. No dialog, since the folder was already named.
+   */
+  async createFor(folder: string): Promise<Workspace> {
+    const workspace: Workspace = { id: randomUUID(), name: path.basename(folder) || folder, folders: [folder] };
     await this.save([...this.list(), workspace]);
     await this.activate(workspace.id);
     return workspace;
@@ -351,8 +397,10 @@ export class Workspaces {
     const unstaged: string[] = [];
     const untracked: string[] = [];
 
+    // `''` and `.` name the repository itself: an untracked row like that
+    // would send the whole clone to the Trash.
     const guard = (file: string) => {
-      if (path.isAbsolute(file) || file.split('/').includes('..')) {
+      if (!file || path.normalize(file) === '.' || path.isAbsolute(file) || file.split('/').includes('..')) {
         throw new Error('Invalid path');
       }
     };
@@ -463,6 +511,22 @@ export class Workspaces {
   }
 
   /**
+   * An image a Markdown preview or an image tab shows (items 161, 162), as a data URL: only inside
+   * a workspace, like every read here, only image types, and at most
+   * `MAX_IMAGE_BYTES`. Undefined for anything else, which the preview shows
+   * as a missing image.
+   */
+  async image(file: string): Promise<string | undefined> {
+    const type = IMAGE_TYPES[path.extname(file).toLowerCase()];
+    if (!type) return undefined;
+    const resolved = await this.inside(file).catch(() => undefined);
+    if (!resolved) return undefined;
+    const info = await stat(resolved).catch(() => undefined);
+    if (!info?.isFile() || info.size > MAX_IMAGE_BYTES) return undefined;
+    return `data:${type};base64,${(await readFile(resolved)).toString('base64')}`;
+  }
+
+  /**
    * Saves an edited file.
    *
    * Three things have to hold, and each has bitten somebody:
@@ -537,6 +601,15 @@ export class Workspaces {
    * workspace — not only the active one, because a tab can outlive a switch
    * and closing the file the user is reading would be worse than allowing it.
    */
+  /** `inside` for main's own callers: the resolved path, or undefined when it is outside every workspace. */
+  async contains(candidate: string): Promise<string | undefined> {
+    try {
+      return await this.inside(candidate);
+    } catch {
+      return undefined;
+    }
+  }
+
   private async inside(candidate: string): Promise<string> {
     const folders = this.list().flatMap((w) => w.folders);
     if (folders.length === 0) {

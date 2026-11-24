@@ -14,7 +14,7 @@
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, Notification, shell, systemPreferences } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,9 +22,11 @@ import { createHost } from './host';
 import { logFilePath, logRendererError } from './logFile';
 import { Poller, type PolledProvider, type Snapshot } from './poller';
 import type { ProviderId, SpeechProviderId, ThemeId } from '@kovan/core';
-import { DEFAULT_SETTINGS, resolveTheme, themeInfo } from '@kovan/core';
+import { DEFAULT_SETTINGS, resolveTheme, themeInfo, type ReviewTool } from '@kovan/core';
 import type { ChangeKind } from '@kovan/git';
 import { KovanTray } from './tray';
+import { OPEN_WINDOWS_SETTING, Windows, windowsToRestore } from './windows';
+import { installKovanCommand, kovanCommandStatus, removeKovanCommand, resolveOpenTarget } from './kovanCommand';
 import { Activity } from './notify';
 import { ActivityFeed } from './activityFeed';
 import { Dictation } from './dictation';
@@ -32,28 +34,37 @@ import { FileIndex } from './fileIndex';
 import { RunWatcher } from './runWatch';
 import { QuickCommands } from './quickCommands';
 import {
-  CREDENTIAL_FIELDS, Credentials, HttpClient, JiraClient, fetchPullDetail, fetchPullDiff, fetchReviewerCandidates,
+  CREDENTIAL_FIELDS, Credentials, HttpClient, JiraClient, fetchPullDetail, fetchPullDiff, fetchPullSummary, fetchReviewerCandidates,
   requestPullReviewers, submitPullReview
 } from '@kovan/providers';
 import { adoptImportedTokens } from './adopt';
 import { adoptBatonSecrets, copyBatonState } from './renamed';
 import {
-  smokePty, smokeUi, type SmokeMode, detailFixture, diffFixture, fixtureSnapshot, sentryFramesFixture,
-  sentryTicketFixture, ticketFixture
+  smokePty, smokeUi, type SmokeMode, DEMO, demoSnapshot, detailFixture, diffFixture, fixtureSnapshot, sentryFramesFixture,
+  sentryTicketFixture, ticketFixture, teammatesFixture, personPullsFixture, personTicketsFixture, ticketPullsFixture
 } from './smoke';
-import { Sessions } from './sessions';
+import { Sessions, type SessionInfo } from './sessions';
+import { ReviewTools } from './reviewTools';
 import { PtyHosts } from './ptyClient';
 import { AgentStatus } from './agentStatus';
+import { AgentAlerts } from './agentAlerts';
 import { ProblemLog } from './problems';
 import { Agents } from './agents';
 import type { TestEnvironmentSave, TestSelection } from './testEnvironments';
 import { Workspaces } from './workspace';
+import { OpenRequests } from './openRequests';
+import { claudeModOpenDir } from './claudeMod';
+import { DockMenu } from './dockMenu';
+import { openLink } from './external';
+import { HIDDEN_FLAG, setLinuxAutostart } from './autostart';
 import { QuickModel } from './quick';
+import { MixpanelService } from './mixpanel';
 import { PriceCheck } from './priceCheck';
 import { ModelSearch } from './modelSearch';
 import { Usage } from './usage';
 import { RunningAgents } from './running';
-import { activityLabel, githubAnswered, ticketKeyInTitle, type ActivityEvent, type PriceCheckRunner, type PriceRule, type QuickKind, type ReviewEvent } from '@kovan/core';
+import { SHELL_SETTING, chosenShell, listShells } from './shells';
+import { activityLabel, diffSideFor, githubAnswered, ticketKeyInTitle, type ActivityEvent, type PriceCheckRunner, type PriceRule, type MixpanelReport, type QuickKind, type ReviewEvent, commandLineOpen, type CommandLineOpen } from '@kovan/core';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -81,7 +92,10 @@ if (process.env['KOVAN_USER_DATA']) {
 // memory budget in MIGRATION.md §9 for the real numbers.
 
 // A second instance would mean two pollers, two trays and double notifications.
-if (!app.requestSingleInstanceLock()) {
+// One started by the `kovan` command (item 178) hands its paths to the running
+// Kovan as the lock's data: `second-instance`'s argv is Chromium's re-parse of
+// the command line, which may reorder or add switches, while this is ours.
+if (!app.requestSingleInstanceLock({ kovanOpen: commandLineOpen(process.argv) ?? null })) {
   app.exit(0);
 }
 
@@ -100,15 +114,15 @@ const activity = new Activity(host);
 let pendingActivityOpen: string | undefined;
 
 function deliverActivity(inbox: ActivityEvent[], fresh: ActivityEvent[], quiet: boolean): void {
-  const live = window && !window.isDestroyed() ? window : undefined;
-  live?.webContents.send('kovan:activity', inbox);
+  windows.send('kovan:activity', inbox);
+  const live = windows.focused() ?? windows.front();
   if (quiet || fresh.length === 0) return;
 
   // In front: a toast in the window. Anywhere else — closed, hidden, behind
   // another app — a macOS notification, because a toast nobody sees is none.
   // A smoke run never reaches Notification Center: it would pop up on the
   // machine running it, and the toast path is the one it can check.
-  const inFront = live && (process.env['KOVAN_SMOKE'] ? true : live.isVisible() && live.isFocused());
+  const inFront = live && (process.env['KOVAN_SMOKE'] && !DEMO ? true : live.isVisible() && live.isFocused());
   if (inFront) {
     live.webContents.send('kovan:activity-toast', fresh);
     return;
@@ -120,13 +134,10 @@ function deliverActivity(inbox: ActivityEvent[], fresh: ActivityEvent[], quiet: 
   if (notify.length === 0) return;
   const open = (subject: string) => {
     pendingActivityOpen = subject;
-    if (window && !window.isDestroyed()) {
-      window.show();
-      window.focus();
+    const { window, fresh } = windows.show();
+    if (!fresh) {
       window.webContents.send('kovan:activity-open', subject);
       pendingActivityOpen = undefined;
-    } else {
-      createWindow();
     }
   };
   if (notify.length <= 2) {
@@ -172,16 +183,109 @@ const sessions = new Sessions((text) => {
 const quickCommands = new QuickCommands(host, sessions);
 const detailHttp = new HttpClient(host.log);
 const credentials = new Credentials(host);
+// Reviewers (item 143). `agents` is declared below; these only run on a click.
+const reviewTools: ReviewTools = new ReviewTools(
+  host,
+  () => agents.runners(),
+  async (repo: string): Promise<string | undefined> =>
+    (await agents.targets()).find((t: { label: string }) => t.label.toLowerCase() === repo.toLowerCase())?.path
+);
 const quick = new QuickModel(host, {
   pull: loadPullDetail, ticket: loadTicket, diff: loadPullDiff, submitReview: postPullReview
-});
+}, reviewTools);
+const mixpanel = new MixpanelService(host, credentials, quick, reviewTools);
 const usage = new Usage(host, sessions, () => quick.listJobs());
 const agents = new Agents(host, sessions, quick);
 const running = new RunningAgents(host, sessions, () => {
-  createWindow();
-  window?.webContents.send('kovan:show-agents');
+  windows.show().window.webContents.send('kovan:show-agents');
 });
 const workspaces = new Workspaces(host);
+/**
+ * A Dock pick that opened a new window, by window id: the new renderer asks
+ * for it once it is listening (item 135), since a message sent now would
+ * arrive before anything could hear it.
+ */
+const pendingWorkspaceOpen = new Map<number, { id: string; folder?: string; file?: { path: string; line?: number } }>();
+// One window per workspace (item 157): a pick brings forward the window on
+// that workspace, or opens a new one for it, as VS Code does.
+const dockMenu = new DockMenu(() => workspaces.list(), () => workspaces.activeId(), (id, folder) => {
+  void (async () => {
+    await workspaces.activate(id);
+    const { window, fresh } = windows.showWorkspace(id);
+    if (fresh) pendingWorkspaceOpen.set(window.id, { id, ...(folder ? { folder } : {}) });
+    else window.webContents.send('kovan:open-workspace', id, folder);
+  })();
+}, () => void newWindow());
+host.config.onChange((key) => {
+  if (key === 'workspaces' || key === 'workspace.active') void dockMenu.refresh();
+  if (key === 'workspaces') windows.retitleAll();
+});
+
+/**
+ * `kovan <path>` from a terminal (item 178), as `code <path>` does: a file
+ * opens in the editor of the workspace that holds it, a folder opens its
+ * workspace. A path in no workspace gets one, named after its folder (the
+ * file's folder for a file), so the next file from there opens beside it.
+ * The window on that workspace comes forward, or a new one opens for it.
+ * Returns false when there was no open request in the arguments.
+ */
+async function openFromCommandLine(request: CommandLineOpen | undefined, workingDirectory: string): Promise<boolean> {
+  if (!request) return false;
+  const cwd = request.cwd || workingDirectory;
+  let opened = false;
+  for (const raw of request.paths) {
+    const target = await resolveOpenTarget(raw, cwd);
+    if (!target) {
+      // The script checked it a moment ago; it went away since.
+      host.log.warn(`kovan command: no such file or folder: ${raw}`);
+      continue;
+    }
+    let place = await workspaces.workspaceFor(target.path);
+    if (place) {
+      await workspaces.activate(place.id);
+    } else {
+      const folder = target.directory ? target.path : path.dirname(target.path);
+      const made = await workspaces.createFor(folder);
+      place = { id: made.id, folder };
+    }
+    const file = target.directory ? undefined : { path: target.path, ...(target.line ? { line: target.line } : {}) };
+    const { window, fresh } = windows.showWorkspace(place.id);
+    if (fresh) pendingWorkspaceOpen.set(window.id, { id: place.id, folder: place.folder, ...(file ? { file } : {}) });
+    else window.webContents.send('kovan:open-workspace', place.id, place.folder, file);
+    host.log.info(`kovan command: opened ${target.path}${target.line ? `:${target.line}` : ''}`);
+    opened = true;
+  }
+  if (!opened) windows.show();
+  // Typed in a terminal, maybe another app's: bring Kovan to the front.
+  app.focus({ steal: true });
+  return true;
+}
+
+/**
+ * "Open in Kovan" from the pane beside Claude (item 148): the file's diff in
+ * the Workspace view of the window in front, brought forward. Only for a repository
+ * in one of Kovan's workspaces, the same rule every workspace read follows.
+ */
+let pendingDiffOpen: { repo: string; file: string; side: 'staged' | 'unstaged' | 'untracked' } | undefined;
+const openRequests = new OpenRequests(claudeModOpenDir(), async ({ repo, file }) => {
+  const root = await workspaces.contains(repo);
+  if (!root) {
+    return { ok: false, message: `${path.basename(repo)} isn't in a Kovan workspace, so Kovan can't show its diff. Add the folder in Kovan's Workspace view.` };
+  }
+  const side = diffSideFor(await workspaces.status(root), file);
+  if (!side) return { ok: false, message: `${file} has no changes now.` };
+  const target = { repo: root, file, side };
+  // The window in front: the one the session was clicked in (item 165). A
+  // repository on another workspace opens there too, beside the session,
+  // rather than in a new window for that workspace; diffs read from any
+  // workspace's folders.
+  const { window, fresh } = windows.show();
+  // The click came from a terminal, maybe another app's: bring Kovan to the front.
+  app.focus({ steal: true });
+  if (fresh) pendingDiffOpen = target;
+  else window.webContents.send('kovan:open-diff', target);
+  return { ok: true, message: `Opened ${file} in Kovan.` };
+}, (message) => host.log.info(message));
 
 /**
  * One pull request's full detail. Shared by the detail pane and the quick
@@ -204,6 +308,24 @@ async function loadPullDetail(repo: string, number: number) {
     repo,
     number
   );
+}
+
+/**
+ * One pull request as the lists show it, for a notification about one that is
+ * in none of them any more (item 144).
+ */
+async function loadPullSummary(repo: string, number: number) {
+  if (process.env['KOVAN_SMOKE'] && process.env['KOVAN_USER_DATA']) {
+    // #404 stands for one that was deleted, for item 145's "couldn't load it".
+    if (number === 404) throw new Error('Could not resolve to a PullRequest with the number of 404.');
+    const sample = fixtureSnapshot(10).merged[0]!;
+    return { ...sample, repo, number, title: `Fixture pull request ${repo}#${number}`, url: `https://github.com/${repo}/pull/${number}` };
+  }
+  const token = await host.secrets.get('github');
+  if (!token) {
+    throw new Error('GitHub is not connected');
+  }
+  return fetchPullSummary(detailHttp, host.config.get('github.baseUrl', 'https://api.github.com'), token, repo, number);
 }
 
 /** A pull request's unified diff, for the Kimi K3 review. */
@@ -310,6 +432,20 @@ async function loadTicket(key: string) {
   return new JiraClient(detailHttp, site, email, token).getIssue(key);
 }
 
+async function loadTicketStatus(key: string) {
+  if (process.env['KOVAN_SMOKE'] && process.env['KOVAN_USER_DATA']) {
+    const { status, statusCategory } = ticketFixture(key);
+    return { status, statusCategory };
+  }
+  const token = await host.secrets.get('jira');
+  const site = host.config.get('jira.baseUrl', '');
+  const email = host.config.get('jira.email', '');
+  if (!token || !site || !email) {
+    throw new Error('Jira is not connected');
+  }
+  return new JiraClient(detailHttp, site, email, token).getIssueStatus(key);
+}
+
 /**
  * What a plain terminal is called, when nothing opening it named it: the
  * repository and branch it sits on, and the ticket when the branch names one
@@ -339,40 +475,87 @@ async function nameTerminal(cwd: string, subject?: string): Promise<{ title: str
   return { title: branch && branch !== 'HEAD' ? `${label} (${branch})` : label };
 }
 
-let window: BrowserWindow | undefined;
 let tray: KovanTray | undefined;
 let firstRefresh = true;
 
-function createWindow(): void {
-  if (window && !window.isDestroyed()) {
-    window.show();
-    window.focus();
-    return;
-  }
+const windows = new Windows({
+  build: buildWindow,
+  list: () => workspaces.list(),
+  active: () => workspaces.activeId(),
+  setActive: (id) => workspaces.activate(id),
+  save: (ids) => void host.config.set(OPEN_WINDOWS_SETTING, ids)
+});
 
-  window = new BrowserWindow({
+/** Shows the window in front, or opens one when none is open. */
+function createWindow(): void {
+  windows.show();
+}
+
+// --- Agent alerts (item 182) -------------------------------------------------
+// A session a notification or the menu bar asked for, waiting for a new
+// window to be ready to show it.
+let pendingSessionOpen: string | undefined;
+
+/** Brings Kovan forward on a session ('' = just Kovan). */
+function openSessionFromMain(id: string): void {
+  const { window, fresh } = windows.show();
+  if (!id) return;
+  if (fresh) pendingSessionOpen = id;
+  else window.webContents.send('kovan:session-open', id);
+}
+
+const agentAlerts = new AgentAlerts({
+  host,
+  sessions,
+  inFront: () => Boolean(windows.focused()?.isVisible()),
+  open: openSessionFromMain
+});
+
+/**
+ * ⌘⇧N, and New Window in the Dock menu and the workspace menu (item 157): an
+ * empty window on the Workspace view, to pick a folder or a workspace in
+ * (item 159).
+ */
+function newWindow(): BrowserWindow {
+  const window = windows.open(undefined);
+  pendingWorkspaceOpen.set(window.id, { id: '' });
+  window.focus();
+  return window;
+}
+
+function buildWindow(): BrowserWindow {
+  const window = new BrowserWindow({
     width: 1080,
     height: 720,
     minWidth: 720,
     minHeight: 480,
     show: false,
-    titleBarStyle: 'hiddenInset',
+    // macOS: the title bar is ours, with the traffic lights inset into it.
+    // Linux keeps the desktop's own frame; its menu bar (Electron's default
+    // one, for copy, paste and reload) stays hidden until Alt is pressed.
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const }
+      : { autoHideMenuBar: true, icon: path.join(app.isPackaged ? process.resourcesPath : path.join(dirname, '../../resources'), 'icon.png') }),
     // Matches the rail on each side of the appearance switch, so the frame and
     // the first paint agree rather than flashing the wrong one.
     backgroundColor: launchBackground(),
     webPreferences: {
-      preload: path.join(dirname, '../preload/index.mjs'),
+      preload: path.join(dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      // The window shows other people's pull requests and tickets; a
+      // Chromium bug there must not reach the rest of the Mac (security
+      // review, 2026-10). The preload only needs contextBridge, ipcRenderer
+      // and webUtils, which a sandboxed preload has.
+      sandbox: true
     }
   });
 
-  window.once('ready-to-show', () => window?.show());
+  window.once('ready-to-show', () => window.show());
 
   if (process.env['KOVAN_SMOKE']) {
-    window.webContents.on('console-message', (_event, _level, message) => {
-      console.log('[renderer]', message);
+    window.webContents.on('console-message', (event) => {
+      console.log('[renderer]', event.message);
     });
   }
 
@@ -382,13 +565,11 @@ function createWindow(): void {
   });
   window.on('unresponsive', () => host.log.warn('Window stopped responding'));
 
-  // Destroy, don't hide. See the note at the top of this file.
-  window.on('closed', () => {
-    window = undefined;
-  });
+  // Destroy, don't hide. See the note at the top of this file. `Windows`
+  // forgets a window when it closes.
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    void openLink(url, (m) => host.log.warn(m));
     return { action: 'deny' };
   });
 
@@ -400,13 +581,18 @@ function createWindow(): void {
   // the input level and repoint them at the terminal's own font size, which
   // is the thing people actually meant to be resizing.
   window.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown' || !input.meta || input.alt || input.control) return;
-    if (input.key === '=' || input.key === '+') {
+    // ⌘ on macOS, Ctrl on Linux, as everywhere else in Kovan.
+    const mod = process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta;
+    if (input.type !== 'keyDown' || !mod || input.alt) return;
+    if (input.shift && input.key.toLowerCase() === 'n') {
       event.preventDefault();
-      window?.webContents.send('kovan:font-size-step', 1);
+      newWindow();
+    } else if (input.key === '=' || input.key === '+') {
+      event.preventDefault();
+      window.webContents.send('kovan:font-size-step', 1);
     } else if (input.key === '-') {
       event.preventDefault();
-      window?.webContents.send('kovan:font-size-step', -1);
+      window.webContents.send('kovan:font-size-step', -1);
     }
   });
 
@@ -416,6 +602,7 @@ function createWindow(): void {
   } else {
     void window.loadFile(path.join(dirname, '../renderer/index.html'));
   }
+  return window;
 }
 
 /**
@@ -426,14 +613,19 @@ function createWindow(): void {
  * location silently orphans the old registration. Re-asserting it costs
  * nothing and makes a reinstall self-healing.
  *
- * `openAsHidden` keeps a login launch quiet: Kovan starts polling with its
- * Dock icon and menu bar glyph, but no window jumps up at login.
+ * A login launch stays quiet: Kovan starts polling with its Dock icon and
+ * menu bar glyph, but no window jumps up (`wasOpenedAtLogin`, at startup).
+ * Electron 44 dropped `openAsHidden`, which macOS no longer honoured anyway.
  */
 function applyLoginItem(): void {
   const wanted = host.config.get('launchAtLogin', false);
+  if (process.platform === 'linux') {
+    void setLinuxAutostart(wanted).catch((error) => host.log.warn(`Open at login: ${String(error)}`));
+    return;
+  }
   const current = app.getLoginItemSettings();
   if (current.openAtLogin !== wanted) {
-    app.setLoginItemSettings({ openAtLogin: wanted, openAsHidden: true });
+    app.setLoginItemSettings({ openAtLogin: wanted });
   }
 }
 
@@ -474,9 +666,7 @@ function launchBackground(): string {
 
 function broadcast(snapshot: Snapshot): void {
   tray?.update(snapshot);
-  if (window && !window.isDestroyed()) {
-    window.webContents.send('kovan:snapshot', snapshot);
-  }
+  windows.send('kovan:snapshot', snapshot);
 }
 
 app.whenReady().then(async () => {
@@ -488,10 +678,13 @@ app.whenReady().then(async () => {
   // menu-bar-only (LSUIElement), which left Cmd+Tab and the Dock with nothing
   // to switch to and made opening it from Finder look like it did nothing.
 
+  void dockMenu.refresh();
+
   tray = new KovanTray({
     open: () => createWindow(),
     refresh: () => void poller.refresh(true),
     launchAtLogin: () => host.config.get('launchAtLogin', false),
+    openSession: (id) => openSessionFromMain(id),
     toggleLaunchAtLogin: async () => {
       const next = !host.config.get('launchAtLogin', false);
       await host.config.set('launchAtLogin', next);
@@ -511,7 +704,12 @@ app.whenReady().then(async () => {
   } catch (error) {
     host.log.warn('could not pick up sessions from the terminal host', error);
   }
-  void agentStatus.watch((id, state) => sessions.setStatus(id, state));
+  // Alerts start once what the agents wrote while Kovan was away has been
+  // read: that is on the badges already, not news (item 182).
+  void agentStatus.watch((id, state) => sessions.setStatus(id, state))
+    .catch((error: unknown) => host.log.warn('could not watch agent status', error))
+    .finally(() => agentAlerts.start());
+  void openRequests.start().catch((error: unknown) => host.log.warn('could not watch for Open in Kovan requests', error));
 
   poller.onDidChange((snapshot) => {
     broadcast(snapshot);
@@ -535,11 +733,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:snapshot', () => poller.current());
   ipcMain.handle('kovan:problems', () => problems.list());
   problems.onDidChange(({ log, started }) => {
-    if (window && !window.isDestroyed()) window.webContents.send('kovan:problems', { log, started });
+    windows.send('kovan:problems', { log, started });
   });
   ipcMain.handle('kovan:refresh', () => poller.refresh(true));
   ipcMain.handle('kovan:refresh-provider', (_event, id: PolledProvider) => poller.refreshProvider(id));
-  ipcMain.handle('kovan:open-external', (_event, url: string) => shell.openExternal(url));
+  ipcMain.handle('kovan:open-external', (_event, url: unknown) => openLink(url, (m) => host.log.warn(m)));
   ipcMain.handle('kovan:credential-fields', () => CREDENTIAL_FIELDS);
   ipcMain.handle('kovan:missing-fields', (_event, id: ProviderId) => credentials.missingFields(id));
   ipcMain.handle('kovan:settings', () => host.config.all());
@@ -582,22 +780,32 @@ app.whenReady().then(async () => {
     return poller.loadMoreMerged(want);
   });
 
+  // Item 164: someone else's pull requests and tickets.
+  const smokeFixtures = Boolean(process.env['KOVAN_SMOKE'] && process.env['KOVAN_USER_DATA']);
+  ipcMain.handle('kovan:teammates', (_event, service: string) => {
+    if (service !== 'github' && service !== 'jira') throw new Error(`No teammates for ${service}`);
+    return smokeFixtures ? teammatesFixture(service) : poller.teammates(service);
+  });
+  ipcMain.handle('kovan:person-pulls', (_event, login: string, merged: number) => {
+    const want = Math.max(1, Math.min(100, Math.floor(Number(merged) || 10)));
+    return smokeFixtures ? personPullsFixture(String(login), want) : poller.personPulls(String(login), want);
+  });
+  ipcMain.handle('kovan:person-tickets', (_event, accountId: string) =>
+    smokeFixtures ? personTicketsFixture() : poller.personTickets(String(accountId)));
   ipcMain.handle('kovan:pull-detail', (_event, repo: string, number: number) => loadPullDetail(repo, number));
   ipcMain.handle('kovan:reviewer-candidates', (_event, repo: string) => loadReviewerCandidates(repo));
   ipcMain.handle('kovan:reviewers-request', (_event, repo: string, number: number, people: string[], teams: string[]) =>
     requestReviewers(repo, number, people, teams));
   ipcMain.handle('kovan:ticket-detail', (_event, key: string) => loadTicket(key));
+  ipcMain.handle('kovan:pull-summary', (_event, repo: string, number: number) => loadPullSummary(String(repo), Number(number)));
+  ipcMain.handle('kovan:ticket-status', (_event, key: string) => loadTicketStatus(key));
 
   // --- Quick model ----------------------------------------------------------
   quick.onChange((kind, subject, state) => {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send('kovan:quick', kind, subject, state);
-    }
+    windows.send('kovan:quick', kind, subject, state);
   });
   quick.onJobs((jobs) => {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send('kovan:quick-jobs', jobs);
-    }
+    windows.send('kovan:quick-jobs', jobs);
     void usage.quickChanged();
   });
   ipcMain.handle('kovan:quick-jobs', () => quick.listJobs());
@@ -605,6 +813,21 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:quick-model', (_event, kind: QuickKind) => quick.modelFor(kind));
   ipcMain.handle('kovan:quick-model-set', (_event, kind: QuickKind, model: string) => quick.setModelFor(kind, model));
   ipcMain.handle('kovan:quick-models-available', () => quick.available());
+  // Mixpanel (item 177). Read only; nothing here runs unless the tab asks.
+  mixpanel.onProgress((progress) => windows.send('kovan:mixpanel-progress', progress));
+  ipcMain.handle('kovan:mixpanel-status', () => mixpanel.status());
+  ipcMain.handle('kovan:mixpanel-reports', (_event, force?: boolean) => mixpanel.reports(Boolean(force)));
+  ipcMain.handle('kovan:mixpanel-cached', () => mixpanel.cached());
+  ipcMain.handle('kovan:mixpanel-result', (_event, id: number, type: MixpanelReport['type'], force?: boolean) =>
+    mixpanel.result(Number(id), type, Boolean(force)));
+  ipcMain.handle('kovan:mixpanel-add', (_event, ref: string, name?: string) => mixpanel.add(String(ref), name));
+  ipcMain.handle('kovan:mixpanel-remove-added', (_event, id: number) => mixpanel.removeAdded(Number(id)));
+  ipcMain.handle('kovan:mixpanel-thread', (_event, id: number) => mixpanel.thread(Number(id)));
+  ipcMain.handle('kovan:mixpanel-thread-clear', (_event, id: number) => mixpanel.clearThread(Number(id)));
+  ipcMain.handle('kovan:mixpanel-model-set', (_event, model: string) => mixpanel.setModel(String(model ?? '')));
+  ipcMain.handle('kovan:mixpanel-ask', (_event, report: MixpanelReport, question: string) => mixpanel.ask(report, String(question)));
+  ipcMain.handle('kovan:mixpanel-note-add', (_event, id: number, text: string) => mixpanel.addNote(Number(id), String(text)));
+  ipcMain.handle('kovan:mixpanel-note-remove', (_event, id: number, index: number) => mixpanel.removeNote(Number(id), Number(index)));
   // Settings → Token prices → Check prices online. Proposals only: the
   // renderer shows them and the user picks what to apply.
   const priceCheck = new PriceCheck();
@@ -620,18 +843,14 @@ app.whenReady().then(async () => {
 
   // --- Token usage ----------------------------------------------------------
   usage.onChange((records) => {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send('kovan:usage', records);
-    }
+    windows.send('kovan:usage', records);
   });
   ipcMain.handle('kovan:usage', () => usage.list());
   usage.start();
 
   // --- Running agents -------------------------------------------------------
   running.onChange((report) => {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send('kovan:running-agents', report);
-    }
+    windows.send('kovan:running-agents', report);
   });
   ipcMain.handle('kovan:running-agents', () => running.current());
   ipcMain.handle('kovan:running-agents-watch', (_event, on: boolean) => running.watch(on));
@@ -647,17 +866,35 @@ app.whenReady().then(async () => {
   const modelSearch = new ModelSearch(host, () => quick.available(true));
   ipcMain.handle('kovan:known-models', () => modelSearch.lists());
   ipcMain.handle('kovan:ticket-statuses', () => loadTicketStatuses().catch(() => []));
+  ipcMain.handle('kovan:review-tools', () => reviewTools.list());
+  ipcMain.handle('kovan:review-tool-save', (_event, tool: Partial<ReviewTool>) => reviewTools.save(tool ?? {}));
+  ipcMain.handle('kovan:review-tool-remove', (_event, id: string) => reviewTools.remove(String(id)));
+  ipcMain.handle('kovan:review-tool-candidates', () => reviewTools.candidates());
+  ipcMain.handle('kovan:review-tool-check', (_event, command: string) => reviewTools.check(String(command)));
+  ipcMain.handle('kovan:review-tool-setup', (_event, command: string) => reviewTools.setup(String(command)));
+  ipcMain.handle('kovan:review-tool-save-key', (_event, file: string, value: string) => reviewTools.saveKey(String(file), String(value)));
+  ipcMain.handle('kovan:review-tool-test', async (_event, tool: Partial<ReviewTool>) => {
+    const checked = reviewTools.sanitize(tool ?? {});
+    return checked ? reviewTools.test(checked) : { ok: false, checks: [{ label: 'Set up', ok: false, note: 'This reviewer can\'t run: check its command and kind.' }] };
+  });
   // A screenshot on the clipboard, pasted into a terminal: saved as a file and
   // its path typed in, which is how Claude Code takes an image in any
   // terminal (VS Code's drop does the same with the dropped file's path).
-  ipcMain.handle('kovan:clipboard-write', (_event, text: string) => { clipboard.writeText(String(text)); });
+  ipcMain.handle('kovan:clipboard-write', (_event, text: string) => clipboard.writeText(String(text)));
   ipcMain.handle('kovan:clipboard-image', async () => {
-    const image = clipboard.readImage();
-    if (image.isEmpty()) return '';
-    const dir = path.join(tmpdir(), 'kovan-paste');
-    await mkdir(dir, { recursive: true });
+    // Electron's clipboard is the W3C one since 40-something: items by MIME
+    // type, read asynchronously. A macOS screenshot offers image/png.
+    const items = await clipboard.read().catch(() => []);
+    const item = items.find((i) => i.types.includes('image/png'));
+    if (!item) return '';
+    const png = Buffer.from(await (await item.getType('image/png')).arrayBuffer());
+    if (png.length === 0) return '';
+    // A fixed name, so it must be in a folder only this user can write: on
+    // Linux `/tmp` is shared, and someone else could make `kovan-paste` first.
+    const dir = path.join(process.platform !== 'darwin' && process.env['XDG_RUNTIME_DIR'] ? process.env['XDG_RUNTIME_DIR'] : tmpdir(), 'kovan-paste');
+    await mkdir(dir, { recursive: true, mode: 0o700 });
     const file = path.join(dir, `pasted-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
-    await writeFile(file, image.toPNG());
+    await writeFile(file, png);
     return file;
   });
   ipcMain.handle('kovan:models-search', (_event, command: string) => modelSearch.search(command));
@@ -669,6 +906,13 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:test-environments', () => agents.testEnvironments.state());
   ipcMain.handle('kovan:test-environments-save', (_event, next: TestEnvironmentSave) =>
     agents.testEnvironments.save(next)
+  );
+  ipcMain.handle('kovan:ticket-pulls', (_event, key: unknown) =>
+    smokeFixtures ? ticketPullsFixture(String(key)) : poller.ticketPulls(String(key)).catch((err) => {
+      // A sheet that can't find the rest still reviews the one you opened.
+      host.log.warn(`ticket pulls for ${String(key)} failed`, err);
+      return [];
+    })
   );
   ipcMain.handle('kovan:default-cwd', (_event, repo?: string) => agents.defaultCwd(repo));
   ipcMain.handle('kovan:start-agent', async (_event, request, subject) => {
@@ -718,8 +962,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:command-duplicate', (_event, id: string) => quickCommands.duplicate(String(id)));
   ipcMain.handle('kovan:command-delete', (_event, id: string) => quickCommands.remove(String(id)));
   ipcMain.handle('kovan:command-run', (_event, id: string) => quickCommands.run(String(id)));
-  ipcMain.handle('kovan:command-folder', async () => {
+  ipcMain.handle('kovan:command-folder', async (event) => {
     const options = { properties: ['openDirectory', 'createDirectory'] as ('openDirectory' | 'createDirectory')[], title: 'Run the command in' };
+    const window = windows.windowOf(event.sender);
     const picked = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
     return picked.canceled ? '' : picked.filePaths[0] ?? '';
   });
@@ -774,20 +1019,43 @@ app.whenReady().then(async () => {
   // --- Workspace ------------------------------------------------------------
   // Every path-taking channel below is resolved against the workspace folders
   // inside `Workspaces`; see the note at the top of workspace.ts.
-  ipcMain.handle('kovan:workspaces', () => ({
+  // `active` is the asking window's own workspace (item 157).
+  ipcMain.handle('kovan:workspaces', (event) => ({
     list: workspaces.list(),
-    active: workspaces.activeId()
+    active: windows.workspaceOf(event.sender)
   }));
-  // ⌘P (item 100): the active workspace's files, listed on demand.
-  ipcMain.handle('kovan:quick-open-files', async (_event, force?: boolean) => {
-    const active = workspaces.list().find((w) => w.id === workspaces.activeId());
+  ipcMain.handle('kovan:window-new', () => void newWindow());
+  // ⌘P (item 100): the window's workspace's files, listed on demand.
+  ipcMain.handle('kovan:quick-open-files', async (event, force?: boolean) => {
+    const id = windows.workspaceOf(event.sender);
+    const active = workspaces.list().find((w) => w.id === id);
     if (!active || active.folders.length === 0) return { workspace: null, files: [] };
     return { workspace: active.name, files: await fileIndex.files(active.folders, force === true) };
   });
-  ipcMain.handle('kovan:workspace-create', () => workspaces.create(window));
-  ipcMain.handle('kovan:workspace-activate', (_event, id: string) => workspaces.activate(id));
-  ipcMain.handle('kovan:workspace-add-folder', (_event, id: string) =>
-    workspaces.addFolder(id, window)
+  ipcMain.handle('kovan:open-diff-pending', () => {
+    const pending = pendingDiffOpen;
+    pendingDiffOpen = undefined;
+    return pending;
+  });
+  // The `kovan` shell command (item 178), installed from Settings › Text & terminal.
+  ipcMain.handle('kovan:cli-status', () => kovanCommandStatus());
+  ipcMain.handle('kovan:cli-install', () => installKovanCommand());
+  ipcMain.handle('kovan:cli-remove', () => removeKovanCommand());
+  ipcMain.handle('kovan:open-workspace-pending', (event) => {
+    const window = windows.windowOf(event.sender);
+    if (!window) return undefined;
+    const pending = pendingWorkspaceOpen.get(window.id);
+    pendingWorkspaceOpen.delete(window.id);
+    return pending;
+  });
+  ipcMain.handle('kovan:workspace-create', async (event) => {
+    const made = await workspaces.create(windows.windowOf(event.sender));
+    if (made) await windows.switchTo(event.sender, made.id);
+    return made;
+  });
+  ipcMain.handle('kovan:workspace-activate', (event, id: string) => windows.switchTo(event.sender, String(id)));
+  ipcMain.handle('kovan:workspace-add-folder', (event, id: string) =>
+    workspaces.addFolder(id, windows.windowOf(event.sender))
   );
   ipcMain.handle('kovan:workspace-remove-folder', (_event, id: string, folder: string) =>
     workspaces.removeFolder(id, folder)
@@ -821,6 +1089,7 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle('kovan:workspace-tree', (_event, dir: string) => workspaces.tree(dir));
   ipcMain.handle('kovan:workspace-read', (_event, file: string) => workspaces.read(file));
+  ipcMain.handle('kovan:workspace-image', (_event, file: string) => workspaces.image(String(file)));
   ipcMain.handle(
     'kovan:workspace-write',
     (_event, file: string, text: string, expected?: { mtimeMs: number; bytes: number }) =>
@@ -846,24 +1115,31 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'kovan:open-terminal',
     async (_event, cwd?: string, subject?: string, title?: string) => {
-      const target = cwd ?? (await agents.defaultCwd());
-      if (!target) {
-        throw new Error('No folder to open a terminal in');
-      }
+      // With no repository to start in, the home folder, as Terminal.app does
+      // (item 160: ⌘J in Sessions on a fresh profile did nothing).
+      const target = cwd ?? (await agents.defaultCwd()) ?? homedir();
       const named = title ? { title, subject } : await nameTerminal(target, subject);
-      return sessions.open({ cwd: target, title: named.title, runnerName: 'Shell', subject: named.subject });
+      const shell = chosenShell(host.config.get<string>(SHELL_SETTING, ''));
+      return sessions.open({ cwd: target, title: named.title, runnerName: 'Shell', subject: named.subject, shell });
     }
   );
+  ipcMain.handle('kovan:shells', () => listShells());
 
-  sessions.onOutput(({ id, data }) => {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send('kovan:session-output', id, data);
-    }
-  });
+  sessions.onOutput(({ id, data }) => windows.send('kovan:session-output', id, data));
+  // The menu bar lists the agents waiting on you (item 182); seeded now with
+  // what was restored at launch, before this listener existed.
+  const trayAgents = (list: SessionInfo[]) => tray?.setWaiting(list
+    .filter((s) => s.running && s.status === 'input')
+    .map((s) => ({ id: s.id, title: s.title, runnerName: s.runnerName })));
   sessions.onDidChange((list) => {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send('kovan:sessions', list);
-    }
+    windows.send('kovan:sessions', list);
+    trayAgents(list);
+  });
+  trayAgents(sessions.list());
+  ipcMain.handle('kovan:session-open-pending', () => {
+    const id = pendingSessionOpen;
+    pendingSessionOpen = undefined;
+    return id;
   });
 
   // Before the first poll, so an imported token is used on the very first
@@ -875,7 +1151,7 @@ app.whenReady().then(async () => {
 
   // Seeds the workspace the UI smoke then drives. Guarded by the same env var
   // that redirects userData, so it can only ever touch a throwaway profile.
-  if ((process.env['KOVAN_SMOKE'] === 'workspace' || process.env['KOVAN_SMOKE_ITEM100']) && process.env['KOVAN_WS_FOLDER']) {
+  if ((process.env['KOVAN_SMOKE'] === 'workspace' || DEMO || process.env['KOVAN_SMOKE_ITEM100']) && process.env['KOVAN_WS_FOLDER']) {
     await seedWorkspace(process.env['KOVAN_WS_FOLDER']);
   }
 
@@ -886,11 +1162,13 @@ app.whenReady().then(async () => {
     return;
   }
 
+  // Demo mode answers every refresh from fixtures and otherwise runs as the
+  // real app: no smoke script, no exit.
+  if (DEMO) poller.useFixture(demoSnapshot);
   poller.start();
 
-  if (process.env['KOVAN_SMOKE']) {
-    createWindow();
-    const win = window!;
+  if (process.env['KOVAN_SMOKE'] && !DEMO) {
+    const win = windows.open(workspaces.activeId());
     win.webContents.once('did-finish-load', async () => {
       const mode = process.env['KOVAN_SMOKE'] as SmokeMode;
       // A throw in here used to reject into nothing: `app.exit` never ran and
@@ -913,16 +1191,45 @@ app.whenReady().then(async () => {
 
 
   app.on('activate', () => createWindow());
-  app.on('second-instance', () => createWindow());
+  app.on('second-instance', (_event, argv, workingDirectory, data) => {
+    const sent = (data as { kovanOpen?: CommandLineOpen | null } | undefined)?.kovanOpen ?? commandLineOpen(argv);
+    void openFromCommandLine(sent ?? undefined, workingDirectory).then(
+      (handled) => { if (!handled) createWindow(); },
+      (err: unknown) => { host.log.warn(`kovan command failed: ${String(err)}`); createWindow(); }
+    );
+  });
   // Cmd+Tab to Kovan with its window closed: `activate` only fires for a Dock
   // click, so switching to it would show a menu bar and nothing else.
   app.on('did-become-active', () => {
-    if (!window || window.isDestroyed()) createWindow();
+    if (!windows.front()) createWindow();
   });
 
-  // Opened from Finder, Spotlight or the Dock: show the window. Only a login
-  // launch stays in the background.
-  if (!app.getLoginItemSettings().wasOpenedAtLogin) createWindow();
+  // Opened from Finder, Spotlight or the Dock: the windows open when Kovan
+  // last quit, each on its workspace (item 157). Only a login launch stays in
+  // the background.
+  if (!app.getLoginItemSettings().wasOpenedAtLogin && !process.argv.includes(HIDDEN_FLAG)) {
+    const restore = windowsToRestore(workspaces.list(), host.config.get<unknown>(OPEN_WINDOWS_SETTING, []), workspaces.activeId());
+    for (const id of restore) windows.open(id);
+  }
+  // Started by the `kovan` command while Kovan wasn't running (item 178).
+  void openFromCommandLine(commandLineOpen(process.argv), process.cwd())
+    .catch((err: unknown) => host.log.warn(`kovan command failed: ${String(err)}`));
+
+  // Demo with KOVAN_SHOT=<path.png>: the window at launch, and again after the
+  // demo's first Refresh — stills for the site, and a check without a screen.
+  const demoShot = process.env['KOVAN_SHOT'];
+  const demoWin = DEMO && demoShot ? windows.front() : undefined;
+  if (demoWin && demoShot) {
+    demoWin.webContents.once('did-finish-load', async () => {
+      const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      await wait(4000);
+      await writeFile(demoShot, (await demoWin.webContents.capturePage()).toPNG());
+      await poller.refresh(true);
+      await wait(1500);
+      await writeFile(demoShot.replace(/\.png$/, '-refreshed.png'), (await demoWin.webContents.capturePage()).toPNG());
+      console.log(`shot: ${demoShot}`);
+    });
+  }
 });
 
 async function seedWorkspace(folder: string): Promise<void> {
@@ -970,6 +1277,10 @@ app.on('before-quit', (event) => {
   }
   quitConfirmed = true;
 });
+// After the question above: a cancelled quit keeps the windows' list live.
+app.on('before-quit', (event) => {
+  if (!event.defaultPrevented) windows.markQuitting();
+});
 
 app.on('will-quit', () => {
   runWatcher.dispose();
@@ -978,6 +1289,7 @@ app.on('will-quit', () => {
   running.dispose();
   poller.stop();
   agentStatus.dispose();
+  agentAlerts.dispose();
   // A smoke run leaves nothing behind; a real quit leaves the agents working.
   if (process.env['KOVAN_SMOKE']) sessions.disposeAll();
   else sessions.detachAll();

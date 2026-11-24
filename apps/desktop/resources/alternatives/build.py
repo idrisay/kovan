@@ -2,7 +2,7 @@ exec(open('flat.py').read().split('PALETTES = {')[0])
 from PIL import Image, ImageDraw
 import os, shutil, subprocess
 
-OUT = '/Users/idrisay/Desktop/coding/ikatia/app/baton/apps/desktop/resources'
+OUT = '/Users/idrisay/Desktop/coding/ikatia/app/kovan/apps/desktop/resources'
 # W4-mono. The lacing is drawn in the field colour rather than white, so the X
 # marks read as cut out of the shaft instead of laid on top of it. That works
 # only because the field is flat — against a gradient the cut-outs would not
