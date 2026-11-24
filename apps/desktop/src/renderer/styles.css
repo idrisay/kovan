@@ -420,6 +420,7 @@ button.statusbar-item:hover { color: var(--secondary); background: rgba(255, 255
   background: var(--blocked);
 }
 .rail-pip.live { background: var(--pass); }
+.rail-pip.waiting { background: var(--waiting); }
 .rail-spacer { flex: 1; }
 
 /* --- Queue sidebar ------------------------------------------------------ */

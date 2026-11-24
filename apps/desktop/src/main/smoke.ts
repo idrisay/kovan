@@ -6212,10 +6212,24 @@ async function driveItem112(win: BrowserWindow, sessions: Sessions, prefix: stri
   win.webContents.sendInputEvent({ type: 'mouseDown', x: box2.x, y: box2.y, button: 'left', clickCount: 1 });
   win.webContents.sendInputEvent({ type: 'mouseUp', x: box2.x, y: box2.y, button: 'left', clickCount: 1 });
   await pause(800);
+  // Item 182: what alerts hear — the change, with the state it came from.
+  const heard: string[] = [];
+  const listening = sessions.onStatusChange(({ info, from, to }) => heard.push(`${info.title}: ${from ?? '∅'} → ${to}`));
   sessions.setStatus(done.id, 'working');
   await pause(300);
   sessions.setStatus(done.id, 'done');
   await pause(1_000);
+  listening.dispose();
+  report['statusEvents'] = heard;
+  // The Sessions rail pip says waiting while any agent is on Input.
+  report['railPip'] = await read(win, `(() => { const p = document.querySelector('.rail-item[aria-label="Sessions"] .rail-pip'); return p ? p.className + ' · ' + p.title : null; })()`);
+  // A notification's click, or the menu bar: from another view, lands on that session.
+  await read(win, `document.querySelector('.rail-item[aria-label="Pull requests"]')?.click()`);
+  await pause(500);
+  win.webContents.send('kovan:session-open', input.id);
+  await pause(1_000);
+  report['openedFromMain'] = await read(win, `document.querySelector('.rail-item.active')?.getAttribute('aria-label') ?? null`);
+  await snap('opened-from-main');
   report['doneUnseen'] = await read(win, `[...document.querySelectorAll('.row.one-line')].map((r) => (r.querySelector('.row-title')?.textContent ?? '') + ' → ' + (r.querySelector('.session-icon')?.getAttribute('aria-label') ?? '—'))`);
   await snap('done-unseen');
 

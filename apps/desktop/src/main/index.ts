@@ -43,10 +43,11 @@ import {
   smokePty, smokeUi, type SmokeMode, DEMO, demoSnapshot, detailFixture, diffFixture, fixtureSnapshot, sentryFramesFixture,
   sentryTicketFixture, ticketFixture, teammatesFixture, personPullsFixture, personTicketsFixture, ticketPullsFixture
 } from './smoke';
-import { Sessions } from './sessions';
+import { Sessions, type SessionInfo } from './sessions';
 import { ReviewTools } from './reviewTools';
 import { PtyHosts } from './ptyClient';
 import { AgentStatus } from './agentStatus';
+import { AgentAlerts } from './agentAlerts';
 import { ProblemLog } from './problems';
 import { Agents } from './agents';
 import type { TestEnvironmentSave, TestSelection } from './testEnvironments';
@@ -490,6 +491,26 @@ function createWindow(): void {
   windows.show();
 }
 
+// --- Agent alerts (item 182) -------------------------------------------------
+// A session a notification or the menu bar asked for, waiting for a new
+// window to be ready to show it.
+let pendingSessionOpen: string | undefined;
+
+/** Brings Kovan forward on a session ('' = just Kovan). */
+function openSessionFromMain(id: string): void {
+  const { window, fresh } = windows.show();
+  if (!id) return;
+  if (fresh) pendingSessionOpen = id;
+  else window.webContents.send('kovan:session-open', id);
+}
+
+const agentAlerts = new AgentAlerts({
+  host,
+  sessions,
+  inFront: () => Boolean(windows.focused()?.isVisible()),
+  open: openSessionFromMain
+});
+
 /**
  * ⌘⇧N, and New Window in the Dock menu and the workspace menu (item 157): an
  * empty window on the Workspace view, to pick a folder or a workspace in
@@ -663,6 +684,7 @@ app.whenReady().then(async () => {
     open: () => createWindow(),
     refresh: () => void poller.refresh(true),
     launchAtLogin: () => host.config.get('launchAtLogin', false),
+    openSession: (id) => openSessionFromMain(id),
     toggleLaunchAtLogin: async () => {
       const next = !host.config.get('launchAtLogin', false);
       await host.config.set('launchAtLogin', next);
@@ -682,7 +704,11 @@ app.whenReady().then(async () => {
   } catch (error) {
     host.log.warn('could not pick up sessions from the terminal host', error);
   }
-  void agentStatus.watch((id, state) => sessions.setStatus(id, state));
+  // Alerts start once what the agents wrote while Kovan was away has been
+  // read: that is on the badges already, not news (item 182).
+  void agentStatus.watch((id, state) => sessions.setStatus(id, state))
+    .catch((error: unknown) => host.log.warn('could not watch agent status', error))
+    .finally(() => agentAlerts.start());
   void openRequests.start().catch((error: unknown) => host.log.warn('could not watch for Open in Kovan requests', error));
 
   poller.onDidChange((snapshot) => {
@@ -1100,7 +1126,21 @@ app.whenReady().then(async () => {
   ipcMain.handle('kovan:shells', () => listShells());
 
   sessions.onOutput(({ id, data }) => windows.send('kovan:session-output', id, data));
-  sessions.onDidChange((list) => windows.send('kovan:sessions', list));
+  // The menu bar lists the agents waiting on you (item 182); seeded now with
+  // what was restored at launch, before this listener existed.
+  const trayAgents = (list: SessionInfo[]) => tray?.setWaiting(list
+    .filter((s) => s.running && s.status === 'input')
+    .map((s) => ({ id: s.id, title: s.title, runnerName: s.runnerName })));
+  sessions.onDidChange((list) => {
+    windows.send('kovan:sessions', list);
+    trayAgents(list);
+  });
+  trayAgents(sessions.list());
+  ipcMain.handle('kovan:session-open-pending', () => {
+    const id = pendingSessionOpen;
+    pendingSessionOpen = undefined;
+    return id;
+  });
 
   // Before the first poll, so an imported token is used on the very first
   // refresh rather than showing "not connected" for a cycle.
@@ -1249,6 +1289,7 @@ app.on('will-quit', () => {
   running.dispose();
   poller.stop();
   agentStatus.dispose();
+  agentAlerts.dispose();
   // A smoke run leaves nothing behind; a real quit leaves the agents working.
   if (process.env['KOVAN_SMOKE']) sessions.disposeAll();
   else sessions.detachAll();

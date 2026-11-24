@@ -126,9 +126,12 @@ export class Sessions {
   private readonly sessions = new Map<string, Session>();
   private readonly output = new EventEmitter<{ id: string; data: string }>();
   private readonly changed = new EventEmitter<SessionInfo[]>();
+  private readonly statusChanged = new EventEmitter<{ info: SessionInfo; from?: AgentState; to: AgentState }>();
 
   readonly onOutput = this.output.event;
   readonly onDidChange = this.changed.event;
+  /** An agent's own status moved (item 112); what alerts listen to (item 182). */
+  readonly onStatusChange = this.statusChanged.event;
 
   constructor(
     /** The ticket a program's title names, when it names one Kovan knows. */
@@ -344,9 +347,17 @@ export class Sessions {
 
   private setState(session: Session, state: AgentState): boolean {
     if (session.status === state) return false;
+    const from = session.status;
     session.status = state;
     session.statusAt = Date.now();
+    this.statusChanged.fire({ info: strip(session), ...(from ? { from } : {}), to: state });
     return true;
+  }
+
+  /** One session as the list shows it, if it is still open. */
+  get(id: string): SessionInfo | undefined {
+    const session = this.sessions.get(id);
+    return session ? strip(session) : undefined;
   }
 
   /** Starts an agent on a piece of work, filing it as a run. */

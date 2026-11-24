@@ -47,6 +47,7 @@ export * from './priceCheck';
 export * from './modelSearch';
 export * from './folders';
 export * from './processes';
+export * from './agentAlerts';
 export * from './terminalTitle';
 export * from './shellPath';
 export * from './dictation';

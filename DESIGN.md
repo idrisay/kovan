@@ -465,6 +465,17 @@ otherwise, so they line up as a column. The row has no cost chip; the hover
 card has Cost, and its Now line says "Done, 3h ago, not opened yet". The
 terminal header and pane tabs keep the worded badge.
 
+**Agent alerts (item 182).** `main/agentAlerts.ts` listens to
+`Sessions.onStatusChange`; `agentAlertKind` in core decides what is news:
+→ Input, and Working → Done. Never the first state heard (alerts start only
+after the launch read of the status folder). A change settles 1.5 s and is
+checked again before it is announced. Only while Kovan isn't in front, as a
+macOS notification that opens the session (`kovan:session-open`, or
+`kovan:session-open-pending` for a window that is still opening). In front,
+the Sessions rail pip says it instead: waiting blue outranks running green.
+The menu bar lists the agents on Input; its title stays the blocked pull
+request count. Off with `notify.agents`.
+
 **Kovan's pane in Claude (item 147).** Claude sessions Kovan starts load a
 Claude Code mod from `resources/claude-mod/kovan` (`--plugin-dir`, through
 `modArgs` in core and `main/claudeMod.ts`; other agents get nothing). It is a

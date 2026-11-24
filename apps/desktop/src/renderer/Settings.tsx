@@ -509,7 +509,7 @@ const SEARCH_INDEX: Record<SectionId, string[]> = {
     'Compact', 'Terminal colours', 'Boosted', 'Color', 'Night'],
   text: ['The kovan command', 'kovan command', 'Install', 'PATH', 'code command', 'Open from terminal', 'Shell for new terminals', 'Default shell', 'zsh', 'bash', 'Terminal font size', 'Ticket and pull request text size', 'Sidebar text size',
     'Tabs, session header and status bar text size', 'Status bar', 'Tabs', 'Font', 'Zoom'],
-  notifications: ['macOS notifications', 'Launch Kovan at login', 'Activity', ...ACTIVITY_SETTINGS.map((a) => a.label)],
+  notifications: ['macOS notifications', 'Agent waiting for you', 'Agent finished', 'Launch Kovan at login', 'Activity', ...ACTIVITY_SETTINGS.map((a) => a.label)],
   dictation: ['Dictate with double-tap ⌘', 'Speech model', 'Apple Speech', 'whisper.cpp', 'OpenAI Whisper', 'Groq Whisper',
     'Deepgram', 'AssemblyAI', 'API key', 'Model file', 'Language', 'Microphone', 'Voice'],
   agents: ['Buttons on pull requests and tickets', 'Summarize', 'Review', 'Condense earlier comments', 'Quick model', 'Model (opencode)', 'Give up after (seconds)', 'Running agents', 'Idle after (minutes)',
@@ -649,6 +649,7 @@ export function Settings({
     text: `${shellChoice.chosen && shellChoice.shells.length > 1 ? `${shellChoice.chosen.name} · ` : ''}Terminal ${fontSize} · Reading ${reading}% · Sidebar ${sidebar}% · Tabs and status bar ${chrome}%`,
     notifications: [
       notify ? 'macOS notifications on' : 'macOS notifications off',
+      notify && on('notify.agents') ? 'agents' : '',
       `${ACTIVITY_SETTINGS.filter((a) => on(a.setting)).length} of ${ACTIVITY_SETTINGS.length} activity kinds`,
       launchAtLogin ? 'launch at login' : ''
     ].filter(Boolean).join(' · '),
@@ -766,6 +767,15 @@ export function Settings({
             <label className="checkbox-row">
               <input type="checkbox" checked={notify} onChange={(e) => void toggle('notify.enabled', e.target.checked, setNotify)} />
               <span>macOS notifications: blocked pull requests, and Activity while Kovan isn't in front</span>
+            </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={on('notify.agents')}
+                disabled={!notify}
+                onChange={(e) => void toggle('notify.agents', e.target.checked, (v) => setRaw((r) => ({ ...r, 'notify.agents': v })))}
+              />
+              <span>When an agent Kovan started is waiting for you or has finished, while Kovan isn't in front</span>
             </label>
             <label className="checkbox-row">
               <input type="checkbox" checked={launchAtLogin} onChange={(e) => void toggle('launchAtLogin', e.target.checked, setLaunchAtLogin)} />

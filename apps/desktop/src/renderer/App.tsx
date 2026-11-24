@@ -1076,6 +1076,14 @@ export function App() {
     if (activity.launchOpen !== undefined) setActivityRequest(activity.launchOpen);
   }, [activity.launchOpen]);
   useEffect(() => window.kovan.onActivityOpen((subject) => setActivityRequest(subject)), []);
+
+  // An agent alert or the menu bar's "waiting for you" list (item 182): the
+  // session, on the Sessions tab, whatever was on screen.
+  useEffect(() => {
+    const open = (id: string) => { setActiveSession(id); setView('sessions'); };
+    void window.kovan.sessionOpenPending().then((id) => { if (id) open(id); });
+    return window.kovan.onSessionOpen(open);
+  }, []);
   useEffect(() => {
     if (activityRequest === undefined) return;
     setView('activity');
@@ -1107,6 +1115,7 @@ export function App() {
     sessions: sessions.filter((s) => s.running).length,
     agents: 0
   }), [snapshot, sessions]);
+  const waitingCount = useMemo(() => sessions.filter((s) => s.running && s.status === 'input').length, [sessions]);
 
   /** Opening a terminal anywhere lands you in the session that just started. */
   const openTerminal = useCallback((cwd?: string) => {
@@ -1496,7 +1505,10 @@ export function App() {
                 >
                   <Icon />
                   {v.id === 'pulls' && n > 0 && <span className="rail-pip" />}
-                  {v.id === 'sessions' && n > 0 && <span className="rail-pip live" />}
+                  {/* Waiting on you outranks running, as Herdr's rollup does (item 182). */}
+                  {v.id === 'sessions' && n > 0 && (waitingCount > 0
+                    ? <span className="rail-pip waiting" title={`${waitingCount} agent${waitingCount === 1 ? '' : 's'} waiting for you`} />
+                    : <span className="rail-pip live" title={`${n} running`} />)}
                   {v.id === 'activity' && activity.unread > 0 && (
                     <span className="rail-count" title={`${activity.unread} unread`}>
                       {activity.unread > 99 ? '99+' : activity.unread}

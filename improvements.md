@@ -5,6 +5,42 @@ idea below is built, move it to **Done** with its item number and commit.
 
 ## Done
 
+### Item 182: Tell me when an agent needs me or finishes (2026-11-24)
+
+Not committed yet, on branch `agent-alerts` (off `linux`). Taken from a
+comparison with Herdr (herdr.dev), whose toasts and "blocked beats working"
+rollup Kovan didn't have. Kovan already had the parts underneath: agents
+report Working / Input / Done themselves (item 112), and sessions outlive
+Kovan (item 114).
+
+- **macOS notification** when an agent Kovan started stops for you
+  (→ Input) or finishes a turn (Working → Done), only while Kovan isn't in
+  front. Clicking it brings Kovan forward on that session. One or two at once
+  get a notification each; three or more get one summary ("3 agents: 1
+  waiting for you, 2 finished").
+- **Quiet when it isn't news:** a change waits 1.5 s and is checked again,
+  so a prompt that answers itself never rings. The first state heard from a
+  session, including everything read at launch, never alerts. Input → Done
+  (you just answered) and Input → Working (you answered) don't either.
+- **Menu bar:** the menu lists "N agents waiting for you" with each session
+  under it (click opens it), and the tooltip says it too. The title still
+  counts blocked pull requests only.
+- **Sessions rail pip** turns waiting blue while any agent is on Input,
+  instead of running green, with the count in its tooltip.
+- **Settings › Notifications:** "When an agent Kovan started is waiting for
+  you or has finished" (`notify.agents`, on by default, under the macOS
+  notifications switch).
+- **Files:** core `agentAlerts.ts` (7 tests), main `agentAlerts.ts`,
+  `Sessions.onStatusChange` and `get`, `tray.ts`, `index.ts`, the IPC
+  channels `kovan:session-open` and `kovan:session-open-pending`, renderer
+  `App.tsx` and `Settings.tsx`, styles, and `DESIGN.md`.
+- **Checked:** typecheck clean; all 449 tests pass. Smoke item 112 (run
+  with `KOVAN_SMOKE_ITEM112`) now also checks the status events with the
+  state they came from, the waiting rail pip, and opening a session from
+  main while on Pull requests.
+- **Not checked:** a real macOS notification and the menu bar menu. A smoke
+  run never shows notifications, and nothing was installed.
+
 ### Item 181: Edit the agent prompts in Settings › Prompts (2026-11-24)
 
 Commit [`1b97ed7`](https://github.com/idrisay/kovan/commit/1b97ed7) on `linux`.
@@ -102,7 +138,19 @@ Commit [`55f9aad`](https://github.com/idrisay/kovan/commit/55f9aad) on `linux`.
   repository, not every one. They could be keyed by repository, with the
   global values as the default.
 
+### Agent alerts (item 182)
+
+- **A toast when Kovan is in front but on another view.** Today the rail
+  pip and the row badge say it; a toast like Activity's would say which
+  session, and when it's on screen it could stay quiet.
+- **Sounds per kind**, as Herdr has (one for Input, one for Done).
+
 ### Install and tooling
+
+- **A fresh `npm install` can't start terminals.** node-pty's prebuilt
+  `spawn-helper` lands without its executable bit, so every session fails
+  with `posix_spawnp failed`. A `postinstall` that runs `chmod +x` on it, or
+  rebuilding node-pty for Electron, would fix it.
 
 - **The install script can swap the app under a running Kovan.** Run from a
   sandboxed shell, its `pgrep` didn't see the running app, so it replaced the

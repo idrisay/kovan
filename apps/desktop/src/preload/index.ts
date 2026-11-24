@@ -220,6 +220,14 @@ const api = {
     return () => ipcRenderer.removeListener('kovan:activity-open', handler);
   },
 
+  // Agent alerts (item 182): a notification or the menu bar opening a session
+  sessionOpenPending: () => ipcRenderer.invoke('kovan:session-open-pending'),
+  onSessionOpen: (listener: (id: string) => void) => {
+    const handler = (_event: unknown, id: string) => listener(id);
+    ipcRenderer.on('kovan:session-open', handler);
+    return () => ipcRenderer.removeListener('kovan:session-open', handler);
+  },
+
   // Connection problems (item 120)
   problems: () => ipcRenderer.invoke('kovan:problems'),
   onProblems: (listener: (update: unknown) => void) => {

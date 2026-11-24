@@ -314,6 +314,9 @@ export interface KovanApi {
   onActivityToast(listener: (events: ActivityEvent[]) => void): () => void;
   /** A notification was clicked: open this subject ('' = the inbox). */
   onActivityOpen(listener: (subject: string) => void): () => void;
+  /** A session a notification or the menu bar asked for before this window was ready (item 182). */
+  sessionOpenPending(): Promise<string | undefined>;
+  onSessionOpen(listener: (id: string) => void): () => void;
   /** Writes what threw to `~/Library/Logs/Kovan/kovan.log` (item 83). */
   logError(report: RendererErrorReport): Promise<void>;
   /** Shows the log file selected in Finder. */
