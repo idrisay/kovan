@@ -7,7 +7,7 @@ idea below is built, move it to **Done** with its item number and commit.
 
 ### Item 182: Tell me when an agent needs me or finishes (2026-11-24)
 
-Not committed yet, on branch `agent-alerts` (off `linux`). Taken from a
+Commit [`de58ec3`](https://github.com/idrisay/kovan/commit/de58ec3) on `linux`. Taken from a
 comparison with Herdr (herdr.dev), whose toasts and "blocked beats working"
 rollup Kovan didn't have. Kovan already had the parts underneath: agents
 report Working / Input / Done themselves (item 112), and sessions outlive
