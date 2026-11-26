@@ -130,7 +130,7 @@ describe('re-requested reviews', () => {
     expect(summary.reviewDecision).toBe('changes_requested');
   });
 
-  // Item 175: evulpo-backend#968 — the only approver was asked again, and
+  // Item 175: acme-backend#968 — the only approver was asked again, and
   // GitHub still answered APPROVED.
   const approvedBy = (requested: string[], ...approvers: string[]) =>
     summaryFromApi({
