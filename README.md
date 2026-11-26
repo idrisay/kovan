@@ -1,50 +1,61 @@
-# Kovan
+<p align="center"><img src="apps/desktop/resources/icon.png" width="128" alt="Kovan icon: a K made of hive cells"></p>
 
-Tells you what is blocked on you, and hands it to a coding agent.
+<h1 align="center">Kovan</h1>
 
-A macOS menu bar app. It watches your GitHub pull requests and Jira tickets and
-says which of them need work before they can merge — and it does that whether
-or not your editor is open, which is the one thing the
-[DevHub extension](../devhub) structurally cannot do.
+<p align="center">Tells you what is blocked on you, and hands it to a coding agent.</p>
 
-Successor to [`devhub-mac`](../devhub-mac) (Swift). The migration plan and its
-reasoning are in [`../devhub-next/MIGRATION.md`](../devhub-next/MIGRATION.md).
+<p align="center">
+  <a href="https://kovan.ch"><b>kovan.ch</b></a> ·
+  <a href="https://github.com/idrisay/kovan-releases/releases/latest"><b>Download for macOS</b></a> ·
+  <a href="https://github.com/idrisay/kovan/issues">Report an issue</a>
+</p>
+
+Kovan is a macOS app for developers who work across GitHub, Jira and Sentry. It
+shows which pull requests, tickets and errors need you, and lets you hand each
+one to a coding agent (Claude Code, Codex or OpenCode) running in a terminal
+next to it. You see the prompt before anything runs, and nothing reaches GitHub
+or Jira until you send it. Tokens are encrypted with the macOS Keychain and
+never leave your Mac; there is no Kovan account and no Kovan server.
+
+*Kovan* is Turkish for beehive.
+
+## Install
+
+Requires a Mac with Apple silicon (M1 or later) and macOS 13 or later.
+
+1. Download the `.dmg` from the
+   [latest release](https://github.com/idrisay/kovan-releases/releases/latest).
+2. Open it and drag **Kovan** into **Applications**.
+3. Kovan isn't notarised by Apple yet, so the first time macOS says it can't
+   check it. Click **Done**, open **System Settings › Privacy & Security**,
+   scroll to the message about Kovan and click **Open Anyway**. Or run once:
+   `xattr -dr com.apple.quarantine /Applications/Kovan.app`
+
+To hand work to an agent, install its command line tool too: `claude`, `codex`
+or `opencode`. Full install notes, checksums and update steps are in the
+[releases repository](https://github.com/idrisay/kovan-releases).
+
+Kovan is MIT licensed; see [LICENSE](LICENSE).
 
 ---
 
-## Status
+# Development
 
-Phases 0–3 of the plan are working: the shared packages, the menu bar app, the
-poller and the queue views. Verified against a real account — 42 pull requests,
-16 blocked, 62 tickets.
-
-| Phase | | |
-|---|---|---|
-| 0 | Scaffold, naming, workspaces | done |
-| 1 | Extract `core` + `providers` behind the `Host` seam | done |
-| 2 | Menu bar app: tray, poller in main, notifications | done |
-| 3 | Queue and ticket views | done |
-| 4 | Terminal + agent runner (`node-pty`, run archive) | done |
-| 4b | Detail panes for pull requests and tickets | done |
-| 3b | Re-point the VS Code extension at `packages/*` | **not started** |
-| 5 | Workbench: explorer, Monaco editor, diff | not started |
-| 6 | Workspaces, Activity, Environments, reviewers | not started |
-| 7 | Codesign, notarise, auto-update | not started |
-
-Sentry, Grafana and Figma clients are **not** ported yet, though their pure
-logic is already in `@kovan/core` and `CREDENTIAL_FIELDS` knows about them.
+The rest of this file is for working on Kovan itself. Read
+[DESIGN.md](DESIGN.md) before adding or changing a feature.
 
 ## Getting started
 
 ```sh
 npm install
-npm run import          # move DevHub's tokens, settings and run history across
 npm run --workspace @kovan/desktop dev
 ```
 
-`npm run import` is safe to re-run and never deletes anything DevHub owns. Add
-`--dry-run` to see what it would do. Expect a Keychain dialog per provider —
-that is macOS deciding whether this process may read the secret.
+`npm run import` moves tokens, settings and run history across from DevHub, the
+VS Code extension Kovan replaces. It is safe to re-run and never deletes
+anything DevHub owns. Add `--dry-run` to see what it would do. Expect a
+Keychain dialog per provider — that is macOS deciding whether this process may
+read the secret.
 
 ## Demo mode
 
@@ -226,8 +237,8 @@ starts to show.
 
 ## Known gaps
 
-- **Idle memory is ~244 MB**, against the Swift app's few MB. Measured, not
-  estimated; see MIGRATION.md §9 for the breakdown and what was tried.
+- **Idle memory is ~244 MB**, against the earlier Swift app's few MB. Measured,
+  not estimated.
 - `noUncheckedIndexedAccess` is off, matching the extension's original compiler
   contract. Turning it on means auditing ~17 regex `match[1]` sites.
 - Queue scoping is account-wide only. The clone index that folder and workspace
@@ -258,9 +269,10 @@ and notarisation of Phase 7 remove that step.
 
 ### Releasing
 
-The source stays private; downloads are published to the public
+Downloads are published to
 [idrisay/kovan-releases](https://github.com/idrisay/kovan-releases), whose
-README has the install steps.
+README has the full install steps. After a release, bump `VERSION` on the
+website (kovan.ch) too.
 
 1. Raise `version` in `apps/desktop/package.json`.
 2. `npm run release` writes `Kovan-<version>-arm64.dmg`, a `.zip` and
